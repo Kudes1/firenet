@@ -1,0 +1,71 @@
+# Пример топологии:
+#
+#            office-lan (10.10.0.0/24)
+#                 |
+#              edge-r1
+#                 |
+#              sw-core  <-- коммутатор, не управляется, только связность
+#              /      \
+#          core-r1 -- core-r2   (прямой резервный линк между ними)
+#              \        /
+#          dmz-web   dmz-db     (за коммутатором — доступны через ОБА core-роутера)
+#
+# core-r1 и core-r2 резервируют друг друга для трафика к dmz-web/dmz-db:
+# компилятор поставит соответствующие правила на оба, а не только на один.
+
+devices:
+  - name: edge-r1
+    kind: router
+    interfaces: [uplink, lan0]
+
+  - name: core-r1
+    kind: router
+    interfaces: [wan0, sw-uplink]
+
+  - name: core-r2
+    kind: router
+    interfaces: [wan0, sw-uplink]
+
+  - name: sw-core
+    kind: switch
+    interfaces: [p1, p2, p3, p4, p5]
+
+links:
+  # прямой резервный линк между ядрами (не через свитч)
+  - a: {device: core-r1, interface: wan0}
+    b: {device: core-r2, interface: wan0}
+  # оба ядра подключены к общему свитчу
+  - a: {device: core-r1, interface: sw-uplink}
+    b: {device: sw-core, interface: p1}
+  - a: {device: core-r2, interface: sw-uplink}
+    b: {device: sw-core, interface: p2}
+  # edge-роутер офиса тоже висит на этом свитче
+  - a: {device: edge-r1, interface: uplink}
+    b: {device: sw-core, interface: p3}
+
+subnets:
+  - name: office-lan
+    cidr: 10.10.0.0/24
+    attach:
+      - {device: edge-r1, interface: lan0}
+
+  # dmz-web и dmz-db "висят" прямо на свитче — оба core-роутера видят их
+  # как соседей по L2-сегменту, поэтому оба становятся кандидатами на путь.
+  - name: dmz-web
+    cidr: 10.20.0.0/25
+    attach:
+      - {device: sw-core, interface: p4}
+
+  - name: dmz-db
+    cidr: 10.20.0.128/25
+    attach:
+      - {device: sw-core, interface: p5}
+
+zones:
+  # composable-зоны: dmz объединяет dmz-web-zone и dmz-db-zone (пример вложенности)
+  - name: dmz-web-zone
+    subnets: [dmz-web]
+  - name: dmz-db-zone
+    subnets: [dmz-db]
+  - name: dmz
+    zones: [dmz-web-zone, dmz-db-zone]

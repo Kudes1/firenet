@@ -1,0 +1,34 @@
+# Правила читаются сверху вниз, первое совпадение побеждает (как в iptables).
+# Имена src/dst — это подсети или зоны из topology.yaml, либо зарезервированное "any".
+
+defaultAction: deny
+
+rules:
+  # office -> dmz-web: только HTTPS
+  - name: office-to-dmz-web-https
+    src: [office-lan]
+    dst: [dmz-web]
+    proto: tcp
+    ports: ["443"]
+    action: allow
+
+  # office -> dmz-db: явный запрет (стоит раньше более широких правил ниже)
+  - name: office-to-dmz-db-deny
+    src: [office-lan]
+    dst: [dmz-db]
+    action: deny
+
+  # весь dmz (composable-зона из dmz-web + dmz-db) не может инициировать
+  # соединения обратно в office
+  - name: dmz-to-office-deny
+    src: [dmz]
+    dst: [office-lan]
+    action: deny
+
+  # диагностический ICMP разрешён везде (src/dst = any -> правило уходит
+  # на все маршрутизаторы безусловно, без поиска путей)
+  - name: allow-icmp
+    src: [any]
+    dst: [any]
+    proto: icmp
+    action: allow
