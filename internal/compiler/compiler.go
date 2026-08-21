@@ -16,7 +16,8 @@ type atomicRule struct {
 	RuleName string
 	Src, Dst string
 	Proto    rules.Proto
-	Ports    []string
+	SrcPorts []string
+	DstPorts []string
 	Action   rules.Action
 }
 
@@ -24,7 +25,12 @@ func expandAtomic(r rules.Rule) []atomicRule {
 	out := make([]atomicRule, 0, len(r.Src)*len(r.Dst))
 	for _, s := range r.Src {
 		for _, d := range r.Dst {
-			out = append(out, atomicRule{RuleName: r.Name, Src: s, Dst: d, Proto: r.Proto, Ports: r.Ports, Action: r.Action})
+			out = append(out, atomicRule{RuleName: r.Name, Src: s, Dst: d, Proto: r.Proto, SrcPorts: r.SrcPorts, DstPorts: r.DstPorts, Action: r.Action})
+			if r.Mirror {
+				// Direction reverses, so what matched as the dst port now
+				// matches as the src port, and vice versa.
+				out = append(out, atomicRule{RuleName: r.Name, Src: d, Dst: s, Proto: r.Proto, SrcPorts: r.DstPorts, DstPorts: r.SrcPorts, Action: r.Action})
+			}
 		}
 	}
 	return out
@@ -55,7 +61,7 @@ func (a *deviceAccum) addRule(r CompiledRule) {
 }
 
 func ruleKey(r CompiledRule) string {
-	return fmt.Sprintf("%s|%s|%s|%v|%s", r.SrcSet, r.DstSet, r.Proto, r.Ports, r.Action)
+	return fmt.Sprintf("%s|%s|%s|%v|%v|%s", r.SrcSet, r.DstSet, r.Proto, r.SrcPorts, r.DstPorts, r.Action)
 }
 
 func (a *deviceAccum) ipsetList(topo *topology.Topology) []IPSet {
@@ -161,10 +167,11 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 			}
 
 			compiled := CompiledRule{
-				Comment: ar.RuleName,
-				Proto:   ar.Proto,
-				Ports:   ar.Ports,
-				Action:  ar.Action,
+				Comment:  ar.RuleName,
+				Proto:    ar.Proto,
+				SrcPorts: ar.SrcPorts,
+				DstPorts: ar.DstPorts,
+				Action:   ar.Action,
 			}
 			if !srcAny {
 				compiled.SrcSet = ipsetName(ar.Src)

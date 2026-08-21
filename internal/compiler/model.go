@@ -16,12 +16,13 @@ type IPSet struct {
 // than by interface, so it holds regardless of which physical link a packet
 // actually took.
 type CompiledRule struct {
-	Comment string // source rule name, for traceability
-	SrcSet  string // ipset name; "" = unconditional (any)
-	DstSet  string
-	Proto   rules.Proto
-	Ports   []string
-	Action  rules.Action
+	Comment  string // source rule name, for traceability
+	SrcSet   string // ipset name; "" = unconditional (any)
+	DstSet   string
+	Proto    rules.Proto
+	SrcPorts []string
+	DstPorts []string
+	Action   rules.Action
 }
 
 // DeviceRuleset is everything one managed device needs: its ipsets and its

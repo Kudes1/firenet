@@ -1,0 +1,12 @@
+defaultAction: deny
+rules:
+    - name: test
+      src:
+        - office-net
+      dst:
+        - main
+      proto: tcp
+      dstPorts:
+        - "443"
+      action: allow
+      mirror: true

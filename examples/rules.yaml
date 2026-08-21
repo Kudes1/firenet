@@ -9,7 +9,7 @@ rules:
     src: [office-lan]
     dst: [dmz-web]
     proto: tcp
-    ports: ["443"]
+    dstPorts: ["443"]
     action: allow
 
   # office -> dmz-db: явный запрет (стоит раньше более широких правил ниже)

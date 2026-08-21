@@ -24,18 +24,18 @@ func redundantTopology(t *testing.T) *topology.Topology {
 	t.Helper()
 	topo := &topology.Topology{
 		Devices: map[string]topology.Device{
-			"r1": {Name: "r1", Kind: topology.DeviceRouter, Interfaces: []string{"a0", "b0"}},
-			"r2": {Name: "r2", Kind: topology.DeviceRouter, Interfaces: []string{"a0", "b0"}},
-			"r3": {Name: "r3", Kind: topology.DeviceRouter, Interfaces: []string{"c0"}},
+			"r1": {Name: "r1", Kind: topology.DeviceRouter},
+			"r2": {Name: "r2", Kind: topology.DeviceRouter},
+			"r3": {Name: "r3", Kind: topology.DeviceRouter},
 		},
 		Subnets: map[string]topology.Subnet{
-			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24"), AttachedTo: []topology.InterfaceRef{
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24"), AttachedTo: []topology.Endpoint{
 				{Device: "r1", Interface: "a0"}, {Device: "r2", Interface: "a0"},
 			}},
-			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24"), AttachedTo: []topology.InterfaceRef{
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24"), AttachedTo: []topology.Endpoint{
 				{Device: "r1", Interface: "b0"}, {Device: "r2", Interface: "b0"},
 			}},
-			"C": {Name: "C", CIDR: prefix(t, "10.0.2.0/24"), AttachedTo: []topology.InterfaceRef{
+			"C": {Name: "C", CIDR: prefix(t, "10.0.2.0/24"), AttachedTo: []topology.Endpoint{
 				{Device: "r3", Interface: "c0"},
 			}},
 		},
@@ -65,7 +65,7 @@ func TestCompile_PlacesOnBothRedundantRouters(t *testing.T) {
 	pol := &rules.Policy{
 		DefaultAction: rules.ActionDeny,
 		Rules: []rules.Rule{
-			{Name: "a-to-b-https", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, Ports: []string{"443"}, Action: rules.ActionAllow},
+			{Name: "a-to-b-https", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 		},
 	}
 	if err := pol.Validate(topo); err != nil {
@@ -162,8 +162,8 @@ func TestCompile_DedupIdenticalRules(t *testing.T) {
 	pol := &rules.Policy{
 		DefaultAction: rules.ActionDeny,
 		Rules: []rules.Rule{
-			{Name: "rule-one", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, Ports: []string{"443"}, Action: rules.ActionAllow},
-			{Name: "rule-two", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, Ports: []string{"443"}, Action: rules.ActionAllow},
+			{Name: "rule-one", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
+			{Name: "rule-two", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 		},
 	}
 	if err := pol.Validate(topo); err != nil {
@@ -180,5 +180,46 @@ func TestCompile_DedupIdenticalRules(t *testing.T) {
 	d := deviceOf(t, out, "r1")
 	if len(d.Rules) != 1 {
 		t.Fatalf("got %d rules, want 1 after dedup", len(d.Rules))
+	}
+}
+
+func TestCompile_MirrorExpandsReverseDirection(t *testing.T) {
+	topo := redundantTopology(t)
+	pol := &rules.Policy{
+		DefaultAction: rules.ActionDeny,
+		Rules: []rules.Rule{
+			{Name: "ab-tcp", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow, Mirror: true},
+		},
+	}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	d := deviceOf(t, out, "r1")
+	if len(d.Rules) != 2 {
+		t.Fatalf("got %d rules, want 2 (original + mirrored)", len(d.Rules))
+	}
+	forward, reverse := d.Rules[0], d.Rules[1]
+	if forward.SrcSet != ipsetName("A") || forward.DstSet != ipsetName("B") {
+		t.Fatalf("unexpected forward rule: %+v", forward)
+	}
+	if reverse.SrcSet != ipsetName("B") || reverse.DstSet != ipsetName("A") {
+		t.Fatalf("unexpected reverse rule: %+v", reverse)
+	}
+	if len(forward.SrcPorts) != 0 || len(forward.DstPorts) != 1 || forward.DstPorts[0] != "443" {
+		t.Fatalf("unexpected forward ports: %+v", forward)
+	}
+	if len(reverse.DstPorts) != 0 || len(reverse.SrcPorts) != 1 || reverse.SrcPorts[0] != "443" {
+		t.Fatalf("mirrored rule must swap ports (dst port becomes src port on reverse), got: %+v", reverse)
+	}
+	if len(pol.Rules) != 1 {
+		t.Fatalf("mirroring must not mutate the source policy, got %d rules", len(pol.Rules))
 	}
 }

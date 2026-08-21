@@ -8,26 +8,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type yamlInterfaceRef struct {
+type yamlEndpoint struct {
 	Device    string `yaml:"device"`
-	Interface string `yaml:"interface"`
+	Interface string `yaml:"interface,omitempty"`
 }
 
 type yamlLink struct {
-	A yamlInterfaceRef `yaml:"a"`
-	B yamlInterfaceRef `yaml:"b"`
+	A yamlEndpoint `yaml:"a"`
+	B yamlEndpoint `yaml:"b"`
 }
 
 type yamlDevice struct {
-	Name       string   `yaml:"name"`
-	Kind       string   `yaml:"kind"`
-	Interfaces []string `yaml:"interfaces"`
+	Name string `yaml:"name"`
+	Kind string `yaml:"kind"`
 }
 
 type yamlSubnet struct {
-	Name   string             `yaml:"name"`
-	CIDR   string             `yaml:"cidr"`
-	Attach []yamlInterfaceRef `yaml:"attach"`
+	Name   string         `yaml:"name"`
+	CIDR   string         `yaml:"cidr"`
+	Attach []yamlEndpoint `yaml:"attach"`
 }
 
 type yamlZone struct {
@@ -66,13 +65,13 @@ func Load(r io.Reader) (*Topology, error) {
 		if _, exists := topo.Devices[d.Name]; exists {
 			return nil, fmt.Errorf("duplicate device name %q", d.Name)
 		}
-		topo.Devices[d.Name] = Device{Name: d.Name, Kind: kind, Interfaces: d.Interfaces}
+		topo.Devices[d.Name] = Device{Name: d.Name, Kind: kind}
 	}
 
 	for _, l := range raw.Links {
 		topo.Links = append(topo.Links, Link{
-			A: InterfaceRef{Device: l.A.Device, Interface: l.A.Interface},
-			B: InterfaceRef{Device: l.B.Device, Interface: l.B.Interface},
+			A: Endpoint{Device: l.A.Device, Interface: l.A.Interface},
+			B: Endpoint{Device: l.B.Device, Interface: l.B.Interface},
 		})
 	}
 
@@ -84,9 +83,9 @@ func Load(r io.Reader) (*Topology, error) {
 		if _, exists := topo.Subnets[s.Name]; exists {
 			return nil, fmt.Errorf("duplicate subnet name %q", s.Name)
 		}
-		attach := make([]InterfaceRef, 0, len(s.Attach))
+		attach := make([]Endpoint, 0, len(s.Attach))
 		for _, a := range s.Attach {
-			attach = append(attach, InterfaceRef{Device: a.Device, Interface: a.Interface})
+			attach = append(attach, Endpoint{Device: a.Device, Interface: a.Interface})
 		}
 		topo.Subnets[s.Name] = Subnet{Name: s.Name, CIDR: prefix, AttachedTo: attach}
 	}

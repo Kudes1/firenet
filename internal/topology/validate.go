@@ -5,13 +5,10 @@ import (
 	"sort"
 )
 
-// Validate checks structural invariants: unique names, valid references, the
-// one-role-per-interface rule, non-overlapping subnets, and acyclic zones.
+// Validate checks structural invariants: unique names, valid references,
+// non-overlapping subnets, and acyclic zones.
 func (t *Topology) Validate() error {
-	if err := t.validateInterfaces(); err != nil {
-		return err
-	}
-	if err := t.validateLinksAndAttachments(); err != nil {
+	if err := t.validateLinks(); err != nil {
 		return err
 	}
 	if err := t.validateSubnets(); err != nil {
@@ -20,67 +17,27 @@ func (t *Topology) Validate() error {
 	return t.validateZones()
 }
 
-func (t *Topology) validateInterfaces() error {
-	for name, d := range t.Devices {
-		seen := make(map[string]struct{}, len(d.Interfaces))
-		for _, iface := range d.Interfaces {
-			if _, ok := seen[iface]; ok {
-				return fmt.Errorf("device %q: duplicate interface %q", name, iface)
-			}
-			seen[iface] = struct{}{}
-		}
-	}
-	return nil
-}
-
-func (t *Topology) hasInterface(ref InterfaceRef) bool {
-	d, ok := t.Devices[ref.Device]
-	if !ok {
-		return false
-	}
-	for _, iface := range d.Interfaces {
-		if iface == ref.Interface {
-			return true
-		}
-	}
-	return false
-}
-
-// validateLinksAndAttachments enforces that every (device, interface) is
-// used at most once across all links and subnet attachments combined, which
-// keeps "what is physically wired to this port" unambiguous.
-func (t *Topology) validateLinksAndAttachments() error {
-	used := make(map[InterfaceRef]string)
-	claim := func(ref InterfaceRef, where string) error {
-		if !t.hasInterface(ref) {
-			return fmt.Errorf("%s: unknown interface %s.%s", where, ref.Device, ref.Interface)
-		}
-		if prev, ok := used[ref]; ok {
-			return fmt.Errorf("%s: interface %s.%s already used by %s", where, ref.Device, ref.Interface, prev)
-		}
-		used[ref] = where
-		return nil
-	}
-
+// validateLinks checks that every link and subnet attachment references a
+// known device, and that no link connects a device to itself.
+func (t *Topology) validateLinks() error {
 	for i, l := range t.Links {
 		where := fmt.Sprintf("link[%d]", i)
+		if _, ok := t.Devices[l.A.Device]; !ok {
+			return fmt.Errorf("%s: unknown device %q", where, l.A.Device)
+		}
+		if _, ok := t.Devices[l.B.Device]; !ok {
+			return fmt.Errorf("%s: unknown device %q", where, l.B.Device)
+		}
 		if l.A.Device == l.B.Device {
 			return fmt.Errorf("%s: both ends on the same device %q", where, l.A.Device)
 		}
-		if err := claim(l.A, where); err != nil {
-			return err
-		}
-		if err := claim(l.B, where); err != nil {
-			return err
-		}
 	}
 
-	names := sortedSubnetNames(t.Subnets)
-	for _, name := range names {
+	for _, name := range sortedSubnetNames(t.Subnets) {
 		where := fmt.Sprintf("subnet %q", name)
 		for _, ref := range t.Subnets[name].AttachedTo {
-			if err := claim(ref, where); err != nil {
-				return err
+			if _, ok := t.Devices[ref.Device]; !ok {
+				return fmt.Errorf("%s: unknown device %q", where, ref.Device)
 			}
 		}
 	}

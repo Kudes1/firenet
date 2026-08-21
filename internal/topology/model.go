@@ -1,6 +1,6 @@
-// Package topology models the physical network: devices, links between
-// them, and the subnets attached to them. It knows nothing about filtering
-// policy.
+// Package topology models the logical network: devices, the connections
+// between them, and the subnets attached to them. It knows nothing about
+// filtering policy.
 package topology
 
 import "net/netip"
@@ -14,31 +14,33 @@ const (
 	DeviceSwitch DeviceKind = "switch"
 )
 
-// Device is a network node with a fixed set of named interfaces.
+// Device is a network node.
 type Device struct {
-	Name       string
-	Kind       DeviceKind
-	Interfaces []string
+	Name string
+	Kind DeviceKind
 }
 
-// InterfaceRef identifies one named interface on one device.
-type InterfaceRef struct {
+// Endpoint is one side of a logical connection: a device, with an optional
+// interface label kept purely for documentation — it has no bearing on
+// validation, rule matching, or compiled output.
+type Endpoint struct {
 	Device    string
-	Interface string
+	Interface string // optional
 }
 
-// Link is a physical point-to-point connection between two interfaces.
+// Link is a logical connection between two devices. Multiple links between
+// the same pair of devices are allowed (e.g. redundant paths).
 type Link struct {
-	A, B InterfaceRef
+	A, B Endpoint
 }
 
-// Subnet is a named CIDR block, attached to one or more device interfaces
-// (more than one for HA gateways, or a switch interface for hosts wired
-// directly to a shared segment).
+// Subnet is a named CIDR block, attached to one or more devices (more than
+// one for HA gateways, or a switch for hosts wired directly to a shared
+// segment).
 type Subnet struct {
 	Name       string
 	CIDR       netip.Prefix
-	AttachedTo []InterfaceRef
+	AttachedTo []Endpoint
 }
 
 // Zone groups subnets and/or other zones under one name for use in rules.

@@ -16,19 +16,15 @@
 devices:
   - name: edge-r1
     kind: router
-    interfaces: [uplink, lan0]
 
   - name: core-r1
     kind: router
-    interfaces: [wan0, sw-uplink]
 
   - name: core-r2
     kind: router
-    interfaces: [wan0, sw-uplink]
 
   - name: sw-core
     kind: switch
-    interfaces: [p1, p2, p3, p4, p5]
 
 links:
   # прямой резервный линк между ядрами (не через свитч)

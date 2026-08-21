@@ -1,0 +1,36 @@
+devices:
+    - name: test1
+      kind: router
+    - name: test2
+      kind: router
+    - name: core
+      kind: switch
+    - name: office1
+      kind: router
+links:
+    - a:
+        device: test1
+      b:
+        device: core
+    - a:
+        device: core
+      b:
+        device: test2
+    - a:
+        device: core
+      b:
+        device: office1
+subnets:
+    - name: main
+      cidr: 10.10.10.0/24
+      attach:
+        - device: test1
+        - device: test2
+    - name: office-net
+      cidr: 192.168.1.0/24
+      attach:
+        - device: office1
+zones:
+    - name: OFFICE
+      subnets:
+        - main

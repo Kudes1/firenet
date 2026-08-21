@@ -45,13 +45,14 @@ func (p *Policy) Validate(topo *topology.Topology) error {
 		default:
 			return fmt.Errorf("rule %q: invalid proto %q", r.Name, r.Proto)
 		}
-		if len(r.Ports) > 0 && r.Proto != ProtoTCP && r.Proto != ProtoUDP {
+		if (len(r.SrcPorts) > 0 || len(r.DstPorts) > 0) && r.Proto != ProtoTCP && r.Proto != ProtoUDP {
 			return fmt.Errorf("rule %q: ports only valid for tcp/udp", r.Name)
 		}
-		for _, port := range r.Ports {
-			if err := validatePortSpec(port); err != nil {
-				return fmt.Errorf("rule %q: %w", r.Name, err)
-			}
+		if err := validatePortList(r.SrcPorts); err != nil {
+			return fmt.Errorf("rule %q: %w", r.Name, err)
+		}
+		if err := validatePortList(r.DstPorts); err != nil {
+			return fmt.Errorf("rule %q: %w", r.Name, err)
 		}
 
 		if r.Action != ActionAllow && r.Action != ActionDeny {
@@ -72,6 +73,15 @@ func validEndpoint(topo *topology.Topology, name string) bool {
 		return true
 	}
 	return false
+}
+
+func validatePortList(ports []string) error {
+	for _, port := range ports {
+		if err := validatePortSpec(port); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validatePortSpec(spec string) error {

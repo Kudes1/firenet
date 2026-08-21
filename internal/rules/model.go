@@ -26,12 +26,14 @@ const Any = "any"
 // Rule matches traffic between named subnets/zones (or Any). Src/Dst are
 // OR-lists: any name in Src combined with any name in Dst matches.
 type Rule struct {
-	Name   string
-	Src    []string
-	Dst    []string
-	Proto  Proto
-	Ports  []string // "80" or "1000-2000"; only meaningful for tcp/udp
-	Action Action
+	Name     string
+	Src      []string
+	Dst      []string
+	Proto    Proto
+	SrcPorts []string // "80" or "1000-2000"; only meaningful for tcp/udp
+	DstPorts []string // "80" or "1000-2000"; only meaningful for tcp/udp
+	Action   Action
+	Mirror   bool // at compile time, also match traffic in the reverse direction (Dst->Src)
 }
 
 // Policy is the full ordered rule set plus what happens when nothing

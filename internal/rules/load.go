@@ -8,12 +8,14 @@ import (
 )
 
 type yamlRule struct {
-	Name   string   `yaml:"name"`
-	Src    []string `yaml:"src"`
-	Dst    []string `yaml:"dst"`
-	Proto  string   `yaml:"proto"`
-	Ports  []string `yaml:"ports"`
-	Action string   `yaml:"action"`
+	Name     string   `yaml:"name"`
+	Src      []string `yaml:"src"`
+	Dst      []string `yaml:"dst"`
+	Proto    string   `yaml:"proto"`
+	SrcPorts []string `yaml:"srcPorts,omitempty"`
+	DstPorts []string `yaml:"dstPorts,omitempty"`
+	Action   string   `yaml:"action"`
+	Mirror   bool     `yaml:"mirror,omitempty"`
 }
 
 type yamlPolicy struct {
@@ -41,12 +43,14 @@ func Load(r io.Reader) (*Policy, error) {
 			proto = ProtoAny
 		}
 		pol.Rules = append(pol.Rules, Rule{
-			Name:   r.Name,
-			Src:    r.Src,
-			Dst:    r.Dst,
-			Proto:  proto,
-			Ports:  r.Ports,
-			Action: Action(r.Action),
+			Name:     r.Name,
+			Src:      r.Src,
+			Dst:      r.Dst,
+			Proto:    proto,
+			SrcPorts: r.SrcPorts,
+			DstPorts: r.DstPorts,
+			Action:   Action(r.Action),
+			Mirror:   r.Mirror,
 		})
 	}
 	return pol, nil

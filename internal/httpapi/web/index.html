@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>firenet</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <strong>firenet</strong>
+  <nav class="tabs">
+    <button data-tab="topology" class="active">Топология</button>
+    <button data-tab="rules">Правила</button>
+    <button data-tab="compile">Компиляция</button>
+  </nav>
+</header>
+
+<main>
+  <section id="tab-topology" class="tab-panel">
+    <div class="topology-layout">
+      <aside class="sidebar">
+        <div class="panel">
+          <h3>Устройство</h3>
+          <form id="add-device-form">
+            <input name="name" placeholder="имя" required>
+            <select name="kind">
+              <option value="router">router</option>
+              <option value="switch">switch</option>
+            </select>
+            <button type="submit">Добавить</button>
+          </form>
+        </div>
+        <div class="panel">
+          <h3>Подсеть</h3>
+          <form id="add-subnet-form">
+            <input name="name" placeholder="имя" required>
+            <input name="cidr" placeholder="10.0.0.0/24" required>
+            <button type="submit">Добавить</button>
+          </form>
+        </div>
+        <div class="panel">
+          <h3>Зоны</h3>
+          <div id="zone-list"></div>
+          <form id="add-zone-form">
+            <input name="name" placeholder="имя зоны" required>
+            <button type="submit">Добавить зону</button>
+          </form>
+        </div>
+        <p class="hint">Клик по устройству начинает соединение; клик по второму устройству или подсети — завершает его. Клик по кружку рядом с концом соединения — задать необязательную метку интерфейса. Перетаскивайте устройства/подсети мышью.</p>
+        <button id="topo-save" class="primary">Сохранить топологию</button>
+      </aside>
+      <div class="canvas-wrap">
+        <svg id="topo-canvas"></svg>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-rules" class="tab-panel" hidden>
+    <div class="rules-toolbar">
+      <label>Действие по умолчанию:
+        <select id="default-action">
+          <option value="deny">deny</option>
+          <option value="allow">allow</option>
+        </select>
+      </label>
+      <button id="add-rule">+ правило</button>
+      <button id="rules-save" class="primary">Сохранить правила</button>
+    </div>
+    <table id="rules-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Имя</th>
+          <th>Src</th>
+          <th>Dst</th>
+          <th>Proto</th>
+          <th>Src Ports</th>
+          <th>Dst Ports</th>
+          <th>Action</th>
+          <th>Зеркало</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="rules-tbody"></tbody>
+    </table>
+  </section>
+
+  <section id="tab-compile" class="tab-panel" hidden>
+    <button id="compile-run" class="primary">Скомпилировать</button>
+    <div id="compile-output"></div>
+  </section>
+</main>
+
+<div id="error-banner" class="banner" hidden></div>
+
+<script src="/app.js"></script>
+<script src="/topology.js"></script>
+<script src="/rules.js"></script>
+<script src="/compile.js"></script>
+</body>
+</html>

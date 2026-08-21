@@ -15,10 +15,10 @@ func testTopology(t *testing.T) *topology.Topology {
 	}
 	return &topology.Topology{
 		Devices: map[string]topology.Device{
-			"r1": {Name: "r1", Kind: topology.DeviceRouter, Interfaces: []string{"lan0"}},
+			"r1": {Name: "r1", Kind: topology.DeviceRouter},
 		},
 		Subnets: map[string]topology.Subnet{
-			"office": {Name: "office", CIDR: prefix, AttachedTo: []topology.InterfaceRef{{Device: "r1", Interface: "lan0"}}},
+			"office": {Name: "office", CIDR: prefix, AttachedTo: []topology.Endpoint{{Device: "r1", Interface: "lan0"}}},
 		},
 		Zones: map[string]topology.Zone{
 			"internal": {Name: "internal", Subnets: []string{"office"}},
@@ -67,10 +67,31 @@ func TestValidate_InvalidProto(t *testing.T) {
 func TestValidate_PortsOnlyForTCPUDP(t *testing.T) {
 	r := baseRule()
 	r.Proto = ProtoICMP
-	r.Ports = []string{"80"}
+	r.DstPorts = []string{"80"}
 	pol := &Policy{DefaultAction: ActionDeny, Rules: []Rule{r}}
 	if err := pol.Validate(testTopology(t)); err == nil {
 		t.Fatal("expected error for ports on icmp rule")
+	}
+}
+
+func TestValidate_SrcPortsOnlyForTCPUDP(t *testing.T) {
+	r := baseRule()
+	r.Proto = ProtoICMP
+	r.SrcPorts = []string{"80"}
+	pol := &Policy{DefaultAction: ActionDeny, Rules: []Rule{r}}
+	if err := pol.Validate(testTopology(t)); err == nil {
+		t.Fatal("expected error for src ports on icmp rule")
+	}
+}
+
+func TestValidate_SrcPortSpecs(t *testing.T) {
+	r := baseRule()
+	r.Proto = ProtoTCP
+	r.SrcPorts = []string{"1024-65535"}
+	r.DstPorts = []string{"443"}
+	pol := &Policy{DefaultAction: ActionDeny, Rules: []Rule{r}}
+	if err := pol.Validate(testTopology(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -89,7 +110,7 @@ func TestValidate_PortSpecs(t *testing.T) {
 	for _, c := range cases {
 		r := baseRule()
 		r.Proto = ProtoTCP
-		r.Ports = []string{c.spec}
+		r.DstPorts = []string{c.spec}
 		pol := &Policy{DefaultAction: ActionDeny, Rules: []Rule{r}}
 		err := pol.Validate(testTopology(t))
 		if (err != nil) != c.wantErr {

@@ -10,8 +10,8 @@ import (
 
 const e2eTopology = `
 devices:
-  - {name: r1, kind: router, interfaces: [a0, b0]}
-  - {name: r2, kind: router, interfaces: [a0, b0]}
+  - {name: r1, kind: router}
+  - {name: r2, kind: router}
 subnets:
   - {name: office, cidr: 10.0.0.0/24, attach: [{device: r1, interface: a0}, {device: r2, interface: a0}]}
   - {name: dmz,    cidr: 10.0.1.0/24, attach: [{device: r1, interface: b0}, {device: r2, interface: b0}]}
@@ -20,7 +20,7 @@ subnets:
 const e2eRules = `
 defaultAction: deny
 rules:
-  - {name: office-to-dmz-https, src: [office], dst: [dmz], proto: tcp, ports: ["443"], action: allow}
+  - {name: office-to-dmz-https, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: allow}
 `
 
 func discardLogger() *slog.Logger {
@@ -53,7 +53,7 @@ func TestCompile_EndToEnd(t *testing.T) {
 
 func TestCompile_InvalidTopologyFailsFast(t *testing.T) {
 	_, err := Compile(context.Background(), discardLogger(), CompileOptions{
-		TopologyYAML: []byte("devices: [{name: r1, kind: bogus, interfaces: []}]"),
+		TopologyYAML: []byte("devices: [{name: r1, kind: bogus}]"),
 		RulesYAML:    []byte(e2eRules),
 	})
 	if err == nil {

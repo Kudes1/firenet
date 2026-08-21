@@ -60,8 +60,11 @@ func matchArgs(r compiler.CompiledRule) string {
 	}
 	if r.Proto != "" && r.Proto != rules.ProtoAny {
 		parts = append(parts, fmt.Sprintf("-p %s", r.Proto))
-		if len(r.Ports) > 0 {
-			parts = append(parts, fmt.Sprintf("-m multiport --dports %s", strings.Join(r.Ports, ",")))
+		if len(r.SrcPorts) > 0 {
+			parts = append(parts, fmt.Sprintf("-m multiport --sports %s", strings.Join(r.SrcPorts, ",")))
+		}
+		if len(r.DstPorts) > 0 {
+			parts = append(parts, fmt.Sprintf("-m multiport --dports %s", strings.Join(r.DstPorts, ",")))
 		}
 	}
 	if r.Comment != "" {

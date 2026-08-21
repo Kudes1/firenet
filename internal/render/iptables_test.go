@@ -28,7 +28,7 @@ func TestRenderRules_StructureAndOrder(t *testing.T) {
 	ds := compiler.DeviceRuleset{
 		Device: "r1",
 		Rules: []compiler.CompiledRule{
-			{Comment: "allow-https", SrcSet: "fn_a", DstSet: "fn_b", Proto: rules.ProtoTCP, Ports: []string{"443"}, Action: rules.ActionAllow},
+			{Comment: "allow-https", SrcSet: "fn_a", DstSet: "fn_b", Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 		},
 		DefaultAction: rules.ActionDeny,
 	}
@@ -52,5 +52,24 @@ func TestRenderRules_StructureAndOrder(t *testing.T) {
 	}
 	if !strings.Contains(out, "-p tcp -m multiport --dports 443") {
 		t.Fatalf("missing proto/port match:\n%s", out)
+	}
+}
+
+func TestRenderRules_SrcAndDstPorts(t *testing.T) {
+	ds := compiler.DeviceRuleset{
+		Device: "r1",
+		Rules: []compiler.CompiledRule{
+			{Comment: "reverse-https", SrcSet: "fn_b", DstSet: "fn_a", Proto: rules.ProtoTCP, SrcPorts: []string{"443"}, Action: rules.ActionAllow},
+			{Comment: "both-sides", Proto: rules.ProtoTCP, SrcPorts: []string{"1024-65535"}, DstPorts: []string{"80", "443"}, Action: rules.ActionAllow},
+		},
+		DefaultAction: rules.ActionDeny,
+	}
+	out := string(RenderRules(ds))
+
+	if !strings.Contains(out, "-p tcp -m multiport --sports 443") {
+		t.Fatalf("missing src-port-only match:\n%s", out)
+	}
+	if !strings.Contains(out, "-p tcp -m multiport --sports 1024-65535 -m multiport --dports 80,443") {
+		t.Fatalf("missing combined src+dst port match:\n%s", out)
 	}
 }
