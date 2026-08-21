@@ -25,10 +25,13 @@ func baseTopology(t *testing.T) *Topology {
 			{A: Endpoint{"r1", "wan0"}, B: Endpoint{"r2", "wan0"}},
 		},
 		Subnets: map[string]Subnet{
-			"a": {Name: "a", CIDR: mustPrefix(t, "10.0.0.0/24"), AttachedTo: []Endpoint{{"r1", "lan0"}}},
-			"b": {Name: "b", CIDR: mustPrefix(t, "10.0.1.0/24"), AttachedTo: []Endpoint{{"r2", "lan0"}}},
+			"a": {Name: "a", CIDR: mustPrefix(t, "10.0.0.0/24")},
+			"b": {Name: "b", CIDR: mustPrefix(t, "10.0.1.0/24")},
 		},
-		Zones: map[string]Zone{},
+		Networks: map[string]Network{
+			"n1": {Name: "n1", Subnets: []string{"a"}, Attach: []Endpoint{{Device: "r1", Interface: "lan0"}}},
+			"n2": {Name: "n2", Subnets: []string{"b"}, Attach: []Endpoint{{Device: "r2", Interface: "lan0"}}},
+		},
 	}
 }
 
@@ -67,56 +70,65 @@ func TestValidate_SelfLoopLink(t *testing.T) {
 
 func TestValidate_OverlappingSubnets(t *testing.T) {
 	topo := baseTopology(t)
-	topo.Subnets["b"] = Subnet{Name: "b", CIDR: mustPrefix(t, "10.0.0.128/25"), AttachedTo: []Endpoint{{"r2", "lan0"}}}
+	topo.Subnets["b"] = Subnet{Name: "b", CIDR: mustPrefix(t, "10.0.0.128/25")}
 	if err := topo.Validate(); err == nil {
 		t.Fatal("expected error for overlapping subnets")
 	}
 }
 
-func TestValidate_ZoneCycle(t *testing.T) {
+func TestValidate_NetworkUnknownSubnet(t *testing.T) {
 	topo := baseTopology(t)
-	topo.Zones["x"] = Zone{Name: "x", Zones: []string{"y"}}
-	topo.Zones["y"] = Zone{Name: "y", Zones: []string{"x"}}
+	topo.Networks["n1"] = Network{Name: "n1", Subnets: []string{"nope"}}
 	if err := topo.Validate(); err == nil {
-		t.Fatal("expected error for zone cycle")
+		t.Fatal("expected error for unknown subnet in network")
 	}
 }
 
-func TestValidate_ZoneUnknownSubnet(t *testing.T) {
+func TestValidate_SubnetInTwoNetworks(t *testing.T) {
 	topo := baseTopology(t)
-	topo.Zones["x"] = Zone{Name: "x", Subnets: []string{"nope"}}
-	if err := topo.Validate(); err == nil {
-		t.Fatal("expected error for unknown subnet in zone")
+	topo.Networks["n3"] = Network{Name: "n3", Subnets: []string{"a"}, Attach: []Endpoint{{Device: "r2"}}}
+	err := topo.Validate()
+	if err == nil {
+		t.Fatal("expected error for subnet in two networks")
 	}
 }
 
-func TestResolveZone_NestedUnion(t *testing.T) {
+func TestValidate_NetworkUnknownDevice(t *testing.T) {
 	topo := baseTopology(t)
-	topo.Zones["dmz-web"] = Zone{Name: "dmz-web", Subnets: []string{"a"}}
-	topo.Zones["dmz-db"] = Zone{Name: "dmz-db", Subnets: []string{"b"}}
-	topo.Zones["dmz"] = Zone{Name: "dmz", Zones: []string{"dmz-web", "dmz-db"}}
-
-	if err := topo.Validate(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	topo.Networks["n1"] = Network{Name: "n1", Subnets: []string{"a"}, Attach: []Endpoint{{Device: "nope"}}}
+	if err := topo.Validate(); err == nil {
+		t.Fatal("expected error for unknown device in network attach")
 	}
+}
 
-	got, err := topo.ResolveZone("dmz")
+func TestResolveNetwork_FlattensToSubnets(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Networks["n1"] = Network{Name: "n1", Subnets: []string{"b", "a"}}
+
+	got, err := topo.ResolveNetwork("n1")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	want := []string{"a", "b"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("ResolveZone(dmz) = %v, want %v", got, want)
+		t.Fatalf("ResolveNetwork(n1) = %v, want %v", got, want)
 	}
 }
 
-func TestResolveZone_BareSubnet(t *testing.T) {
+func TestResolveNetwork_BareSubnet(t *testing.T) {
 	topo := baseTopology(t)
-	got, err := topo.ResolveZone("a")
+	got, err := topo.ResolveNetwork("a")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if len(got) != 1 || got[0] != "a" {
-		t.Fatalf("ResolveZone(a) = %v, want [a]", got)
+		t.Fatalf("ResolveNetwork(a) = %v, want [a]", got)
+	}
+}
+
+func TestResolveNetwork_UnknownName(t *testing.T) {
+	topo := baseTopology(t)
+	if _, err := topo.ResolveNetwork("nope"); err == nil {
+		t.Fatal("expected error for unknown name")
 	}
 }

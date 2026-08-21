@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>firenet — компиляция</title>
+<script>
+  try {
+    var saved = localStorage.getItem("firenet-theme");
+    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-nav="compile" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
+<div id="site-header"></div>
+
+<main>
+  <div style="margin-bottom: var(--space-3);">
+    <button class="primary" hx-post="/ui/compile" hx-target="#compile-output" hx-swap="innerHTML">Скомпилировать</button>
+  </div>
+  <div id="compile-output"></div>
+</main>
+
+<script src="/htmx.min.js"></script>
+<script src="/alpine.min.js" defer></script>
+<script src="/common.js"></script>
+</body>
+</html>

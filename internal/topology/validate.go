@@ -6,7 +6,7 @@ import (
 )
 
 // Validate checks structural invariants: unique names, valid references,
-// non-overlapping subnets, and acyclic zones.
+// non-overlapping subnets, and each subnet in at most one network.
 func (t *Topology) Validate() error {
 	if err := t.validateLinks(); err != nil {
 		return err
@@ -14,10 +14,10 @@ func (t *Topology) Validate() error {
 	if err := t.validateSubnets(); err != nil {
 		return err
 	}
-	return t.validateZones()
+	return t.validateNetworks()
 }
 
-// validateLinks checks that every link and subnet attachment references a
+// validateLinks checks that every link and network attachment references a
 // known device, and that no link connects a device to itself.
 func (t *Topology) validateLinks() error {
 	for i, l := range t.Links {
@@ -33,11 +33,11 @@ func (t *Topology) validateLinks() error {
 		}
 	}
 
-	for _, name := range sortedSubnetNames(t.Subnets) {
-		where := fmt.Sprintf("subnet %q", name)
-		for _, ref := range t.Subnets[name].AttachedTo {
+	for _, name := range sortedNetworkNames(t.Networks) {
+		n := t.Networks[name]
+		for _, ref := range n.Attach {
 			if _, ok := t.Devices[ref.Device]; !ok {
-				return fmt.Errorf("%s: unknown device %q", where, ref.Device)
+				return fmt.Errorf("network %q: unknown device %q", name, ref.Device)
 			}
 		}
 	}
@@ -57,71 +57,44 @@ func (t *Topology) validateSubnets() error {
 	return nil
 }
 
-func (t *Topology) validateZones() error {
-	for name, z := range t.Zones {
-		for _, s := range z.Subnets {
+func (t *Topology) validateNetworks() error {
+	owner := make(map[string]string, len(t.Subnets)) // subnet name -> network name
+	for _, name := range sortedNetworkNames(t.Networks) {
+		for _, s := range t.Networks[name].Subnets {
 			if _, ok := t.Subnets[s]; !ok {
-				return fmt.Errorf("zone %q: unknown subnet %q", name, s)
+				return fmt.Errorf("network %q: unknown subnet %q", name, s)
 			}
-		}
-		for _, zz := range z.Zones {
-			if _, ok := t.Zones[zz]; !ok {
-				return fmt.Errorf("zone %q: unknown nested zone %q", name, zz)
+			if prev, ok := owner[s]; ok {
+				return fmt.Errorf("subnet %q belongs to both network %q and %q", s, prev, name)
 			}
-		}
-	}
-	for name := range t.Zones {
-		if _, err := t.ResolveZone(name); err != nil {
-			return err
+			owner[s] = name
 		}
 	}
 	return nil
 }
 
-// ResolveZone flattens a subnet or zone name into its constituent subnet
-// names (a bare subnet name resolves to itself). Nested zones are unioned;
-// cycles are reported as errors.
-func (t *Topology) ResolveZone(name string) ([]string, error) {
-	visiting := make(map[string]bool)
-	return t.resolve(name, visiting)
-}
-
-func (t *Topology) resolve(name string, visiting map[string]bool) ([]string, error) {
-	if s, ok := t.Subnets[name]; ok {
-		return []string{s.Name}, nil
+// ResolveNetwork flattens a subnet or network name into its constituent
+// subnet names (a bare subnet name resolves to itself).
+func (t *Topology) ResolveNetwork(name string) ([]string, error) {
+	if _, ok := t.Subnets[name]; ok {
+		return []string{name}, nil
 	}
-	z, ok := t.Zones[name]
+	n, ok := t.Networks[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown zone or subnet %q", name)
+		return nil, fmt.Errorf("unknown network or subnet %q", name)
 	}
-	if visiting[name] {
-		return nil, fmt.Errorf("cycle detected in zone %q", name)
-	}
-	visiting[name] = true
-	defer delete(visiting, name)
-
-	seen := make(map[string]struct{})
-	var out []string
-	add := func(s string) {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
-			out = append(out, s)
-		}
-	}
-	for _, s := range z.Subnets {
-		add(s)
-	}
-	for _, zz := range z.Zones {
-		sub, err := t.resolve(zz, visiting)
-		if err != nil {
-			return nil, err
-		}
-		for _, s := range sub {
-			add(s)
-		}
-	}
+	out := append([]string(nil), n.Subnets...)
 	sort.Strings(out)
 	return out, nil
+}
+
+func sortedNetworkNames(m map[string]Network) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func sortedSubnetNames(m map[string]Subnet) []string {

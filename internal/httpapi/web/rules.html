@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>firenet — правила</title>
+<script>
+  try {
+    var saved = localStorage.getItem("firenet-theme");
+    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-nav="rules" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
+<div id="site-header"></div>
+
+<main x-data="rulesPage">
+  <form id="rules-form" @submit.prevent>
+    <div class="table-toolbar">
+      <div class="rules-settings-group" x-show="!editing">
+        <span class="settings-badge" title="Действие по умолчанию">Действие: <strong x-text="doc.defaultAction"></strong></span>
+        <span class="settings-badge" title="Имя цепочки">Цепочка: <strong x-text="formatChainName(doc.chainName)"></strong></span>
+        <span class="settings-badge" title="Вставка перехода">Переход: <strong x-text="formatChainPosition(doc.chainPosition)"></strong></span>
+        <button type="button" class="secondary btn-sm" @click="startEdit()" title="Разблокировать и изменить параметры">⚙ Изменить параметры</button>
+      </div>
+
+      <div class="rules-settings-group" x-show="editing" x-cloak>
+        <label>Действие по умолчанию:
+          <select x-model="settings.defaultAction">
+            <option value="deny">deny</option>
+            <option value="allow">allow</option>
+          </select>
+        </label>
+        <label>Имя цепочки:
+          <input x-model.trim="settings.chainName" placeholder="FIRENET-FWD">
+        </label>
+        <label>Вставка перехода:
+          <select x-model="settings.chainPosition">
+            <option value="top">в начало FORWARD</option>
+            <option value="bottom">в конец FORWARD</option>
+          </select>
+        </label>
+        <div class="settings-edit-actions">
+          <button type="button" class="primary btn-sm" :disabled="saving" @click="saveSettings()">Применить</button>
+          <button type="button" class="secondary btn-sm" @click="cancelEdit()">Отмена</button>
+        </div>
+      </div>
+
+      <div class="toolbar-actions">
+        <button type="button" class="secondary btn-sm" @click="searchOpen = !searchOpen" title="Поиск по правилам">&#128269;</button>
+        <button type="button" class="primary" @click="openAdd()">+ правило</button>
+      </div>
+    </div>
+    <div class="table-wrap" x-show="loaded" x-cloak>
+    <table class="data-table" x-ref="table">
+      <colgroup>
+        <col data-default-width="56" data-min-width="44" style="width: 56px">
+        <col data-default-width="130" data-min-width="80" style="width: 130px">
+        <col data-default-width="150" data-min-width="90" style="width: 150px">
+        <col data-default-width="170" data-min-width="100" style="width: 170px">
+        <col data-default-width="170" data-min-width="100" style="width: 170px">
+        <col data-default-width="80" data-min-width="70" style="width: 80px">
+        <col data-default-width="100" data-min-width="80" style="width: 100px">
+        <col data-default-width="100" data-min-width="80" style="width: 100px">
+        <col data-default-width="90" data-min-width="70" style="width: 90px">
+        <col data-default-width="70" data-min-width="50" style="width: 70px">
+        <col data-default-width="76" data-min-width="60" style="width: 76px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Имя</th>
+          <th>Комментарий</th>
+          <th>Src</th>
+          <th>Dst</th>
+          <th>Proto</th>
+          <th>Src Ports</th>
+          <th>Dst Ports</th>
+          <th>Action</th>
+          <th>Зеркало</th>
+          <th></th>
+        </tr>
+        <tr class="search-row" x-show="searchOpen" x-cloak>
+          <th><button type="button" class="icon-btn reset-search" title="Сбросить фильтры" @click="resetFilters()">&#10005;</button></th>
+          <th><input x-model.trim="filters.name" placeholder="поиск..."></th>
+          <th><input x-model.trim="filters.comment" placeholder="поиск..."></th>
+          <th><input x-model.trim="filters.src" placeholder="имя или IP" title="Имя подсети/сети, IP или CIDR (можно частично: 10.0.) внутри неё"></th>
+          <th><input x-model.trim="filters.dst" placeholder="имя или IP" title="Имя подсети/сети, IP или CIDR (можно частично: 10.0.) внутри неё"></th>
+          <th><input x-model.trim="filters.proto" placeholder="поиск..."></th>
+          <th><input x-model.trim="filters.srcPorts" placeholder="поиск..."></th>
+          <th><input x-model.trim="filters.dstPorts" placeholder="поиск..."></th>
+          <th><input x-model.trim="filters.action" placeholder="поиск..."></th>
+          <th></th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="row in filteredRules" :key="row.index">
+          <tr>
+            <td class="row-index-cell">
+              <button type="button" class="icon-btn move" title="Вверх" @click="moveRule(row.index, -1)">&#9650;</button>
+              <button type="button" class="icon-btn move" title="Вниз" @click="moveRule(row.index, 1)">&#9660;</button>
+            </td>
+            <td x-text="row.rule.name"></td>
+            <td x-text="row.rule.comment"></td>
+            <td x-text="row.rule.src?.length ? row.rule.src.join(', ') : 'any'"></td>
+            <td x-text="row.rule.dst?.length ? row.rule.dst.join(', ') : 'any'"></td>
+            <td x-text="row.rule.proto || 'any'"></td>
+            <td x-text="(row.rule.srcPorts || []).join(',')"></td>
+            <td x-text="(row.rule.dstPorts || []).join(',')"></td>
+            <td><span class="settings-badge" x-text="row.rule.action || 'deny'"></span></td>
+            <td><span x-show="row.rule.mirror">&#10003;</span></td>
+            <td>
+              <button type="button" class="icon-btn edit" title="Изменить правило" @click="openEdit(row.index)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.3 2.1a1.6 1.6 0 0 1 2.3 2.3L5.4 12.6l-3.1.8.8-3.1z"/></svg></button>
+              <button type="button" class="icon-btn delete" title="Удалить правило" @click="removeRule(row.index)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11"/><path d="M5.5 4V2.7c0-.4.3-.7.7-.7h3.6c.4 0 .7.3.7.7V4"/><path d="M3.5 4l.6 9.3c0 .4.4.7.8.7h6.2c.4 0 .8-.3.8-.7L12.5 4"/><path d="M6.5 6.8v4.4"/><path d="M9.5 6.8v4.4"/></svg></button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="loaded && !filteredRules.length"><td colspan="11" class="empty-cell">Ничего не найдено</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </form>
+
+  <dialog x-ref="dialog" class="modal modal-lg">
+    <h3 x-text="modalTitle"></h3>
+    <p class="cell-hint" x-show="modalError" x-text="modalError" x-cloak></p>
+    <div class="modal-grid">
+      <label>Имя
+        <input x-model.trim="draft.name" placeholder="office-to-dmz">
+      </label>
+      <label>Комментарий
+        <input x-model.trim="draft.comment" title="Попадает в iptables --comment; если пусто — используется имя">
+      </label>
+    </div>
+    <div class="modal-grid">
+      <label>Src
+        <div class="member-list">
+          <template x-for="e in draft.src" :key="e">
+            <div class="member-row">
+              <span class="owner-badge" x-text="e"></span>
+              <button type="button" class="icon-btn delete" title="Убрать эндпоинт" @click="removeEndpoint('src', e)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11"/><path d="M5.5 4V2.7c0-.4.3-.7.7-.7h3.6c.4 0 .7.3.7.7V4"/><path d="M3.5 4l.6 9.3c0 .4.4.7.8.7h6.2c.4 0 .8-.3.8-.7L12.5 4"/><path d="M6.5 6.8v4.4"/><path d="M9.5 6.8v4.4"/></svg></button>
+            </div>
+          </template>
+          <p class="hint member-empty" x-show="!draft.src.length">Источник не выбран</p>
+        </div>
+        <div class="member-combo" @click.outside="srcOpen = false">
+          <input x-model.trim="srcSearch"
+                 placeholder="все эндпоинты — начните вводить для поиска"
+                 title="Подсети и сети; ввод фильтрует список по имени"
+                 @focus="srcOpen = true"
+                 @input="srcOpen = true; srcCursor = 0"
+                 @keydown.arrow-down.prevent="moveCursor('src', 1)"
+                 @keydown.arrow-up.prevent="moveCursor('src', -1)"
+                 @keydown.enter.prevent="pickCursor('src')"
+                 @keydown.escape="srcOpen = false">
+          <button type="button" class="member-combo-toggle" :class="{ open: srcOpen }" @click="srcOpen = !srcOpen" title="Показать или скрыть список">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+          </button>
+          <div class="member-suggestions" x-show="srcOpen" x-cloak>
+            <template x-for="(e, i) in availableEndpoints('src')" :key="e">
+              <button type="button" class="member-suggestion" :class="{ active: i === srcCursor }"
+                      @mousedown.prevent="addEndpoint('src', e)"
+                      @mouseenter="srcCursor = i"
+                      x-text="e"></button>
+            </template>
+            <p class="hint member-empty" x-show="!availableEndpoints('src').length">Ничего не найдено</p>
+          </div>
+        </div>
+      </label>
+      <label>Dst
+        <div class="member-list">
+          <template x-for="e in draft.dst" :key="e">
+            <div class="member-row">
+              <span class="owner-badge" x-text="e"></span>
+              <button type="button" class="icon-btn delete" title="Убрать эндпоинт" @click="removeEndpoint('dst', e)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11"/><path d="M5.5 4V2.7c0-.4.3-.7.7-.7h3.6c.4 0 .7.3.7.7V4"/><path d="M3.5 4l.6 9.3c0 .4.4.7.8.7h6.2c.4 0 .8-.3.8-.7L12.5 4"/><path d="M6.5 6.8v4.4"/><path d="M9.5 6.8v4.4"/></svg></button>
+            </div>
+          </template>
+          <p class="hint member-empty" x-show="!draft.dst.length">Получатель не выбран</p>
+        </div>
+        <div class="member-combo" @click.outside="dstOpen = false">
+          <input x-model.trim="dstSearch"
+                 placeholder="все эндпоинты — начните вводить для поиска"
+                 title="Подсети и сети; ввод фильтрует список по имени"
+                 @focus="dstOpen = true"
+                 @input="dstOpen = true; dstCursor = 0"
+                 @keydown.arrow-down.prevent="moveCursor('dst', 1)"
+                 @keydown.arrow-up.prevent="moveCursor('dst', -1)"
+                 @keydown.enter.prevent="pickCursor('dst')"
+                 @keydown.escape="dstOpen = false">
+          <button type="button" class="member-combo-toggle" :class="{ open: dstOpen }" @click="dstOpen = !dstOpen" title="Показать или скрыть список">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+          </button>
+          <div class="member-suggestions" x-show="dstOpen" x-cloak>
+            <template x-for="(e, i) in availableEndpoints('dst')" :key="e">
+              <button type="button" class="member-suggestion" :class="{ active: i === dstCursor }"
+                      @mousedown.prevent="addEndpoint('dst', e)"
+                      @mouseenter="dstCursor = i"
+                      x-text="e"></button>
+            </template>
+            <p class="hint member-empty" x-show="!availableEndpoints('dst').length">Ничего не найдено</p>
+          </div>
+        </div>
+      </label>
+    </div>
+    <div class="modal-grid">
+      <label>Proto
+        <select x-model="draft.proto">
+          <option value="any">any</option>
+          <option value="tcp">tcp</option>
+          <option value="udp">udp</option>
+          <option value="icmp">icmp</option>
+        </select>
+      </label>
+      <label>Action
+        <select x-model="draft.action">
+          <option value="allow">allow</option>
+          <option value="deny">deny</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-grid">
+      <label>Src Ports
+        <input x-model.trim="draft.srcPorts" placeholder="80,443">
+      </label>
+      <label>Dst Ports
+        <input x-model.trim="draft.dstPorts" placeholder="80,443">
+      </label>
+    </div>
+    <label class="modal-check">
+      <input type="checkbox" x-model="draft.mirror" title="При компиляции также разрешить трафик в обратном направлении (dst → src)">
+      Зеркало — также разрешить обратное направление
+    </label>
+    <p class="cell-hint" x-show="draftHint" x-text="draftHint"></p>
+    <div class="modal-actions">
+      <button type="button" @click="closeModal()">Отмена</button>
+      <button type="button" class="primary" :disabled="!!draftHint || saving" @click="saveDraft()">Сохранить</button>
+    </div>
+  </dialog>
+</main>
+
+<script src="/alpine.min.js" defer></script>
+<script src="/common.js"></script>
+<script src="/columns.js"></script>
+<script src="/rules.js"></script>
+</body>
+</html>

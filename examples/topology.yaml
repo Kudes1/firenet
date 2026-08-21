@@ -1,4 +1,4 @@
-# Пример топологии:
+# Пример проекта:
 #
 #            office-lan (10.10.0.0/24)
 #                 |
@@ -39,29 +39,22 @@ links:
   - a: {device: edge-r1, interface: uplink}
     b: {device: sw-core, interface: p3}
 
-subnets:
-  - name: office-lan
-    cidr: 10.10.0.0/24
+networks:
+  # office-lan — сегмент за edge-r1
+  - name: office
+    subnets: [office-lan]
     attach:
       - {device: edge-r1, interface: lan0}
 
   # dmz-web и dmz-db "висят" прямо на свитче — оба core-роутера видят их
   # как соседей по L2-сегменту, поэтому оба становятся кандидатами на путь.
-  - name: dmz-web
-    cidr: 10.20.0.0/25
+  # Каждая подсеть — отдельная сеть со своей привязкой.
+  - name: dmz-web-net
+    subnets: [dmz-web]
     attach:
       - {device: sw-core, interface: p4}
 
-  - name: dmz-db
-    cidr: 10.20.0.128/25
+  - name: dmz-db-net
+    subnets: [dmz-db]
     attach:
       - {device: sw-core, interface: p5}
-
-zones:
-  # composable-зоны: dmz объединяет dmz-web-zone и dmz-db-zone (пример вложенности)
-  - name: dmz-web-zone
-    subnets: [dmz-web]
-  - name: dmz-db-zone
-    subnets: [dmz-db]
-  - name: dmz
-    zones: [dmz-web-zone, dmz-db-zone]

@@ -29,14 +29,23 @@ make run
 ## Компиляция топологии и правил
 
 ```sh
-./bin/firenet validate --topology topology.yaml --rules rules.yaml   # только проверка
-./bin/firenet compile  --topology topology.yaml --rules rules.yaml --stdout
-./bin/firenet compile  --topology topology.yaml --rules rules.yaml --out ./out/
+./bin/firenet validate --topology topology.yaml --subnets subnets.yaml --rules rules.yaml   # только проверка
+./bin/firenet compile  --topology topology.yaml --subnets subnets.yaml --rules rules.yaml --stdout
+./bin/firenet compile  --topology topology.yaml --subnets subnets.yaml --rules rules.yaml --out ./out/
 ```
 
-Формат `topology.yaml` и `rules.yaml`, семантика `any` и алгоритм размещения
-правил на маршрутизаторах описаны в doc-комментариях пакетов
-`internal/topology`, `internal/rules`, `internal/graph`, `internal/compiler`.
+Формат `topology.yaml`, `subnets.yaml` и `rules.yaml`, семантика `any` и
+алгоритм размещения правил на маршрутизаторах описаны в doc-комментариях
+пакетов `internal/topology`, `internal/rules`, `internal/graph`,
+`internal/compiler`.
+
+Модель данных: подсети (`subnets.yaml`) — именованные CIDR-блоки; сети
+(`topology.yaml`, секция `networks`) — именованные списки подсетей с
+привязкой к устройствам (одна сеть = один сегмент, из сети получается один
+ipset); правила ссылаются на имена подсетей и сетей.
+
+Веб-интерфейс (`./bin/firenet serve`): отдельные страницы «Топология»,
+«Подсети», «Сети», «Правила», «Компиляция».
 
 ## Конфигурация
 

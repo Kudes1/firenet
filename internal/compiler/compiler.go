@@ -13,7 +13,7 @@ import (
 // atomicRule is a Rule with its OR-list Src/Dst expanded to a single name
 // each, so every atomic rule maps to at most one ipset per side.
 type atomicRule struct {
-	RuleName string
+	Comment  string
 	Src, Dst string
 	Proto    rules.Proto
 	SrcPorts []string
@@ -22,14 +22,18 @@ type atomicRule struct {
 }
 
 func expandAtomic(r rules.Rule) []atomicRule {
+	comment := r.Comment
+	if comment == "" {
+		comment = r.Name
+	}
 	out := make([]atomicRule, 0, len(r.Src)*len(r.Dst))
 	for _, s := range r.Src {
 		for _, d := range r.Dst {
-			out = append(out, atomicRule{RuleName: r.Name, Src: s, Dst: d, Proto: r.Proto, SrcPorts: r.SrcPorts, DstPorts: r.DstPorts, Action: r.Action})
+			out = append(out, atomicRule{Comment: comment, Src: s, Dst: d, Proto: r.Proto, SrcPorts: r.SrcPorts, DstPorts: r.DstPorts, Action: r.Action})
 			if r.Mirror {
 				// Direction reverses, so what matched as the dst port now
 				// matches as the src port, and vice versa.
-				out = append(out, atomicRule{RuleName: r.Name, Src: d, Dst: s, Proto: r.Proto, SrcPorts: r.DstPorts, DstPorts: r.SrcPorts, Action: r.Action})
+				out = append(out, atomicRule{Comment: comment, Src: d, Dst: s, Proto: r.Proto, SrcPorts: r.DstPorts, DstPorts: r.SrcPorts, Action: r.Action})
 			}
 		}
 	}
@@ -73,7 +77,7 @@ func (a *deviceAccum) ipsetList(topo *topology.Topology) []IPSet {
 
 	out := make([]IPSet, 0, len(names))
 	for _, n := range names {
-		subnets, _ := topo.ResolveZone(n) // already validated to succeed
+		subnets, _ := topo.ResolveNetwork(n) // already validated to succeed
 		cidrs := make([]string, 0, len(subnets))
 		for _, s := range subnets {
 			cidrs = append(cidrs, topo.Subnets[s].CIDR.String())
@@ -121,12 +125,12 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 			var srcSubnets, dstSubnets []string
 			var err error
 			if !srcAny {
-				if srcSubnets, err = topo.ResolveZone(ar.Src); err != nil {
+				if srcSubnets, err = topo.ResolveNetwork(ar.Src); err != nil {
 					return nil, fmt.Errorf("rule %q: src %q: %w", rule.Name, ar.Src, err)
 				}
 			}
 			if !dstAny {
-				if dstSubnets, err = topo.ResolveZone(ar.Dst); err != nil {
+				if dstSubnets, err = topo.ResolveNetwork(ar.Dst); err != nil {
 					return nil, fmt.Errorf("rule %q: dst %q: %w", rule.Name, ar.Dst, err)
 				}
 			}
@@ -168,7 +172,7 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 			}
 
 			compiled := CompiledRule{
-				Comment:  ar.RuleName,
+				Comment:  ar.Comment,
 				Proto:    ar.Proto,
 				SrcPorts: ar.SrcPorts,
 				DstPorts: ar.DstPorts,

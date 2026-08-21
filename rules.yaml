@@ -2,6 +2,7 @@ defaultAction: deny
 chainPosition: top
 rules:
     - name: test
+      comment: AI-55432
       src:
         - office-net
       dst:
@@ -9,7 +10,5 @@ rules:
       proto: tcp
       dstPorts:
         - "443"
-        - "80"
-        - 400-500
       action: allow
       mirror: true

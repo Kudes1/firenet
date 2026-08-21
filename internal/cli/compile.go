@@ -11,7 +11,7 @@ import (
 )
 
 func newCompileCmd() *cobra.Command {
-	var topologyPath, rulesPath, outDir, deviceFilter string
+	var topologyPath, subnetsPath, rulesPath, outDir, deviceFilter string
 	var toStdout bool
 	var maxHops, maxPaths int
 
@@ -23,6 +23,10 @@ func newCompileCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("read topology file: %w", err)
 			}
+			subnetsYAML, err := os.ReadFile(subnetsPath)
+			if err != nil {
+				return fmt.Errorf("read subnets file: %w", err)
+			}
 			rulesYAML, err := os.ReadFile(rulesPath)
 			if err != nil {
 				return fmt.Errorf("read rules file: %w", err)
@@ -30,6 +34,7 @@ func newCompileCmd() *cobra.Command {
 
 			devices, err := app.Compile(cmd.Context(), loggerFromContext(cmd.Context()), app.CompileOptions{
 				TopologyYAML: topoYAML,
+				SubnetsYAML:  subnetsYAML,
 				RulesYAML:    rulesYAML,
 				MaxHops:      maxHops,
 				MaxPaths:     maxPaths,
@@ -55,6 +60,7 @@ func newCompileCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&topologyPath, "topology", "", "path to topology YAML file (required)")
+	cmd.Flags().StringVar(&subnetsPath, "subnets", "", "path to subnets YAML file (required)")
 	cmd.Flags().StringVar(&rulesPath, "rules", "", "path to rules YAML file (required)")
 	cmd.Flags().StringVar(&outDir, "out", "./out", "output directory for per-device scripts")
 	cmd.Flags().BoolVar(&toStdout, "stdout", false, "print output to stdout instead of writing files")
@@ -62,6 +68,7 @@ func newCompileCmd() *cobra.Command {
 	cmd.Flags().IntVar(&maxHops, "max-hops", 0, "override the max path length (0 = default)")
 	cmd.Flags().IntVar(&maxPaths, "max-paths", 0, "override the max paths per subnet pair (0 = default)")
 	_ = cmd.MarkFlagRequired("topology")
+	_ = cmd.MarkFlagRequired("subnets")
 	_ = cmd.MarkFlagRequired("rules")
 
 	return cmd

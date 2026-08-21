@@ -114,15 +114,19 @@ func Build(topo *topology.Topology) (*Graph, error) {
 		}
 	}
 
-	for name, s := range topo.Subnets {
-		for _, ref := range s.AttachedTo {
+	// Every subnet inherits the attachment of its owning network (one
+	// network = one L2 segment; Validate guarantees a single owner).
+	for _, n := range topo.Networks {
+		for _, ref := range n.Attach {
 			dev := topo.Devices[ref.Device]
-			switch dev.Kind {
-			case topology.DeviceSwitch:
-				id := domainOf[ref.Device]
-				domainPoints[id] = append(domainPoints[id], attachPoint{node: SubnetNode(name)})
-			case topology.DeviceRouter:
-				g.addUndirected(RouterNode(ref.Device), SubnetNode(name), ref.Interface, "")
+			for _, sname := range n.Subnets {
+				switch dev.Kind {
+				case topology.DeviceSwitch:
+					id := domainOf[ref.Device]
+					domainPoints[id] = append(domainPoints[id], attachPoint{node: SubnetNode(sname)})
+				case topology.DeviceRouter:
+					g.addUndirected(RouterNode(ref.Device), SubnetNode(sname), ref.Interface, "")
+				}
 			}
 		}
 	}

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>firenet — топология</title>
+<script>
+  try {
+    var saved = localStorage.getItem("firenet-theme");
+    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-nav="topology" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
+<div id="site-header"></div>
+
+<main>
+  <div class="topology-layout">
+    <aside class="sidebar">
+      <div class="panel">
+        <h3>Устройство</h3>
+        <form id="add-device-form">
+          <input name="name" placeholder="имя" required>
+          <select name="kind">
+            <option value="router">router</option>
+            <option value="switch">switch</option>
+          </select>
+          <button type="submit">Добавить</button>
+        </form>
+      </div>
+      <div class="panel">
+        <h3>Сеть</h3>
+        <form id="add-network-form">
+          <input name="name" placeholder="имя сети" required>
+          <button type="submit">Добавить сеть</button>
+        </form>
+      </div>
+      <p class="hint">Клик по устройству начинает соединение; клик по второму устройству или сети — завершает его. Клик по сети после выбора устройства подключает сегмент к устройству. Клик по кружку у конца соединения — метка интерфейса. Перетаскивайте узлы мышью.</p>
+      <button id="topo-save" class="primary">Сохранить топологию</button>
+    </aside>
+    <div class="canvas-wrap">
+      <svg id="topo-canvas"></svg>
+    </div>
+  </div>
+</main>
+
+<script src="/alpine.min.js" defer></script>
+<script src="/common.js"></script>
+<script src="/topology.js"></script>
+</body>
+</html>

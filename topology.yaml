@@ -26,22 +26,15 @@ links:
         device: zavod
       b:
         device: core
-subnets:
-    - name: main
-      cidr: 10.10.10.0/24
+networks:
+    - name: servers
+      subnets:
+        - main
       attach:
         - device: test1
         - device: test2
-    - name: office-net
-      cidr: 192.168.1.0/24
+    - name: test1
+      subnets:
+        - office-net
       attach:
         - device: office1
-    - name: zv-1
-      cidr: 172.20.0.0/16
-      attach:
-        - device: zavod
-zones:
-    - name: OFFICE
-      subnets:
-        - main
-        - office-net

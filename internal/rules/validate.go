@@ -13,7 +13,7 @@ import (
 // name, with a small safety margin under the kernel's 29-byte limit.
 var chainNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,28}$`)
 
-// Validate checks that every rule references a real subnet/zone (or Any),
+// Validate checks that every rule references a real subnet/network (or Any),
 // uses a valid proto/action, and only carries ports for tcp/udp.
 func (p *Policy) Validate(topo *topology.Topology) error {
 	if p.DefaultAction != ActionAllow && p.DefaultAction != ActionDeny {
@@ -80,7 +80,7 @@ func validEndpoint(topo *topology.Topology, name string) bool {
 	if _, ok := topo.Subnets[name]; ok {
 		return true
 	}
-	if _, ok := topo.Zones[name]; ok {
+	if _, ok := topo.Networks[name]; ok {
 		return true
 	}
 	return false
@@ -105,8 +105,8 @@ func validatePortSpec(spec string) error {
 		}
 		nums = append(nums, n)
 	}
-	if len(nums) == 2 && nums[0] > nums[1] {
-		return fmt.Errorf("invalid port range %q: from > to", spec)
+	if len(nums) == 2 && nums[0] >= nums[1] {
+		return fmt.Errorf("invalid port range %q: from must be less than to", spec)
 	}
 	return nil
 }

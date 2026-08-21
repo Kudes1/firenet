@@ -1,0 +1,7 @@
+subnets:
+    - name: main
+      cidr: 10.10.10.0/24
+    - name: office-net
+      cidr: 192.168.1.0/24
+    - name: zv-1
+      cidr: 172.20.0.0/16

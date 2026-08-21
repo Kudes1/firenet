@@ -90,7 +90,7 @@ header {
 header strong { font-size: 1.05rem; letter-spacing: 0.01em; }
 
 nav.tabs { display: flex; gap: var(--space-1); }
-nav.tabs button {
+nav.tabs a, nav.tabs button {
   background: none;
   border: none;
   color: var(--muted);
@@ -98,9 +98,10 @@ nav.tabs button {
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
   border-radius: var(--radius-sm);
+  text-decoration: none;
 }
-nav.tabs button:hover { background: var(--panel-bg-hover); color: var(--fg); }
-nav.tabs button.active { color: var(--fg); background: var(--panel-bg); font-weight: 600; }
+nav.tabs a:hover, nav.tabs button:hover { background: var(--panel-bg-hover); color: var(--fg); }
+nav.tabs a.active, nav.tabs button.active { color: var(--fg); background: var(--panel-bg); font-weight: 600; }
 
 .theme-toggle {
   margin-left: auto;
@@ -185,7 +186,8 @@ button.icon-btn {
 }
 button.icon-btn:hover { background: transparent; text-decoration: underline; }
 button.icon-btn.delete:hover { text-decoration: none; opacity: 0.75; }
-button.icon-btn.delete svg { width: 1.6em; height: 1.6em; }
+button.icon-btn svg { width: 1.6em; height: 1.6em; }
+button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 
 .btn-link {
   background: none;
@@ -257,8 +259,9 @@ td input[type="checkbox"] {
 td:has(> input[type="checkbox"]) {
   text-align: center;
 }
-.row-index-cell { display: flex; flex-direction: column; gap: 2px; }
-.icon-btn.move { color: var(--muted); font-weight: normal; line-height: 1; }
+.row-index-cell { text-align: center; white-space: nowrap; }
+.row-index-cell .icon-btn + .icon-btn { margin-left: var(--space-1); }
+.icon-btn.move { color: var(--muted); font-weight: normal; line-height: 1; padding: 0; }
 .icon-btn.move:hover { text-decoration: none; color: var(--fg); }
 
 .table-wrap { flex: 1; min-height: 200px; overflow: auto; padding-bottom: 2rem; }
@@ -274,8 +277,11 @@ td:has(> input[type="checkbox"]) {
   flex: 1;
   min-height: 0;
 }
-#rules-table { table-layout: fixed; width: 100%; min-width: 702px; }
-#rules-table th {
+.data-table { table-layout: fixed; width: 100%; }
+#rules-table { min-width: 702px; }
+.data-table th:not(:first-child),
+.data-table td:not(:first-child) { border-left: 1px solid var(--border); }
+.data-table th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -293,14 +299,26 @@ td:has(> input[type="checkbox"]) {
   user-select: none;
   touch-action: none;
 }
+.col-resizer { background: var(--border); opacity: 0.35; }
 .col-resizer:hover, .col-resizer.active { background: var(--accent); opacity: 0.5; }
+
+.data-table tr.search-row th { top: auto; padding: 0.2rem; }
+.data-table tr.search-row input {
+  width: 100%;
+  padding: 0.2rem 0.35rem;
+  font-size: 0.8rem;
+  font-weight: normal;
+  box-sizing: border-box;
+}
+.reset-search { color: var(--muted); }
+.empty-cell { text-align: center; color: var(--muted); font-style: italic; padding: 0.75rem; }
 
 .btn-sm {
   padding: 0.25rem 0.5rem;
   font-size: 0.85rem;
 }
 
-.rules-toolbar {
+.table-toolbar {
   display: flex;
   flex-shrink: 0;
   gap: var(--space-3);
@@ -308,15 +326,16 @@ td:has(> input[type="checkbox"]) {
   margin-bottom: var(--space-3);
   flex-wrap: wrap;
 }
-.rules-toolbar label {
+.table-toolbar h3 { margin: 0; font-size: 0.78rem; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+.table-toolbar label {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   font-size: 0.85rem;
   color: var(--muted);
 }
-.rules-toolbar label input,
-.rules-toolbar label select {
+.table-toolbar label input,
+.table-toolbar label select {
   padding: 0.25rem 0.5rem;
   font-size: 0.85rem;
 }
@@ -350,7 +369,7 @@ td:has(> input[type="checkbox"]) {
   gap: var(--space-1);
   align-items: center;
 }
-.rules-toolbar-actions {
+.toolbar-actions {
   display: inline-flex;
   gap: var(--space-2);
   align-items: center;
@@ -434,6 +453,8 @@ details.multiselect.open-up .multiselect-panel {
   user-select: none;
 }
 .multiselect-panel label:hover { background: var(--panel-bg-hover); }
+.multiselect-panel label.disabled { opacity: 0.55; cursor: not-allowed; }
+.multiselect-panel label.disabled:hover { background: none; }
 .multiselect-panel label input[type="checkbox"] {
   width: 1rem;
   height: 1rem;
@@ -489,3 +510,123 @@ details.multiselect.open-up .multiselect-panel {
   overflow: auto;
   max-height: 240px;
 }
+
+/* Standalone pages (subnets / networks) */
+.page-panel { max-width: 900px; }
+.page-panel h3 { margin-top: 0; }
+table.list input { width: 100%; min-width: 10rem; }
+table.list td { vertical-align: middle; padding-right: var(--space-2); }
+table.list tr.invalid input { border-color: var(--danger); }
+.owner-badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+}
+td .owner-badge { margin: 1px var(--space-1) 1px 0; }
+.cell-hint { color: var(--danger); font-size: 0.78rem; margin-right: var(--space-2); }
+.page-actions { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.zone-list { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); }
+.net-name-input { max-width: 16rem; }
+
+/* Modal dialog (native <dialog>) */
+dialog.modal {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  color: var(--fg);
+  padding: var(--space-4);
+  min-width: 22rem;
+}
+dialog.modal::backdrop { background: rgba(0, 0, 0, 0.45); }
+dialog.modal h3 { margin-top: 0; }
+dialog.modal label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  font-size: 0.9rem;
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+.modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.modal-grid label { margin-bottom: 0; }
+.modal-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.modal-check input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--accent); }
+
+/* Large modal variant (e.g. network editor with a long subnet list) */
+dialog.modal-lg { width: min(44rem, 92vw); }
+dialog.modal {
+  max-height: min(85vh, 100% - 2 * var(--space-4));
+  overflow-y: auto;
+}
+dialog.modal .multiselect-panel { max-height: 320px; }
+
+/* Member list inside the network editor modal */
+.member-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 260px;
+  overflow-y: auto;
+  margin-bottom: var(--space-3);
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.member-row:last-child { border-bottom: none; }
+.member-row .hint { flex: 1; }
+.member-row button { margin-left: auto; }
+.member-empty { padding: var(--space-2); text-align: center; font-style: italic; }
+
+/* Searchable subnet picker (network editor modal) */
+.member-combo { position: relative; margin-bottom: var(--space-3); }
+.member-combo input { width: 100%; padding-right: 2.2rem; }
+.member-combo-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  padding: 0.15rem;
+  color: var(--muted);
+  display: inline-flex;
+}
+.member-combo-toggle svg { width: 1rem; height: 1rem; transition: transform 0.15s ease; }
+.member-combo-toggle.open svg { transform: rotate(180deg); }
+.member-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: var(--shadow);
+}
+.member-suggestion {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  background: none;
+  padding: var(--space-1) var(--space-2);
+  font-size: 0.88rem;
+}
+.member-suggestion.active, .member-suggestion:hover { background: var(--panel-bg-hover); }

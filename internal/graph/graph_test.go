@@ -24,6 +24,12 @@ func routers(paths []Path) map[string]bool {
 	return out
 }
 
+// netWithSubnets builds a Network named name whose subnets are all attached
+// to the given endpoints.
+func netWithSubnets(name string, subnets []string, eps ...topology.Endpoint) topology.Network {
+	return topology.Network{Name: name, Subnets: subnets, Attach: eps}
+}
+
 func TestBuild_LinearChain(t *testing.T) {
 	topo := &topology.Topology{
 		Devices: map[string]topology.Device{
@@ -34,8 +40,12 @@ func TestBuild_LinearChain(t *testing.T) {
 			{A: topology.Endpoint{Device: "r1", Interface: "up"}, B: topology.Endpoint{Device: "r2", Interface: "down"}},
 		},
 		Subnets: map[string]topology.Subnet{
-			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24"), AttachedTo: []topology.Endpoint{{Device: "r1", Interface: "a0"}}},
-			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24"), AttachedTo: []topology.Endpoint{{Device: "r2", Interface: "b0"}}},
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "r1", Interface: "a0"}),
+			"nB": netWithSubnets("nB", []string{"B"}, topology.Endpoint{Device: "r2", Interface: "b0"}),
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -59,21 +69,23 @@ func TestBuild_LinearChain(t *testing.T) {
 }
 
 func TestBuild_RedundantPaths(t *testing.T) {
-	// Subnets A and B are each dual-homed to r1 and r2 directly (HA
+	// Networks nA and nB are each dual-homed to r1 and r2 directly (HA
 	// gateways), with no link between r1 and r2 themselves -- exactly two
-	// independent transit paths.
+	// independent transit paths between their subnets.
 	topo := &topology.Topology{
 		Devices: map[string]topology.Device{
 			"r1": {Name: "r1", Kind: topology.DeviceRouter},
 			"r2": {Name: "r2", Kind: topology.DeviceRouter},
 		},
 		Subnets: map[string]topology.Subnet{
-			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24"), AttachedTo: []topology.Endpoint{
-				{Device: "r1", Interface: "a0"}, {Device: "r2", Interface: "a0"},
-			}},
-			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24"), AttachedTo: []topology.Endpoint{
-				{Device: "r1", Interface: "b0"}, {Device: "r2", Interface: "b0"},
-			}},
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nA": netWithSubnets("nA", []string{"A"},
+				topology.Endpoint{Device: "r1", Interface: "a0"}, topology.Endpoint{Device: "r2", Interface: "a0"}),
+			"nB": netWithSubnets("nB", []string{"B"},
+				topology.Endpoint{Device: "r1", Interface: "b0"}, topology.Endpoint{Device: "r2", Interface: "b0"}),
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -108,8 +120,12 @@ func TestBuild_SwitchChainCollapses(t *testing.T) {
 			{A: topology.Endpoint{Device: "sw1", Interface: "p2"}, B: topology.Endpoint{Device: "sw2", Interface: "p1"}},
 		},
 		Subnets: map[string]topology.Subnet{
-			"X": {Name: "X", CIDR: prefix(t, "10.0.0.0/24"), AttachedTo: []topology.Endpoint{{Device: "r1", Interface: "x0"}}},
-			"A": {Name: "A", CIDR: prefix(t, "10.0.1.0/24"), AttachedTo: []topology.Endpoint{{Device: "sw2", Interface: "p2"}}},
+			"X": {Name: "X", CIDR: prefix(t, "10.0.0.0/24")},
+			"A": {Name: "A", CIDR: prefix(t, "10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nX": netWithSubnets("nX", []string{"X"}, topology.Endpoint{Device: "r1", Interface: "x0"}),
+			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "sw2", Interface: "p2"}),
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -128,6 +144,41 @@ func TestBuild_SwitchChainCollapses(t *testing.T) {
 	}
 }
 
+func TestBuild_AllSubnetsOfNetworkShareSegment(t *testing.T) {
+	// Both subnets of one network hang off the same router: they must be
+	// mutually reachable in one hop through no other device.
+	topo := &topology.Topology{
+		Devices: map[string]topology.Device{
+			"r1": {Name: "r1", Kind: topology.DeviceRouter},
+			"r2": {Name: "r2", Kind: topology.DeviceRouter},
+		},
+		Links: []topology.Link{
+			{A: topology.Endpoint{Device: "r1"}, B: topology.Endpoint{Device: "r2"}},
+		},
+		Subnets: map[string]topology.Subnet{
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"n": netWithSubnets("n", []string{"A", "B"}, topology.Endpoint{Device: "r1", Interface: "lan0"}),
+		},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("invalid fixture: %v", err)
+	}
+	g, err := Build(topo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	paths, err := g.AllSimplePaths(SubnetNode("A"), SubnetNode("B"), DefaultLimits())
+	if err != nil {
+		t.Fatalf("pathfind: %v", err)
+	}
+	if len(paths) != 1 || paths[0].Nodes[1] != RouterNode("r1") {
+		t.Fatalf("paths = %+v, want a single path A-r1-B", paths)
+	}
+}
+
 func TestAllSimplePaths_CycleDoesNotHang(t *testing.T) {
 	topo := &topology.Topology{
 		Devices: map[string]topology.Device{
@@ -141,8 +192,12 @@ func TestAllSimplePaths_CycleDoesNotHang(t *testing.T) {
 			{A: topology.Endpoint{Device: "r2", Interface: "toR3"}, B: topology.Endpoint{Device: "r3", Interface: "toR2"}},
 		},
 		Subnets: map[string]topology.Subnet{
-			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24"), AttachedTo: []topology.Endpoint{{Device: "r1", Interface: "a0"}}},
-			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24"), AttachedTo: []topology.Endpoint{{Device: "r2", Interface: "b0"}}},
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "r1", Interface: "a0"}),
+			"nB": netWithSubnets("nB", []string{"B"}, topology.Endpoint{Device: "r2", Interface: "b0"}),
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -167,17 +222,23 @@ func TestAllSimplePaths_CycleDoesNotHang(t *testing.T) {
 
 func TestAllSimplePaths_TooManyPaths(t *testing.T) {
 	devices := map[string]topology.Device{}
-	subnetA := topology.Subnet{Name: "A", CIDR: prefix(t, "10.0.0.0/24")}
-	subnetB := topology.Subnet{Name: "B", CIDR: prefix(t, "10.0.1.0/24")}
+	var epsA, epsB []topology.Endpoint
 	for i := 0; i < 4; i++ {
 		name := "r" + string(rune('1'+i))
 		devices[name] = topology.Device{Name: name, Kind: topology.DeviceRouter}
-		subnetA.AttachedTo = append(subnetA.AttachedTo, topology.Endpoint{Device: name, Interface: "a0"})
-		subnetB.AttachedTo = append(subnetB.AttachedTo, topology.Endpoint{Device: name, Interface: "b0"})
+		epsA = append(epsA, topology.Endpoint{Device: name, Interface: "a0"})
+		epsB = append(epsB, topology.Endpoint{Device: name, Interface: "b0"})
 	}
 	topo := &topology.Topology{
 		Devices: devices,
-		Subnets: map[string]topology.Subnet{"A": subnetA, "B": subnetB},
+		Subnets: map[string]topology.Subnet{
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nA": netWithSubnets("nA", []string{"A"}, epsA...),
+			"nB": netWithSubnets("nB", []string{"B"}, epsB...),
+		},
 	}
 	if err := topo.Validate(); err != nil {
 		t.Fatalf("invalid fixture: %v", err)

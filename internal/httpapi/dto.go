@@ -28,31 +28,37 @@ type DeviceDoc struct {
 	Kind string `json:"kind" yaml:"kind"`
 }
 
-// SubnetDoc is a named CIDR block attached to one or more devices.
+// SubnetDoc is a named CIDR block. Attachment lives on the Network that
+// contains it.
 type SubnetDoc struct {
-	Name   string        `json:"name" yaml:"name"`
-	CIDR   string        `json:"cidr" yaml:"cidr"`
-	Attach []EndpointDoc `json:"attach,omitempty" yaml:"attach,omitempty"`
+	Name string `json:"name" yaml:"name"`
+	CIDR string `json:"cidr" yaml:"cidr"`
 }
 
-// ZoneDoc groups subnets and/or other zones under one name for use in rules.
-type ZoneDoc struct {
-	Name    string   `json:"name" yaml:"name"`
-	Subnets []string `json:"subnets,omitempty" yaml:"subnets,omitempty"`
-	Zones   []string `json:"zones,omitempty" yaml:"zones,omitempty"`
+// SubnetsDoc is the full wire shape of subnets.yaml.
+type SubnetsDoc struct {
+	Subnets []SubnetDoc `json:"subnets" yaml:"subnets"`
+}
+
+// NetworkDoc is one L2 segment: an attachment to devices plus the named
+// list of member subnets (which becomes one ipset at compile time).
+type NetworkDoc struct {
+	Name    string        `json:"name" yaml:"name"`
+	Subnets []string      `json:"subnets,omitempty" yaml:"subnets,omitempty"`
+	Attach  []EndpointDoc `json:"attach,omitempty" yaml:"attach,omitempty"`
 }
 
 // TopologyDoc is the full wire shape of topology.yaml.
 type TopologyDoc struct {
-	Devices []DeviceDoc `json:"devices" yaml:"devices"`
-	Links   []LinkDoc   `json:"links" yaml:"links"`
-	Subnets []SubnetDoc `json:"subnets" yaml:"subnets"`
-	Zones   []ZoneDoc   `json:"zones" yaml:"zones"`
+	Devices  []DeviceDoc  `json:"devices" yaml:"devices"`
+	Links    []LinkDoc    `json:"links" yaml:"links"`
+	Networks []NetworkDoc `json:"networks" yaml:"networks"`
 }
 
 // RuleDoc matches traffic between named subnets/zones (or "any").
 type RuleDoc struct {
 	Name     string   `json:"name" yaml:"name"`
+	Comment  string   `json:"comment,omitempty" yaml:"comment,omitempty"`
 	Src      []string `json:"src" yaml:"src"`
 	Dst      []string `json:"dst" yaml:"dst"`
 	Proto    string   `json:"proto,omitempty" yaml:"proto,omitempty"`

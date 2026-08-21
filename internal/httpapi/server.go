@@ -17,6 +17,8 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/topology", h.getTopology)
 	mux.HandleFunc("PUT /api/topology", h.putTopology)
+	mux.HandleFunc("GET /api/subnets", h.getSubnets)
+	mux.HandleFunc("PUT /api/subnets", h.putSubnets)
 	mux.HandleFunc("GET /api/rules", h.getRules)
 	mux.HandleFunc("PUT /api/rules", h.putRules)
 	mux.HandleFunc("POST /api/validate", h.validate)
@@ -24,13 +26,17 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/layout", h.getLayout)
 	mux.HandleFunc("PUT /api/layout", h.putLayout)
 
-	mux.HandleFunc("GET /ui/rules", h.uiRules)
-	mux.HandleFunc("POST /ui/rules/add", h.uiRulesAdd)
-	mux.HandleFunc("POST /ui/rules/{index}/delete", h.uiRulesDelete)
-	mux.HandleFunc("POST /ui/rules/{index}/move-up", h.uiRulesMove(-1))
-	mux.HandleFunc("POST /ui/rules/{index}/move-down", h.uiRulesMove(1))
-	mux.HandleFunc("POST /ui/rules/save", h.uiRulesSave)
 	mux.HandleFunc("POST /ui/compile", h.uiCompile)
+
+	// Standalone UI pages.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/topology", http.StatusFound)
+	})
+	mux.HandleFunc("GET /ui/topology", servePage("topology.html"))
+	mux.HandleFunc("GET /ui/subnets", servePage("subnets.html"))
+	mux.HandleFunc("GET /ui/networks", servePage("networks.html"))
+	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
+	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
 
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {
@@ -39,6 +45,19 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.Handle("/", http.FileServer(http.FS(webRoot)))
 
 	return withLogging(log, mux)
+}
+
+// servePage renders one of the embedded static HTML pages.
+func servePage(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		b, err := webFiles.ReadFile("web/" + name)
+		if err != nil {
+			http.Error(w, "page not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(b)
+	}
 }
 
 func withLogging(log *slog.Logger, next http.Handler) http.Handler {

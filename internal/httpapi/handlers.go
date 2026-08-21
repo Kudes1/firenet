@@ -54,12 +54,12 @@ func (h *handlers) putTopology(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	topo, err := topology.Load(bytes.NewReader(raw))
+	subnetsRaw, err := h.readStoredSubnets()
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if err := topo.Validate(); err != nil {
+	if _, err := app.LoadProject(raw, subnetsRaw); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
@@ -68,6 +68,76 @@ func (h *handlers) putTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, doc)
+}
+
+func (h *handlers) getSubnets(w http.ResponseWriter, r *http.Request) {
+	raw, err := h.readStoredSubnets()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	var doc SubnetsDoc
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("parse stored subnets: %w", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (h *handlers) putSubnets(w http.ResponseWriter, r *http.Request) {
+	var doc SubnetsDoc
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
+		return
+	}
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	topoRaw, err := h.store.ReadTopology()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if _, err := app.LoadProject(topoRaw, raw); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if err := h.store.WriteSubnets(raw); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (h *handlers) readStoredSubnets() ([]byte, error) {
+	raw, err := h.store.ReadSubnets()
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 {
+		raw = []byte("subnets: []\n")
+	}
+	return raw, nil
+}
+
+// loadTopology loads the stored topology.yaml + subnets.yaml as one merged,
+// validated Topology (cross-file references included).
+func (h *handlers) loadTopology() (*topology.Topology, error) {
+	topoRaw, err := h.store.ReadTopology()
+	if err != nil {
+		return nil, err
+	}
+	subnetsRaw, err := h.readStoredSubnets()
+	if err != nil {
+		return nil, err
+	}
+	topo, err := app.LoadProject(topoRaw, subnetsRaw)
+	if err != nil {
+		return nil, fmt.Errorf("stored project is invalid: %w", err)
+	}
+	return topo, nil
 }
 
 func (h *handlers) getRules(w http.ResponseWriter, r *http.Request) {
@@ -102,20 +172,14 @@ func (h *handlers) putRules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, doc)
 }
 
-// validateAndPersistRules validates doc against the stored topology and, on
-// success, persists it. invalid reports whether a failure is the caller's
-// fault (422-worthy) as opposed to a server-side problem (500-worthy).
+// validateAndPersistRules validates doc against the stored project
+// (topology + subnets) and, on success, persists it. invalid reports whether
+// a failure is the caller's fault (422-worthy) as opposed to a server-side
+// problem (500-worthy).
 func (h *handlers) validateAndPersistRules(doc PolicyDoc) (invalid bool, err error) {
-	topoRaw, err := h.store.ReadTopology()
+	topo, err := h.loadTopology()
 	if err != nil {
 		return false, err
-	}
-	topo, err := topology.Load(bytes.NewReader(topoRaw))
-	if err != nil {
-		return false, fmt.Errorf("load stored topology: %w", err)
-	}
-	if err := topo.Validate(); err != nil {
-		return false, fmt.Errorf("stored topology is invalid: %w", err)
 	}
 
 	raw, err := yaml.Marshal(doc)
@@ -138,6 +202,11 @@ func (h *handlers) validate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	subnetsRaw, err := h.readStoredSubnets()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	rulesRaw, err := h.store.ReadRules()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -145,14 +214,12 @@ func (h *handlers) validate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var errs []string
-	topo, loadErr := topology.Load(bytes.NewReader(topoRaw))
+	topo, loadErr := app.LoadProject(topoRaw, subnetsRaw)
 	switch {
 	case loadErr != nil:
 		errs = append(errs, loadErr.Error())
 	default:
-		if valErr := topo.Validate(); valErr != nil {
-			errs = append(errs, valErr.Error())
-		} else if pol, err := rules.Load(bytes.NewReader(rulesRaw)); err != nil {
+		if pol, err := rules.Load(bytes.NewReader(rulesRaw)); err != nil {
 			errs = append(errs, err.Error())
 		} else if err := pol.Validate(topo); err != nil {
 			errs = append(errs, err.Error())
@@ -168,6 +235,11 @@ func (h *handlers) compile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	subnetsRaw, err := h.readStoredSubnets()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	rulesRaw, err := h.store.ReadRules()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -175,6 +247,7 @@ func (h *handlers) compile(w http.ResponseWriter, r *http.Request) {
 	}
 	devices, err := app.Compile(r.Context(), h.log, app.CompileOptions{
 		TopologyYAML: topoRaw,
+		SubnetsYAML:  subnetsRaw,
 		RulesYAML:    rulesRaw,
 	})
 	if err != nil {

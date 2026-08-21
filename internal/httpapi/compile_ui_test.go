@@ -2,9 +2,31 @@ package httpapi
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// doForm sends a request with an empty form body, like the old HTMX UI did.
+func doForm(t *testing.T, h http.Handler, method, path string, form map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(encodeForm(form)))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func encodeForm(form map[string]string) string {
+	if len(form) == 0 {
+		return ""
+	}
+	vals := make([]string, 0, len(form))
+	for k, v := range form {
+		vals = append(vals, k+"="+strings.ReplaceAll(v, "&", "%26"))
+	}
+	return strings.Join(vals, "&")
+}
 
 func TestUICompile_Success(t *testing.T) {
 	h, _ := newTestServer(t)

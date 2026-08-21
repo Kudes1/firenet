@@ -18,6 +18,8 @@ import (
 type ProjectStore interface {
 	ReadTopology() ([]byte, error)
 	WriteTopology([]byte) error
+	ReadSubnets() ([]byte, error)
+	WriteSubnets([]byte) error
 	ReadRules() ([]byte, error)
 	WriteRules([]byte) error
 	// ReadLayout returns (nil, nil) if no layout has been saved yet.
@@ -28,12 +30,15 @@ type ProjectStore interface {
 // FileProjectStore reads/writes a project's files directly on disk.
 type FileProjectStore struct {
 	TopologyPath string
+	SubnetsPath  string
 	RulesPath    string
 	LayoutPath   string
 }
 
 func (s FileProjectStore) ReadTopology() ([]byte, error) { return os.ReadFile(s.TopologyPath) }
 func (s FileProjectStore) WriteTopology(b []byte) error  { return writeFileAtomic(s.TopologyPath, b) }
+func (s FileProjectStore) ReadSubnets() ([]byte, error)  { return os.ReadFile(s.SubnetsPath) }
+func (s FileProjectStore) WriteSubnets(b []byte) error   { return writeFileAtomic(s.SubnetsPath, b) }
 func (s FileProjectStore) ReadRules() ([]byte, error)    { return os.ReadFile(s.RulesPath) }
 func (s FileProjectStore) WriteRules(b []byte) error     { return writeFileAtomic(s.RulesPath, b) }
 
@@ -47,23 +52,37 @@ func (s FileProjectStore) ReadLayout() ([]byte, error) {
 
 func (s FileProjectStore) WriteLayout(b []byte) error { return writeFileAtomic(s.LayoutPath, b) }
 
-// EnsureSeeded creates empty-but-valid topology/rules files at the store's
-// paths if they don't already exist, so a brand-new project can be started
-// purely from the browser instead of requiring hand-written YAML up front.
+// EnsureSeeded creates empty-but-valid topology/subnets/rules files at the
+// store's paths if they don't already exist, so a brand-new project can be
+// started purely from the browser instead of requiring hand-written YAML up
+// front.
 func (s FileProjectStore) EnsureSeeded() error {
-	if err := seedIfMissing(s.TopologyPath, emptyTopologyYAML()); err != nil {
-		return err
+	for path, content := range map[string][]byte{
+		s.TopologyPath: emptyTopologyYAML(),
+		s.SubnetsPath:  emptySubnetsYAML(),
+		s.RulesPath:    emptyPolicyYAML(),
+	} {
+		if err := seedIfMissing(path, content); err != nil {
+			return err
+		}
 	}
-	return seedIfMissing(s.RulesPath, emptyPolicyYAML())
+	return nil
 }
 
 func emptyTopologyYAML() []byte {
 	b, err := yaml.Marshal(TopologyDoc{
-		Devices: []DeviceDoc{},
-		Links:   []LinkDoc{},
-		Subnets: []SubnetDoc{},
-		Zones:   []ZoneDoc{},
+		Devices:  []DeviceDoc{},
+		Links:    []LinkDoc{},
+		Networks: []NetworkDoc{},
 	})
+	if err != nil {
+		panic(err) // static value, can't fail
+	}
+	return b
+}
+
+func emptySubnetsYAML() []byte {
+	b, err := yaml.Marshal(SubnetsDoc{Subnets: []SubnetDoc{}})
 	if err != nil {
 		panic(err) // static value, can't fail
 	}

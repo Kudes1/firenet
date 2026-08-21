@@ -10,12 +10,12 @@ import (
 	"github.com/kudes1/firenet/internal/graph"
 	"github.com/kudes1/firenet/internal/render"
 	"github.com/kudes1/firenet/internal/rules"
-	"github.com/kudes1/firenet/internal/topology"
 )
 
 // CompileOptions are the inputs to a single compile run.
 type CompileOptions struct {
 	TopologyYAML []byte
+	SubnetsYAML  []byte
 	RulesYAML    []byte
 	MaxHops      int // 0 = use graph.DefaultLimits()
 	MaxPaths     int // 0 = use graph.DefaultLimits()
@@ -33,12 +33,9 @@ type CompiledDevice struct {
 // or CLI knowledge — so both internal/cli today and a future internal/http
 // adapter can call it directly.
 func Compile(_ context.Context, log *slog.Logger, opts CompileOptions) ([]CompiledDevice, error) {
-	topo, err := topology.Load(bytes.NewReader(opts.TopologyYAML))
+	topo, err := LoadProject(opts.TopologyYAML, opts.SubnetsYAML)
 	if err != nil {
-		return nil, fmt.Errorf("load topology: %w", err)
-	}
-	if err := topo.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid topology: %w", err)
+		return nil, err
 	}
 
 	pol, err := rules.Load(bytes.NewReader(opts.RulesYAML))

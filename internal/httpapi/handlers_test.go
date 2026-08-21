@@ -17,10 +17,15 @@ devices:
   - {name: r2, kind: router}
 links:
   - {a: {device: r1, interface: wan0}, b: {device: r2, interface: wan0}}
+networks:
+  - {name: n-office, subnets: [office], attach: [{device: r1, interface: lan0}]}
+  - {name: n-dmz, subnets: [dmz], attach: [{device: r2, interface: lan0}]}
+`
+
+const fixtureSubnets = `
 subnets:
-  - {name: office, cidr: 10.0.0.0/24, attach: [{device: r1, interface: lan0}]}
-  - {name: dmz, cidr: 10.0.1.0/24, attach: [{device: r2, interface: lan0}]}
-zones: []
+  - {name: office, cidr: 10.0.0.0/24}
+  - {name: dmz, cidr: 10.0.1.0/24}
 `
 
 const fixtureRules = `
@@ -38,11 +43,15 @@ func newTestServer(t *testing.T) (http.Handler, FileProjectStore) {
 	dir := t.TempDir()
 	store := FileProjectStore{
 		TopologyPath: filepath.Join(dir, "topology.yaml"),
+		SubnetsPath:  filepath.Join(dir, "subnets.yaml"),
 		RulesPath:    filepath.Join(dir, "rules.yaml"),
 		LayoutPath:   filepath.Join(dir, ".firenet-layout.json"),
 	}
 	if err := store.WriteTopology([]byte(fixtureTopology)); err != nil {
 		t.Fatalf("seed topology: %v", err)
+	}
+	if err := store.WriteSubnets([]byte(fixtureSubnets)); err != nil {
+		t.Fatalf("seed subnets: %v", err)
 	}
 	if err := store.WriteRules([]byte(fixtureRules)); err != nil {
 		t.Fatalf("seed rules: %v", err)
@@ -76,8 +85,63 @@ func TestGetTopology(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(doc.Devices) != 2 || len(doc.Subnets) != 2 {
+	if len(doc.Devices) != 2 || len(doc.Networks) != 2 {
 		t.Fatalf("unexpected doc: %+v", doc)
+	}
+}
+
+func TestGetPutSubnets(t *testing.T) {
+	h, _ := newTestServer(t)
+	rec := doJSON(t, h, http.MethodGet, "/api/subnets", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var doc SubnetsDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(doc.Subnets) != 2 {
+		t.Fatalf("unexpected subnets: %+v", doc)
+	}
+
+	doc.Subnets = append(doc.Subnets, SubnetDoc{Name: "guest", CIDR: "10.0.2.0/24"})
+	rec = doJSON(t, h, http.MethodPut, "/api/subnets", doc)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPutSubnets_RejectsOverlap(t *testing.T) {
+	h, _ := newTestServer(t)
+	doc := SubnetsDoc{Subnets: []SubnetDoc{
+		{Name: "office", CIDR: "10.0.0.0/24"},
+		{Name: "dmz", CIDR: "10.0.0.128/25"},
+	}}
+	rec := doJSON(t, h, http.MethodPut, "/api/subnets", doc)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPutSubnets_RejectsSubnetInUse(t *testing.T) {
+	h, _ := newTestServer(t)
+	doc := SubnetsDoc{Subnets: []SubnetDoc{{Name: "office", CIDR: "10.0.0.0/24"}}}
+	rec := doJSON(t, h, http.MethodPut, "/api/subnets", doc)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 (dmz still referenced by n-dmz), got status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPutTopology_RejectsUnknownSubnetInNetwork(t *testing.T) {
+	h, _ := newTestServer(t)
+	doc := TopologyDoc{
+		Devices:  []DeviceDoc{{Name: "r1", Kind: "router"}},
+		Links:    []LinkDoc{},
+		Networks: []NetworkDoc{{Name: "n1", Subnets: []string{"ghost"}}},
+	}
+	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
@@ -86,8 +150,9 @@ func TestPutTopology_Valid(t *testing.T) {
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}},
 		Links:   []LinkDoc{},
-		Subnets: []SubnetDoc{},
-		Zones:   []ZoneDoc{},
+		Networks: []NetworkDoc{
+			{Name: "n1", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1", Interface: "lan0"}}},
+		},
 	}
 	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
 	if rec.Code != http.StatusOK {
@@ -111,8 +176,7 @@ func TestPutTopology_RejectsSelfLoopLink(t *testing.T) {
 		Links: []LinkDoc{
 			{A: EndpointDoc{Device: "r1", Interface: "a0"}, B: EndpointDoc{Device: "r1", Interface: "a0"}},
 		},
-		Subnets: []SubnetDoc{},
-		Zones:   []ZoneDoc{},
+		Networks: []NetworkDoc{},
 	}
 	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
 	if rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {

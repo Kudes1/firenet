@@ -13,7 +13,7 @@ import (
 )
 
 func newServeCmd() *cobra.Command {
-	var topologyPath, rulesPath, addr string
+	var topologyPath, subnetsPath, rulesPath, addr string
 	var openBrowser bool
 
 	cmd := &cobra.Command{
@@ -24,6 +24,7 @@ func newServeCmd() *cobra.Command {
 
 			store := httpapi.FileProjectStore{
 				TopologyPath: topologyPath,
+				SubnetsPath:  subnetsPath,
 				RulesPath:    rulesPath,
 				LayoutPath:   filepath.Join(filepath.Dir(topologyPath), ".firenet-layout.json"),
 			}
@@ -32,7 +33,7 @@ func newServeCmd() *cobra.Command {
 			}
 
 			srv := httpapi.NewServer(store, log)
-			log.Info("serving firenet web UI", "addr", addr, "topology", topologyPath, "rules", rulesPath)
+			log.Info("serving firenet web UI", "addr", addr, "topology", topologyPath, "subnets", subnetsPath, "rules", rulesPath)
 
 			if openBrowser {
 				go openURL("http://" + addr)
@@ -42,6 +43,7 @@ func newServeCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&topologyPath, "topology", "topology.yaml", "path to topology YAML file")
+	cmd.Flags().StringVar(&subnetsPath, "subnets", "subnets.yaml", "path to subnets YAML file")
 	cmd.Flags().StringVar(&rulesPath, "rules", "rules.yaml", "path to rules YAML file")
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:8787", "address to listen on")
 	cmd.Flags().BoolVar(&openBrowser, "open", false, "open the UI in a browser on start")

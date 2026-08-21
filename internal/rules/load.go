@@ -9,6 +9,7 @@ import (
 
 type yamlRule struct {
 	Name     string   `yaml:"name"`
+	Comment  string   `yaml:"comment,omitempty"`
 	Src      []string `yaml:"src"`
 	Dst      []string `yaml:"dst"`
 	Proto    string   `yaml:"proto"`
@@ -56,6 +57,7 @@ func Load(r io.Reader) (*Policy, error) {
 		}
 		pol.Rules = append(pol.Rules, Rule{
 			Name:     r.Name,
+			Comment:  r.Comment,
 			Src:      r.Src,
 			Dst:      r.Dst,
 			Proto:    proto,

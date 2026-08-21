@@ -7,27 +7,28 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kudes1/firenet/internal/app"
 	"github.com/kudes1/firenet/internal/rules"
-	"github.com/kudes1/firenet/internal/topology"
 )
 
 func newValidateCmd() *cobra.Command {
-	var topologyPath, rulesPath string
+	var topologyPath, subnetsPath, rulesPath string
 
 	cmd := &cobra.Command{
 		Use:   "validate",
-		Short: "Validate topology and rules files without compiling",
+		Short: "Validate topology, subnets and rules files without compiling",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			topoYAML, err := os.ReadFile(topologyPath)
 			if err != nil {
 				return fmt.Errorf("read topology file: %w", err)
 			}
-			topo, err := topology.Load(bytes.NewReader(topoYAML))
+			subnetsYAML, err := os.ReadFile(subnetsPath)
 			if err != nil {
-				return fmt.Errorf("load topology: %w", err)
+				return fmt.Errorf("read subnets file: %w", err)
 			}
-			if err := topo.Validate(); err != nil {
-				return fmt.Errorf("invalid topology: %w", err)
+			topo, err := app.LoadProject(topoYAML, subnetsYAML)
+			if err != nil {
+				return err
 			}
 
 			rulesYAML, err := os.ReadFile(rulesPath)
@@ -48,8 +49,10 @@ func newValidateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&topologyPath, "topology", "", "path to topology YAML file (required)")
+	cmd.Flags().StringVar(&subnetsPath, "subnets", "", "path to subnets YAML file (required)")
 	cmd.Flags().StringVar(&rulesPath, "rules", "", "path to rules YAML file (required)")
 	_ = cmd.MarkFlagRequired("topology")
+	_ = cmd.MarkFlagRequired("subnets")
 	_ = cmd.MarkFlagRequired("rules")
 
 	return cmd

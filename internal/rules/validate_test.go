@@ -18,10 +18,10 @@ func testTopology(t *testing.T) *topology.Topology {
 			"r1": {Name: "r1", Kind: topology.DeviceRouter},
 		},
 		Subnets: map[string]topology.Subnet{
-			"office": {Name: "office", CIDR: prefix, AttachedTo: []topology.Endpoint{{Device: "r1", Interface: "lan0"}}},
+			"office": {Name: "office", CIDR: prefix},
 		},
-		Zones: map[string]topology.Zone{
-			"internal": {Name: "internal", Subnets: []string{"office"}},
+		Networks: map[string]topology.Network{
+			"internal": {Name: "internal", Subnets: []string{"office"}, Attach: []topology.Endpoint{{Device: "r1", Interface: "lan0"}}},
 		},
 	}
 }
@@ -37,7 +37,7 @@ func TestValidate_OK(t *testing.T) {
 	}
 }
 
-func TestValidate_ZoneEndpointOK(t *testing.T) {
+func TestValidate_NetworkEndpointOK(t *testing.T) {
 	r := baseRule()
 	r.Src = []string{"internal"}
 	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
@@ -105,6 +105,7 @@ func TestValidate_PortSpecs(t *testing.T) {
 		{"0", true},
 		{"70000", true},
 		{"2000-1000", true},
+		{"80-80", true},
 		{"abc", true},
 	}
 	for _, c := range cases {

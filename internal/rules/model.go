@@ -42,6 +42,7 @@ const DefaultChainName = "FIRENET-FWD"
 // OR-lists: any name in Src combined with any name in Dst matches.
 type Rule struct {
 	Name     string
+	Comment  string // free-form description rendered into iptables --comment; falls back to Name
 	Src      []string
 	Dst      []string
 	Proto    Proto

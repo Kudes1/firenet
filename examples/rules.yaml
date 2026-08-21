@@ -1,5 +1,6 @@
 # Правила читаются сверху вниз, первое совпадение побеждает (как в iptables).
-# Имена src/dst — это подсети или зоны из topology.yaml, либо зарезервированное "any".
+# Имена src/dst — это подсети или сети из topology.yaml/subnets.yaml, либо
+# зарезервированное "any".
 
 defaultAction: deny
 
@@ -18,10 +19,10 @@ rules:
     dst: [dmz-db]
     action: deny
 
-  # весь dmz (composable-зона из dmz-web + dmz-db) не может инициировать
-  # соединения обратно в office
+  # весь dmz не может инициировать соединения обратно в office
+  # (OR-список: правило развернётся в комбинации src×dst)
   - name: dmz-to-office-deny
-    src: [dmz]
+    src: [dmz-web, dmz-db]
     dst: [office-lan]
     action: deny
 

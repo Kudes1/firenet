@@ -17,6 +17,11 @@ func (h *handlers) uiCompile(w http.ResponseWriter, r *http.Request) {
 		h.renderCompileResults(w, compileView{Error: "Ошибка чтения топологии: " + err.Error()})
 		return
 	}
+	subnetsRaw, err := h.readStoredSubnets()
+	if err != nil {
+		h.renderCompileResults(w, compileView{Error: "Ошибка чтения подсетей: " + err.Error()})
+		return
+	}
 	rulesRaw, err := h.store.ReadRules()
 	if err != nil {
 		h.renderCompileResults(w, compileView{Error: "Ошибка чтения правил: " + err.Error()})
@@ -24,6 +29,7 @@ func (h *handlers) uiCompile(w http.ResponseWriter, r *http.Request) {
 	}
 	devices, err := app.Compile(r.Context(), h.log, app.CompileOptions{
 		TopologyYAML: topoRaw,
+		SubnetsYAML:  subnetsRaw,
 		RulesYAML:    rulesRaw,
 	})
 	if err != nil {

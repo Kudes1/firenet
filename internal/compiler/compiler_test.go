@@ -29,18 +29,17 @@ func redundantTopology(t *testing.T) *topology.Topology {
 			"r3": {Name: "r3", Kind: topology.DeviceRouter},
 		},
 		Subnets: map[string]topology.Subnet{
-			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24"), AttachedTo: []topology.Endpoint{
-				{Device: "r1", Interface: "a0"}, {Device: "r2", Interface: "a0"},
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
+			"C": {Name: "C", CIDR: prefix(t, "10.0.2.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"ab": {Name: "ab", Subnets: []string{"A", "B"}, Attach: []topology.Endpoint{
+				{Device: "r1", Interface: "ab0"}, {Device: "r2", Interface: "ab0"},
 			}},
-			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24"), AttachedTo: []topology.Endpoint{
-				{Device: "r1", Interface: "b0"}, {Device: "r2", Interface: "b0"},
-			}},
-			"C": {Name: "C", CIDR: prefix(t, "10.0.2.0/24"), AttachedTo: []topology.Endpoint{
+			"nC": {Name: "nC", Subnets: []string{"C"}, Attach: []topology.Endpoint{
 				{Device: "r3", Interface: "c0"},
 			}},
-		},
-		Zones: map[string]topology.Zone{
-			"ab": {Name: "ab", Subnets: []string{"A", "B"}},
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -105,7 +104,7 @@ func TestCompile_PlacesOnBothRedundantRouters(t *testing.T) {
 	requireNoDevice(t, out, "r3")
 }
 
-func TestCompile_ZoneExpandsToMembers(t *testing.T) {
+func TestCompile_NetworkExpandsToMembers(t *testing.T) {
 	topo := redundantTopology(t)
 	pol := &rules.Policy{
 		DefaultAction: rules.ActionDeny,
@@ -191,6 +190,46 @@ func TestCompile_DedupIdenticalRules(t *testing.T) {
 	d := deviceOf(t, out, "r1")
 	if len(d.Rules) != 1 {
 		t.Fatalf("got %d rules, want 1 after dedup", len(d.Rules))
+	}
+}
+
+func TestCompile_CommentPrefersCommentOverName(t *testing.T) {
+	topo := redundantTopology(t)
+	pol := &rules.Policy{
+		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
+		Rules: []rules.Rule{
+			{Name: "named", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoAny, Action: rules.ActionAllow},
+			{Name: "described", Comment: "доступ к БД", Src: []string{"B"}, Dst: []string{"A"}, Proto: rules.ProtoTCP, DstPorts: []string{"5432"}, Action: rules.ActionDeny},
+		},
+	}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	d := deviceOf(t, out, "r1")
+	var named, described *CompiledRule
+	for i := range d.Rules {
+		switch d.Rules[i].Comment {
+		case "named":
+			named = &d.Rules[i]
+		case "доступ к БД":
+			described = &d.Rules[i]
+		}
+	}
+	if named == nil {
+		t.Fatalf("rule without comment must fall back to its name in --comment")
+	}
+	if described == nil {
+		t.Fatalf("rule comment must reach CompiledRule.Comment, got rules: %+v", d.Rules)
 	}
 }
 

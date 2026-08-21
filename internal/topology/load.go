@@ -23,26 +23,29 @@ type yamlDevice struct {
 	Kind string `yaml:"kind"`
 }
 
-type yamlSubnet struct {
-	Name   string         `yaml:"name"`
-	CIDR   string         `yaml:"cidr"`
-	Attach []yamlEndpoint `yaml:"attach"`
-}
-
-type yamlZone struct {
-	Name    string   `yaml:"name"`
-	Subnets []string `yaml:"subnets"`
-	Zones   []string `yaml:"zones"`
+type yamlNetwork struct {
+	Name    string         `yaml:"name"`
+	Subnets []string       `yaml:"subnets"`
+	Attach  []yamlEndpoint `yaml:"attach"`
 }
 
 type yamlTopology struct {
-	Devices []yamlDevice `yaml:"devices"`
-	Links   []yamlLink   `yaml:"links"`
-	Subnets []yamlSubnet `yaml:"subnets"`
-	Zones   []yamlZone   `yaml:"zones"`
+	Devices  []yamlDevice  `yaml:"devices"`
+	Links    []yamlLink    `yaml:"links"`
+	Networks []yamlNetwork `yaml:"networks"`
 }
 
-// Load decodes a topology.yaml document. It does not call Validate.
+type yamlSubnetDoc struct {
+	Subnets []yamlSubnet `yaml:"subnets"`
+}
+
+type yamlSubnet struct {
+	Name string `yaml:"name"`
+	CIDR string `yaml:"cidr"`
+}
+
+// Load decodes a topology.yaml document (devices, links, networks).
+// It does not call Validate.
 func Load(r io.Reader) (*Topology, error) {
 	dec := yaml.NewDecoder(r)
 	dec.KnownFields(true)
@@ -52,9 +55,8 @@ func Load(r io.Reader) (*Topology, error) {
 	}
 
 	topo := &Topology{
-		Devices: make(map[string]Device, len(raw.Devices)),
-		Subnets: make(map[string]Subnet, len(raw.Subnets)),
-		Zones:   make(map[string]Zone, len(raw.Zones)),
+		Devices:  make(map[string]Device, len(raw.Devices)),
+		Networks: make(map[string]Network, len(raw.Networks)),
 	}
 
 	for _, d := range raw.Devices {
@@ -75,27 +77,39 @@ func Load(r io.Reader) (*Topology, error) {
 		})
 	}
 
+	for _, n := range raw.Networks {
+		if _, exists := topo.Networks[n.Name]; exists {
+			return nil, fmt.Errorf("duplicate network name %q", n.Name)
+		}
+		attach := make([]Endpoint, 0, len(n.Attach))
+		for _, a := range n.Attach {
+			attach = append(attach, Endpoint{Device: a.Device, Interface: a.Interface})
+		}
+		topo.Networks[n.Name] = Network{Name: n.Name, Subnets: n.Subnets, Attach: attach}
+	}
+
+	return topo, nil
+}
+
+// LoadSubnets decodes a subnets.yaml document. It does not call Validate.
+func LoadSubnets(r io.Reader) (map[string]Subnet, error) {
+	dec := yaml.NewDecoder(r)
+	dec.KnownFields(true)
+	var raw yamlSubnetDoc
+	if err := dec.Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode subnets yaml: %w", err)
+	}
+
+	subnets := make(map[string]Subnet, len(raw.Subnets))
 	for _, s := range raw.Subnets {
 		prefix, err := netip.ParsePrefix(s.CIDR)
 		if err != nil {
 			return nil, fmt.Errorf("subnet %q: invalid cidr %q: %w", s.Name, s.CIDR, err)
 		}
-		if _, exists := topo.Subnets[s.Name]; exists {
+		if _, exists := subnets[s.Name]; exists {
 			return nil, fmt.Errorf("duplicate subnet name %q", s.Name)
 		}
-		attach := make([]Endpoint, 0, len(s.Attach))
-		for _, a := range s.Attach {
-			attach = append(attach, Endpoint{Device: a.Device, Interface: a.Interface})
-		}
-		topo.Subnets[s.Name] = Subnet{Name: s.Name, CIDR: prefix, AttachedTo: attach}
+		subnets[s.Name] = Subnet{Name: s.Name, CIDR: prefix}
 	}
-
-	for _, z := range raw.Zones {
-		if _, exists := topo.Zones[z.Name]; exists {
-			return nil, fmt.Errorf("duplicate zone name %q", z.Name)
-		}
-		topo.Zones[z.Name] = Zone{Name: z.Name, Subnets: z.Subnets, Zones: z.Zones}
-	}
-
-	return topo, nil
+	return subnets, nil
 }

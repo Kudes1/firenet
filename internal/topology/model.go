@@ -1,6 +1,6 @@
 // Package topology models the logical network: devices, the connections
-// between them, and the subnets attached to them. It knows nothing about
-// filtering policy.
+// between them, subnets, and networks (named subnet groups) attached to
+// them. It knows nothing about filtering policy.
 package topology
 
 import "net/netip"
@@ -34,27 +34,26 @@ type Link struct {
 	A, B Endpoint
 }
 
-// Subnet is a named CIDR block, attached to one or more devices (more than
-// one for HA gateways, or a switch for hosts wired directly to a shared
-// segment).
+// Subnet is a named CIDR block. It carries no attachment of its own: where
+// it lives on the wire is defined by the Network that contains it.
 type Subnet struct {
-	Name       string
-	CIDR       netip.Prefix
-	AttachedTo []Endpoint
+	Name string
+	CIDR netip.Prefix
 }
 
-// Zone groups subnets and/or other zones under one name for use in rules.
-type Zone struct {
+// Network is one L2 segment: an attachment to one or more devices plus the
+// named list of member subnets (which becomes one ipset at compile time).
+type Network struct {
 	Name    string
 	Subnets []string
-	Zones   []string
+	Attach  []Endpoint
 }
 
 // Topology is the full declared network: devices, their links, and the
-// subnets/zones layered on top.
+// subnets/networks layered on top.
 type Topology struct {
-	Devices map[string]Device
-	Links   []Link
-	Subnets map[string]Subnet
-	Zones   map[string]Zone
+	Devices  map[string]Device
+	Links    []Link
+	Subnets  map[string]Subnet
+	Networks map[string]Network
 }
