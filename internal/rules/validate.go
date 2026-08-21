@@ -2,17 +2,28 @@ package rules
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/kudes1/firenet/internal/topology"
 )
 
+// chainNameRE matches iptables' own constraints on a user-defined chain
+// name, with a small safety margin under the kernel's 29-byte limit.
+var chainNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,28}$`)
+
 // Validate checks that every rule references a real subnet/zone (or Any),
 // uses a valid proto/action, and only carries ports for tcp/udp.
 func (p *Policy) Validate(topo *topology.Topology) error {
 	if p.DefaultAction != ActionAllow && p.DefaultAction != ActionDeny {
 		return fmt.Errorf("invalid defaultAction %q", p.DefaultAction)
+	}
+	if !chainNameRE.MatchString(p.ChainName) {
+		return fmt.Errorf("invalid chainName %q", p.ChainName)
+	}
+	if p.ChainPosition != ChainTop && p.ChainPosition != ChainBottom {
+		return fmt.Errorf("invalid chainPosition %q", p.ChainPosition)
 	}
 
 	seen := make(map[string]struct{}, len(p.Rules))

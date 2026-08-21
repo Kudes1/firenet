@@ -24,6 +24,14 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/layout", h.getLayout)
 	mux.HandleFunc("PUT /api/layout", h.putLayout)
 
+	mux.HandleFunc("GET /ui/rules", h.uiRules)
+	mux.HandleFunc("POST /ui/rules/add", h.uiRulesAdd)
+	mux.HandleFunc("POST /ui/rules/{index}/delete", h.uiRulesDelete)
+	mux.HandleFunc("POST /ui/rules/{index}/move-up", h.uiRulesMove(-1))
+	mux.HandleFunc("POST /ui/rules/{index}/move-down", h.uiRulesMove(1))
+	mux.HandleFunc("POST /ui/rules/save", h.uiRulesSave)
+	mux.HandleFunc("POST /ui/compile", h.uiCompile)
+
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {
 		panic(err) // embedded at build time; can't fail at runtime

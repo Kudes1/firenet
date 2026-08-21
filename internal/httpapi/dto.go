@@ -65,5 +65,7 @@ type RuleDoc struct {
 // PolicyDoc is the full wire shape of rules.yaml.
 type PolicyDoc struct {
 	DefaultAction string    `json:"defaultAction" yaml:"defaultAction"`
+	ChainName     string    `json:"chainName,omitempty" yaml:"chainName,omitempty"`
+	ChainPosition string    `json:"chainPosition,omitempty" yaml:"chainPosition,omitempty"`
 	Rules         []RuleDoc `json:"rules" yaml:"rules"`
 }

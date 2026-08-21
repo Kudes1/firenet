@@ -3,20 +3,60 @@
 <head>
 <meta charset="utf-8">
 <title>firenet</title>
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem("firenet-theme");
+      if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+    } catch (e) {}
+  })();
+</script>
 <link rel="stylesheet" href="/style.css">
+<script>
+  function appData() {
+    return {
+      activeTab: 'topology',
+      theme: localStorage.getItem('firenet-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+      banner: { show: false, message: '', kind: 'error', timer: null },
+      toggleTheme() {
+        this.theme = this.theme === 'dark' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = this.theme;
+        localStorage.setItem('firenet-theme', this.theme);
+      },
+      showBanner(message, kind) {
+        this.banner.message = message;
+        this.banner.kind = kind || 'error';
+        this.banner.show = true;
+        clearTimeout(this.banner.timer);
+        this.banner.timer = setTimeout(() => {
+          this.banner.show = false;
+        }, 6000);
+      }
+    };
+  }
+</script>
 </head>
-<body>
+<body x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
 <header>
   <strong>firenet</strong>
   <nav class="tabs">
-    <button data-tab="topology" class="active">Топология</button>
-    <button data-tab="rules">Правила</button>
-    <button data-tab="compile">Компиляция</button>
+    <button type="button" :class="{ active: activeTab === 'topology' }" @click="activeTab = 'topology'">Топология</button>
+    <button type="button" :class="{ active: activeTab === 'rules' }" @click="activeTab = 'rules'">Правила</button>
+    <button type="button" :class="{ active: activeTab === 'compile' }" @click="activeTab = 'compile'">Компиляция</button>
   </nav>
+  <button id="theme-toggle" class="theme-toggle" type="button" @click="toggleTheme()" title="Переключить тему" aria-label="Переключить тему">
+    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="4"></circle>
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+    </svg>
+    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+    </svg>
+  </button>
 </header>
 
 <main>
-  <section id="tab-topology" class="tab-panel">
+  <section id="tab-topology" class="tab-panel" x-show="activeTab === 'topology'">
     <div class="topology-layout">
       <aside class="sidebar">
         <div class="panel">
@@ -55,47 +95,23 @@
     </div>
   </section>
 
-  <section id="tab-rules" class="tab-panel" hidden>
-    <div class="rules-toolbar">
-      <label>Действие по умолчанию:
-        <select id="default-action">
-          <option value="deny">deny</option>
-          <option value="allow">allow</option>
-        </select>
-      </label>
-      <button id="add-rule">+ правило</button>
-      <button id="rules-save" class="primary">Сохранить правила</button>
-    </div>
-    <table id="rules-table">
-      <thead>
-        <tr>
-          <th></th>
-          <th>Имя</th>
-          <th>Src</th>
-          <th>Dst</th>
-          <th>Proto</th>
-          <th>Src Ports</th>
-          <th>Dst Ports</th>
-          <th>Action</th>
-          <th>Зеркало</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="rules-tbody"></tbody>
-    </table>
+  <section id="tab-rules" class="tab-panel" x-show="activeTab === 'rules'" x-cloak>
+    <div id="rules-panel" hx-get="/ui/rules" hx-trigger="load" hx-swap="outerHTML"></div>
   </section>
 
-  <section id="tab-compile" class="tab-panel" hidden>
-    <button id="compile-run" class="primary">Скомпилировать</button>
+  <section id="tab-compile" class="tab-panel" x-show="activeTab === 'compile'" x-cloak>
+    <div style="margin-bottom: var(--space-3);">
+      <button id="compile-run" class="primary" hx-post="/ui/compile" hx-target="#compile-output" hx-swap="innerHTML">Скомпилировать</button>
+    </div>
     <div id="compile-output"></div>
   </section>
 </main>
 
-<div id="error-banner" class="banner" hidden></div>
+<div id="error-banner" class="banner" :class="banner.kind" x-show="banner.show" x-text="banner.message" x-cloak></div>
 
-<script src="/app.js"></script>
+<script src="/htmx.min.js"></script>
+<script src="/alpine.min.js" defer></script>
 <script src="/topology.js"></script>
 <script src="/rules.js"></script>
-<script src="/compile.js"></script>
 </body>
 </html>

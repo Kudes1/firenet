@@ -90,41 +90,46 @@ func (h *handlers) putRules(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
 		return
 	}
+	invalid, err := h.validateAndPersistRules(doc)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if invalid {
+			status = http.StatusUnprocessableEntity
+		}
+		writeError(w, status, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
 
+// validateAndPersistRules validates doc against the stored topology and, on
+// success, persists it. invalid reports whether a failure is the caller's
+// fault (422-worthy) as opposed to a server-side problem (500-worthy).
+func (h *handlers) validateAndPersistRules(doc PolicyDoc) (invalid bool, err error) {
 	topoRaw, err := h.store.ReadTopology()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return false, err
 	}
 	topo, err := topology.Load(bytes.NewReader(topoRaw))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("load stored topology: %w", err))
-		return
+		return false, fmt.Errorf("load stored topology: %w", err)
 	}
 	if err := topo.Validate(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("stored topology is invalid: %w", err))
-		return
+		return false, fmt.Errorf("stored topology is invalid: %w", err)
 	}
 
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return false, err
 	}
 	pol, err := rules.Load(bytes.NewReader(raw))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return true, err
 	}
 	if err := pol.Validate(topo); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err)
-		return
+		return true, err
 	}
-	if err := h.store.WriteRules(raw); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, doc)
+	return false, h.store.WriteRules(raw)
 }
 
 func (h *handlers) validate(w http.ResponseWriter, r *http.Request) {

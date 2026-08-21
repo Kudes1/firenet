@@ -26,10 +26,13 @@ type CompiledRule struct {
 }
 
 // DeviceRuleset is everything one managed device needs: its ipsets and its
-// ordered rules, plus the policy default to apply when nothing matches.
+// ordered rules, the policy default to apply when nothing matches, and
+// where/how firenet's own chain is wired into FORWARD.
 type DeviceRuleset struct {
 	Device        string
 	IPSets        []IPSet
 	Rules         []CompiledRule
 	DefaultAction rules.Action
+	ChainName     string
+	ChainPosition rules.ChainPosition
 }

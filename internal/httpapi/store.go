@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/kudes1/firenet/internal/rules"
 )
 
 // ProjectStore is the persistence seam between the HTTP API and where a
@@ -69,7 +71,12 @@ func emptyTopologyYAML() []byte {
 }
 
 func emptyPolicyYAML() []byte {
-	b, err := yaml.Marshal(PolicyDoc{DefaultAction: "deny", Rules: []RuleDoc{}})
+	b, err := yaml.Marshal(PolicyDoc{
+		DefaultAction: "deny",
+		ChainName:     rules.DefaultChainName,
+		ChainPosition: string(rules.ChainTop),
+		Rules:         []RuleDoc{},
+	})
 	if err != nil {
 		panic(err) // static value, can't fail
 	}

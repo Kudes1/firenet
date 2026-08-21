@@ -1,9 +1,11 @@
 // Package graph derives a router/subnet reachability graph from a topology,
-// collapsing switches (which exist only for L2 connectivity) into virtual
-// direct edges, and finds the paths policy rules need for placement.
+// representing each switch as a single L2-domain bus node, and finds the
+// paths policy rules need for placement.
 package graph
 
 import (
+	"fmt"
+
 	"github.com/kudes1/firenet/internal/topology"
 )
 
@@ -12,10 +14,16 @@ type NodeKind int
 const (
 	NodeRouter NodeKind = iota
 	NodeSubnet
+	// NodeDomain is a synthetic node standing in for one switch L2 domain.
+	// It lets two devices sharing a switch reach each other in exactly one
+	// hop without a simple path being able to detour through a third,
+	// unrelated device on the same domain (a bus node can't be revisited).
+	NodeDomain
 )
 
-// Node is one vertex of the graph: a managed router or a named subnet.
-// Switches never appear here — they are collapsed away in Build.
+// Node is one vertex of the graph: a managed router, a named subnet, or a
+// synthetic L2-domain bus. Switches themselves never appear as devices here
+// — each switch L2 domain is represented by one NodeDomain bus in Build.
 type Node struct {
 	Kind NodeKind
 	Name string
@@ -23,12 +31,17 @@ type Node struct {
 
 func RouterNode(name string) Node { return Node{Kind: NodeRouter, Name: name} }
 func SubnetNode(name string) Node { return Node{Kind: NodeSubnet, Name: name} }
+func domainNode(id int) Node      { return Node{Kind: NodeDomain, Name: fmt.Sprintf("l2-%d", id)} }
 
 func (n Node) String() string {
-	if n.Kind == NodeRouter {
+	switch n.Kind {
+	case NodeRouter:
 		return "router:" + n.Name
+	case NodeDomain:
+		return "domain:" + n.Name
+	default:
+		return "subnet:" + n.Name
 	}
-	return "subnet:" + n.Name
 }
 
 // Edge is a directed graph edge, annotated with the interface used on the
@@ -114,15 +127,13 @@ func Build(topo *topology.Topology) (*Graph, error) {
 		}
 	}
 
-	for _, points := range domainPoints {
-		for i := 0; i < len(points); i++ {
-			for j := i + 1; j < len(points); j++ {
-				p1, p2 := points[i], points[j]
-				if p1.node.Kind == NodeSubnet && p2.node.Kind == NodeSubnet {
-					continue // hosts on the same L2 segment don't transit a managed router
-				}
-				g.addUndirected(p1.node, p2.node, p1.iface, p2.iface)
-			}
+	for id, points := range domainPoints {
+		if len(points) < 2 {
+			continue // nothing on the other side of this switch to reach
+		}
+		bus := domainNode(id)
+		for _, p := range points {
+			g.addUndirected(p.node, bus, p.iface, "")
 		}
 	}
 

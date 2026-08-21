@@ -20,6 +20,8 @@ type yamlRule struct {
 
 type yamlPolicy struct {
 	DefaultAction string     `yaml:"defaultAction"`
+	ChainName     string     `yaml:"chainName,omitempty"`
+	ChainPosition string     `yaml:"chainPosition,omitempty"`
 	Rules         []yamlRule `yaml:"rules"`
 }
 
@@ -32,9 +34,19 @@ func Load(r io.Reader) (*Policy, error) {
 		return nil, fmt.Errorf("decode rules yaml: %w", err)
 	}
 
-	pol := &Policy{DefaultAction: Action(raw.DefaultAction)}
+	pol := &Policy{
+		DefaultAction: Action(raw.DefaultAction),
+		ChainName:     raw.ChainName,
+		ChainPosition: ChainPosition(raw.ChainPosition),
+	}
 	if pol.DefaultAction == "" {
 		pol.DefaultAction = ActionDeny
+	}
+	if pol.ChainName == "" {
+		pol.ChainName = DefaultChainName
+	}
+	if pol.ChainPosition == "" {
+		pol.ChainPosition = ChainTop
 	}
 
 	for _, r := range raw.Rules {

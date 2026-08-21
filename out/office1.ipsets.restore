@@ -1,0 +1,4 @@
+create fn_bf28cd64 hash:net -exist
+add fn_bf28cd64 10.10.10.0/24
+create fn_64f45168 hash:net -exist
+add fn_64f45168 192.168.1.0/24

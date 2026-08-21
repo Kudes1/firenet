@@ -23,6 +23,21 @@ const (
 // Any is the reserved src/dst name matching every network unconditionally.
 const Any = "any"
 
+// ChainPosition controls where firenet's jump into its own chain is placed
+// relative to whatever else already lives in FORWARD.
+type ChainPosition string
+
+const (
+	// ChainTop puts firenet's rules ahead of anything else in FORWARD.
+	ChainTop ChainPosition = "top"
+	// ChainBottom makes firenet's rules a fallback, evaluated only after
+	// whatever the device administrator manages directly in FORWARD.
+	ChainBottom ChainPosition = "bottom"
+)
+
+// DefaultChainName is used when a policy doesn't set ChainName.
+const DefaultChainName = "FIRENET-FWD"
+
 // Rule matches traffic between named subnets/zones (or Any). Src/Dst are
 // OR-lists: any name in Src combined with any name in Dst matches.
 type Rule struct {
@@ -40,5 +55,7 @@ type Rule struct {
 // matches.
 type Policy struct {
 	DefaultAction Action
-	Rules         []Rule // priority order: first match wins, like iptables
+	ChainName     string        // iptables chain firenet owns; "" defaults to DefaultChainName
+	ChainPosition ChainPosition // where the jump into ChainName is placed in FORWARD
+	Rules         []Rule        // priority order: first match wins, like iptables
 }

@@ -31,6 +31,8 @@ func TestRenderRules_StructureAndOrder(t *testing.T) {
 			{Comment: "allow-https", SrcSet: "fn_a", DstSet: "fn_b", Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 		},
 		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
 	}
 	out := string(RenderRules(ds))
 
@@ -61,15 +63,60 @@ func TestRenderRules_SrcAndDstPorts(t *testing.T) {
 		Rules: []compiler.CompiledRule{
 			{Comment: "reverse-https", SrcSet: "fn_b", DstSet: "fn_a", Proto: rules.ProtoTCP, SrcPorts: []string{"443"}, Action: rules.ActionAllow},
 			{Comment: "both-sides", Proto: rules.ProtoTCP, SrcPorts: []string{"1024-65535"}, DstPorts: []string{"80", "443"}, Action: rules.ActionAllow},
+			{Comment: "dst-range", Proto: rules.ProtoUDP, DstPorts: []string{"5000-5010"}, Action: rules.ActionAllow},
 		},
 		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
 	}
 	out := string(RenderRules(ds))
 
 	if !strings.Contains(out, "-p tcp -m multiport --sports 443") {
 		t.Fatalf("missing src-port-only match:\n%s", out)
 	}
-	if !strings.Contains(out, "-p tcp -m multiport --sports 1024-65535 -m multiport --dports 80,443") {
+	if !strings.Contains(out, "-p tcp -m multiport --sports 1024:65535 -m multiport --dports 80,443") {
 		t.Fatalf("missing combined src+dst port match:\n%s", out)
+	}
+	if !strings.Contains(out, "-p udp -m multiport --dports 5000:5010") {
+		t.Fatalf("missing dst-port range match:\n%s", out)
+	}
+}
+
+func TestRenderRules_ChainPositionTop(t *testing.T) {
+	ds := compiler.DeviceRuleset{Device: "r1", DefaultAction: rules.ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: rules.ChainTop}
+	out := string(RenderRules(ds))
+	if !strings.Contains(out, "iptables -I FORWARD -j FIRENET-FWD") {
+		t.Fatalf("expected -I FORWARD jump for top position:\n%s", out)
+	}
+	if strings.Contains(out, "-A FORWARD -j FIRENET-FWD") {
+		t.Fatalf("did not expect -A FORWARD jump for top position:\n%s", out)
+	}
+}
+
+func TestRenderRules_ChainPositionBottom(t *testing.T) {
+	ds := compiler.DeviceRuleset{Device: "r1", DefaultAction: rules.ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: rules.ChainBottom}
+	out := string(RenderRules(ds))
+	if !strings.Contains(out, "iptables -A FORWARD -j FIRENET-FWD") {
+		t.Fatalf("expected -A FORWARD jump for bottom position:\n%s", out)
+	}
+	if strings.Contains(out, "-I FORWARD -j FIRENET-FWD") {
+		t.Fatalf("did not expect -I FORWARD jump for bottom position:\n%s", out)
+	}
+}
+
+func TestRenderRules_CustomChainName(t *testing.T) {
+	ds := compiler.DeviceRuleset{
+		Device:        "r1",
+		Rules:         []compiler.CompiledRule{{Comment: "allow-https", Action: rules.ActionAllow}},
+		DefaultAction: rules.ActionDeny,
+		ChainName:     "MY-CHAIN",
+		ChainPosition: rules.ChainTop,
+	}
+	out := string(RenderRules(ds))
+	if strings.Contains(out, "FIRENET-FWD") {
+		t.Fatalf("expected default chain name not to appear when a custom one is set:\n%s", out)
+	}
+	if !strings.Contains(out, "iptables -N MY-CHAIN") || !strings.Contains(out, "iptables -I FORWARD -j MY-CHAIN") {
+		t.Fatalf("expected custom chain name throughout the script:\n%s", out)
 	}
 }

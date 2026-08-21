@@ -1,5 +1,59 @@
 "use strict";
 
+const State = {
+  topology: { devices: [], links: [], subnets: [], zones: [] },
+  layout: { devices: {}, subnets: {} },
+};
+
+function showBanner(message, kind) {
+  window.dispatchEvent(new CustomEvent("notify", { detail: { message, kind: kind || "error" } }));
+}
+
+window.downloadText = function (filename, content) {
+  const blob = new Blob([content], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const tmp = document.createElement("a");
+  tmp.href = url;
+  tmp.download = filename;
+  tmp.click();
+  URL.revokeObjectURL(url);
+};
+
+const Api = {
+  async get(path) {
+    const res = await fetch(path);
+    if (!res.ok) throw await apiError(res);
+    return res.json();
+  },
+  async put(path, body) {
+    const res = await fetch(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await apiError(res);
+    return res.status === 204 ? null : res.json();
+  },
+  async post(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) throw await apiError(res);
+    return res.status === 204 ? null : res.json();
+  },
+};
+
+async function apiError(res) {
+  try {
+    const data = await res.json();
+    return new Error(data.error || `HTTP ${res.status}`);
+  } catch {
+    return new Error(`HTTP ${res.status}`);
+  }
+}
+
 // Topology renders devices/subnets/links as an SVG canvas the user builds
 // the network on directly, instead of hand-editing {device, interface}
 // pairs in YAML. Connections are logical (device-to-device, device-to-
@@ -483,7 +537,10 @@ const Topology = (() => {
         State.topology = await Api.put("/api/topology", State.topology);
         showBanner("Топология сохранена", "ok");
         render();
-        Rules.render();
+        // src/dst pickers on the Rules tab list endpoint names computed from
+        // topology; a rename/removal there needs a fresh render, discarding
+        // any unsaved edits still sitting in the Rules form.
+        htmx.ajax("GET", "/ui/rules", { target: "#rules-panel", swap: "outerHTML" });
       } catch (e) {
         showBanner("Ошибка сохранения топологии: " + e.message);
       }
@@ -502,3 +559,24 @@ const Topology = (() => {
     },
   };
 })();
+
+async function bootTopology() {
+  try {
+    State.topology = await Api.get("/api/topology");
+  } catch (e) {
+    showBanner("Не удалось загрузить топологию: " + e.message);
+  }
+  try {
+    const layout = await Api.get("/api/layout");
+    State.layout = { devices: layout.devices || {}, subnets: layout.subnets || {} };
+  } catch {
+    State.layout = { devices: {}, subnets: {} };
+  }
+  Topology.render();
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", bootTopology);
+} else {
+  bootTopology();
+}

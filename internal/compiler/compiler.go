@@ -100,9 +100,10 @@ func routerNames(topo *topology.Topology) []string {
 }
 
 // Compile resolves every rule's src/dst to subnets, finds the routers that
-// physically need each rule, and returns one ruleset per managed router
-// (routers with no applicable rule still get the conntrack/default-action
-// baseline via DefaultAction, rendered by internal/render).
+// physically need each rule, and returns one ruleset per router that ended
+// up with at least one rule. Routers no rule ever placed on are omitted —
+// there's nothing for internal/render to produce beyond the same
+// conntrack/default-action baseline every device would otherwise repeat.
 func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits graph.Limits) ([]DeviceRuleset, error) {
 	allRouters := routerNames(topo)
 	accum := make(map[string]*deviceAccum, len(allRouters))
@@ -196,11 +197,16 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 	result := make([]DeviceRuleset, 0, len(allRouters))
 	for _, name := range allRouters {
 		a := accum[name]
+		if len(a.rules) == 0 {
+			continue
+		}
 		result = append(result, DeviceRuleset{
 			Device:        name,
 			IPSets:        a.ipsetList(topo),
 			Rules:         a.rules,
 			DefaultAction: pol.DefaultAction,
+			ChainName:     pol.ChainName,
+			ChainPosition: pol.ChainPosition,
 		})
 	}
 	return result, nil

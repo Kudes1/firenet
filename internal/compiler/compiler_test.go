@@ -60,10 +60,21 @@ func deviceOf(t *testing.T, ds []DeviceRuleset, name string) DeviceRuleset {
 	return DeviceRuleset{}
 }
 
+func requireNoDevice(t *testing.T, ds []DeviceRuleset, name string) {
+	t.Helper()
+	for _, d := range ds {
+		if d.Device == name {
+			t.Fatalf("%s: got a ruleset (%d rules), want none — a router with no rules should be omitted entirely", name, len(d.Rules))
+		}
+	}
+}
+
 func TestCompile_PlacesOnBothRedundantRouters(t *testing.T) {
 	topo := redundantTopology(t)
 	pol := &rules.Policy{
 		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "a-to-b-https", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 		},
@@ -90,17 +101,16 @@ func TestCompile_PlacesOnBothRedundantRouters(t *testing.T) {
 		}
 	}
 
-	// r3 is unrelated to A/B traffic and must not receive the rule.
-	r3 := deviceOf(t, out, "r3")
-	if len(r3.Rules) != 0 {
-		t.Fatalf("r3: got %d rules, want 0", len(r3.Rules))
-	}
+	// r3 is unrelated to A/B traffic and must not receive a ruleset at all.
+	requireNoDevice(t, out, "r3")
 }
 
 func TestCompile_ZoneExpandsToMembers(t *testing.T) {
 	topo := redundantTopology(t)
 	pol := &rules.Policy{
 		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "c-to-ab", Src: []string{"C"}, Dst: []string{"ab"}, Proto: rules.ProtoAny, Action: rules.ActionDeny},
 		},
@@ -118,12 +128,9 @@ func TestCompile_ZoneExpandsToMembers(t *testing.T) {
 	}
 
 	// C has no path to A or B in this fixture (r3 is isolated), so the rule
-	// should resolve to zero placements without erroring.
-	for _, name := range []string{"r1", "r2", "r3"} {
-		d := deviceOf(t, out, name)
-		if len(d.Rules) != 0 {
-			t.Fatalf("%s: got %d rules, want 0 (C is unreachable from ab)", name, len(d.Rules))
-		}
+	// resolves to zero placements and no device gets a ruleset at all.
+	if len(out) != 0 {
+		t.Fatalf("got %d devices, want 0 (C is unreachable from ab)", len(out))
 	}
 }
 
@@ -131,6 +138,8 @@ func TestCompile_AnyAnyPlacesOnAllRouters(t *testing.T) {
 	topo := redundantTopology(t)
 	pol := &rules.Policy{
 		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "allow-icmp", Src: []string{rules.Any}, Dst: []string{rules.Any}, Proto: rules.ProtoICMP, Action: rules.ActionAllow},
 		},
@@ -161,6 +170,8 @@ func TestCompile_DedupIdenticalRules(t *testing.T) {
 	topo := redundantTopology(t)
 	pol := &rules.Policy{
 		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "rule-one", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 			{Name: "rule-two", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
@@ -187,6 +198,8 @@ func TestCompile_MirrorExpandsReverseDirection(t *testing.T) {
 	topo := redundantTopology(t)
 	pol := &rules.Policy{
 		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "ab-tcp", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow, Mirror: true},
 		},

@@ -1,0 +1,17 @@
+{{define "compile-results"}}
+{{if .Error}}
+<div class="banner error" style="position: static; margin-bottom: var(--space-3); max-width: none;">{{.Error}}</div>
+{{else}}
+  {{range .Devices}}
+  <div class="compile-device">
+    <h3>{{.Name}}</h3>
+    <button type="button" class="btn-link" onclick="downloadText('{{.Name}}.ipsets.restore', this.nextElementSibling.innerText)">Скачать {{.Name}}.ipsets.restore</button>
+    <pre>{{.IPSetsScript}}</pre>
+    <button type="button" class="btn-link" onclick="downloadText('{{.Name}}.rules.sh', this.nextElementSibling.innerText)">Скачать {{.Name}}.rules.sh</button>
+    <pre>{{.RulesScript}}</pre>
+  </div>
+  {{else}}
+  <p class="hint">Нет устройств для компиляции.</p>
+  {{end}}
+{{end}}
+{{end}}

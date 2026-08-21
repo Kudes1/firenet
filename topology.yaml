@@ -7,6 +7,8 @@ devices:
       kind: switch
     - name: office1
       kind: router
+    - name: zavod
+      kind: router
 links:
     - a:
         device: test1
@@ -20,6 +22,10 @@ links:
         device: core
       b:
         device: office1
+    - a:
+        device: zavod
+      b:
+        device: core
 subnets:
     - name: main
       cidr: 10.10.10.0/24
@@ -30,7 +36,12 @@ subnets:
       cidr: 192.168.1.0/24
       attach:
         - device: office1
+    - name: zv-1
+      cidr: 172.20.0.0/16
+      attach:
+        - device: zavod
 zones:
     - name: OFFICE
       subnets:
         - main
+        - office-net

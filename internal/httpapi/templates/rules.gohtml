@@ -1,0 +1,131 @@
+{{define "rules-panel"}}
+<div id="rules-panel" x-data="rulesPanel({
+  defaultAction: '{{if eq .Doc.DefaultAction "allow"}}allow{{else}}deny{{end}}',
+  chainName: '{{.Doc.ChainName}}',
+  chainPosition: '{{if eq .Doc.ChainPosition "bottom"}}bottom{{else}}top{{end}}'
+})">
+  <form id="rules-form">
+    <input type="hidden" id="rules-default-action" name="defaultAction" :value="defaultAction" value="{{if eq .Doc.DefaultAction "allow"}}allow{{else}}deny{{end}}">
+    <input type="hidden" id="rules-chain-name" name="chainName" :value="chainName" value="{{.Doc.ChainName}}">
+    <input type="hidden" id="rules-chain-position" name="chainPosition" :value="chainPosition" value="{{if eq .Doc.ChainPosition "bottom"}}bottom{{else}}top{{end}}">
+
+    <div class="rules-toolbar">
+      <div id="rules-settings-display" class="rules-settings-group" x-show="!editing">
+        <span class="settings-badge" title="Действие по умолчанию">Действие: <strong x-text="defaultAction">{{if eq .Doc.DefaultAction "allow"}}allow{{else}}deny{{end}}</strong></span>
+        <span class="settings-badge" title="Имя цепочки">Цепочка: <strong x-text="chainName || 'FIRENET-FWD'">{{if .Doc.ChainName}}{{.Doc.ChainName}}{{else}}FIRENET-FWD{{end}}</strong></span>
+        <span class="settings-badge" title="Вставка перехода">Переход: <strong x-text="chainPosition === 'bottom' ? 'в конец FORWARD' : 'в начало FORWARD'">{{if eq .Doc.ChainPosition "bottom"}}в конец FORWARD{{else}}в начало FORWARD{{end}}</strong></span>
+        <button type="button" id="btn-unlock-settings" class="secondary btn-sm" @click="startEdit()" title="Разблокировать и изменить параметры">⚙ Изменить параметры</button>
+      </div>
+
+      <div id="rules-settings-edit" class="rules-settings-group" x-show="editing" x-cloak>
+        <label>Действие по умолчанию:
+          <select x-model="draftDefaultAction">
+            <option value="deny">deny</option>
+            <option value="allow">allow</option>
+          </select>
+        </label>
+        <label>Имя цепочки:
+          <input x-model="draftChainName" placeholder="FIRENET-FWD">
+        </label>
+        <label>Вставка перехода:
+          <select x-model="draftChainPosition">
+            <option value="top">в начало FORWARD</option>
+            <option value="bottom">в конец FORWARD</option>
+          </select>
+        </label>
+        <div class="settings-edit-actions">
+          <button type="button" id="btn-apply-settings" class="primary btn-sm" @click="applyEdit()">Применить</button>
+          <button type="button" id="btn-cancel-settings" class="secondary btn-sm" @click="cancelEdit()">Отмена</button>
+        </div>
+      </div>
+
+      <div class="rules-toolbar-actions">
+        <button type="button" class="secondary" hx-post="/ui/rules/add" hx-target="#rules-tbody" hx-swap="beforeend">+ правило</button>
+        <button type="button" class="primary" hx-post="/ui/rules/save" hx-target="#rules-banner-slot" hx-swap="innerHTML">Сохранить правила</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+    <table id="rules-table" x-init="initTable($el)">
+      <colgroup>
+        <col data-default-width="46" data-min-width="40" style="width: 46px">
+        <col data-default-width="130" data-min-width="80" style="width: 130px">
+        <col data-default-width="170" data-min-width="100" style="width: 170px">
+        <col data-default-width="170" data-min-width="100" style="width: 170px">
+        <col data-default-width="80" data-min-width="70" style="width: 80px">
+        <col data-default-width="100" data-min-width="80" style="width: 100px">
+        <col data-default-width="100" data-min-width="80" style="width: 100px">
+        <col data-default-width="90" data-min-width="70" style="width: 90px">
+        <col data-default-width="70" data-min-width="50" style="width: 70px">
+        <col data-default-width="42" data-min-width="36" style="width: 42px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Имя</th>
+          <th>Src</th>
+          <th>Dst</th>
+          <th>Proto</th>
+          <th>Src Ports</th>
+          <th>Dst Ports</th>
+          <th>Action</th>
+          <th>Зеркало</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="rules-tbody">{{template "rules-rows" .Rows}}</tbody>
+    </table>
+    </div>
+  </form>
+  <div id="rules-banner-slot">{{template "rules-banner" .Banner}}</div>
+</div>
+{{end}}
+
+{{define "rules-rows"}}{{range .}}{{template "rules-row" .}}{{end}}{{end}}
+
+{{define "rules-row"}}
+<tr>
+  <td class="row-index-cell">
+    <button type="button" class="icon-btn move" title="Вверх" hx-post="/ui/rules/{{.Index}}/move-up" hx-target="#rules-tbody" hx-swap="innerHTML">&#9650;</button>
+    <button type="button" class="icon-btn move" title="Вниз" hx-post="/ui/rules/{{.Index}}/move-down" hx-target="#rules-tbody" hx-swap="innerHTML">&#9660;</button>
+  </td>
+  <td><input name="rules[{{.Index}}][name]" value="{{.Rule.Name}}"></td>
+  <td>
+    <details class="multiselect">
+      <summary class="multiselect-toggle"><span class="multiselect-toggle-text">{{if .Rule.Src}}{{join .Rule.Src ", "}}{{else}}— выбрать —{{end}}</span></summary>
+      <div class="multiselect-panel">
+        {{range .Src}}<label><input type="checkbox" name="rules[{{$.Index}}][src]" value="{{.Name}}" {{if .Checked}}checked{{end}}><span>{{.Name}}</span></label>{{end}}
+      </div>
+    </details>
+  </td>
+  <td>
+    <details class="multiselect">
+      <summary class="multiselect-toggle"><span class="multiselect-toggle-text">{{if .Rule.Dst}}{{join .Rule.Dst ", "}}{{else}}— выбрать —{{end}}</span></summary>
+      <div class="multiselect-panel">
+        {{range .Dst}}<label><input type="checkbox" name="rules[{{$.Index}}][dst]" value="{{.Name}}" {{if .Checked}}checked{{end}}><span>{{.Name}}</span></label>{{end}}
+      </div>
+    </details>
+  </td>
+  <td>
+    <select name="rules[{{.Index}}][proto]">
+      <option value="any" {{if not (or (eq .Rule.Proto "tcp") (eq .Rule.Proto "udp") (eq .Rule.Proto "icmp"))}}selected{{end}}>any</option>
+      <option value="tcp" {{if eq .Rule.Proto "tcp"}}selected{{end}}>tcp</option>
+      <option value="udp" {{if eq .Rule.Proto "udp"}}selected{{end}}>udp</option>
+      <option value="icmp" {{if eq .Rule.Proto "icmp"}}selected{{end}}>icmp</option>
+    </select>
+  </td>
+  <td><input name="rules[{{.Index}}][srcPorts]" value="{{join .Rule.SrcPorts ","}}"></td>
+  <td><input name="rules[{{.Index}}][dstPorts]" value="{{join .Rule.DstPorts ","}}"></td>
+  <td>
+    <select name="rules[{{.Index}}][action]">
+      <option value="allow" {{if ne .Rule.Action "deny"}}selected{{end}}>allow</option>
+      <option value="deny" {{if eq .Rule.Action "deny"}}selected{{end}}>deny</option>
+    </select>
+  </td>
+  <td><input type="checkbox" name="rules[{{.Index}}][mirror]" {{if .Rule.Mirror}}checked{{end}} title="При компиляции также разрешить трафик в обратном направлении (dst → src)"></td>
+  <td><button type="button" class="icon-btn delete" title="Удалить правило" hx-post="/ui/rules/{{.Index}}/delete" hx-target="#rules-tbody" hx-swap="innerHTML">{{template "trash-icon"}}</button></td>
+</tr>
+{{end}}
+
+{{define "rules-banner"}}{{if .}}<div id="rules-banner" class="banner {{.Kind}}">{{.Message}}</div>{{end}}{{end}}
+
+{{define "trash-icon"}}<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11"/><path d="M5.5 4V2.7c0-.4.3-.7.7-.7h3.6c.4 0 .7.3.7.7V4"/><path d="M3.5 4l.6 9.3c0 .4.4.7.8.7h6.2c.4 0 .8-.3.8-.7L12.5 4"/><path d="M6.5 6.8v4.4"/><path d="M9.5 6.8v4.4"/></svg>{{end}}

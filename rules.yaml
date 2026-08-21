@@ -1,4 +1,5 @@
 defaultAction: deny
+chainPosition: top
 rules:
     - name: test
       src:
@@ -8,5 +9,7 @@ rules:
       proto: tcp
       dstPorts:
         - "443"
+        - "80"
+        - 400-500
       action: allow
       mirror: true
