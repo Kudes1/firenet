@@ -35,6 +35,9 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /ui/topology", servePage("topology.html"))
 	mux.HandleFunc("GET /ui/subnets", servePage("subnets.html"))
 	mux.HandleFunc("GET /ui/networks", servePage("networks.html"))
+	mux.HandleFunc("GET /ui/sets", servePage("sets.html"))
+	mux.HandleFunc("GET /ui/unions", servePage("unions.html"))
+	mux.HandleFunc("GET /ui/links", servePage("links.html"))
 	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
 	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
 
@@ -42,9 +45,20 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	if err != nil {
 		panic(err) // embedded at build time; can't fail at runtime
 	}
-	mux.Handle("/", http.FileServer(http.FS(webRoot)))
+	mux.Handle("/", noCache(http.FileServer(http.FS(webRoot))))
 
 	return withLogging(log, mux)
+}
+
+// noCache forces revalidation of embedded assets: the embed FS carries no
+// modification times, so the file server has neither Last-Modified nor
+// ETag to revalidate with, and browsers would otherwise heuristically
+// serve stale JS after a rebuild.
+func noCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // servePage renders one of the embedded static HTML pages.

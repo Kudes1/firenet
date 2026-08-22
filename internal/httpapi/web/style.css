@@ -15,6 +15,11 @@
   --shadow: 0 4px 14px rgba(20, 20, 30, 0.1);
   --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.35);
 
+  /* topology node kinds: shape is set in JS (KINDS), color lives here */
+  --kind-router: #d97706;
+  --kind-switch: #7c3aed;
+  --kind-network: #16a34a;
+
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 1rem;
@@ -38,6 +43,9 @@
     --panel-bg-hover: #2a2a30;
     --shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
     --focus-ring: 0 0 0 3px rgba(96, 165, 250, 0.4);
+    --kind-router: #f59e0b;
+    --kind-switch: #a78bfa;
+    --kind-network: #4ade80;
   }
 }
 :root[data-theme="dark"] {
@@ -53,8 +61,11 @@
   --success-fg: #052e16;
   --panel-bg: #212126;
   --panel-bg-hover: #2a2a30;
-  --shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
-  --focus-ring: 0 0 0 3px rgba(96, 165, 250, 0.4);
+    --shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
+    --focus-ring: 0 0 0 3px rgba(96, 165, 250, 0.4);
+    --kind-router: #f59e0b;
+    --kind-switch: #a78bfa;
+    --kind-network: #4ade80;
 }
 
 * { box-sizing: border-box; }
@@ -141,8 +152,7 @@ main {
 }
 .tab-panel[hidden] { display: none; }
 
-.topology-layout { display: flex; gap: var(--space-3); align-items: flex-start; }
-.sidebar { width: 280px; flex-shrink: 0; }
+.topology-layout { display: flex; flex: 1; min-height: 0; }
 .panel {
   background: var(--panel-bg);
   border: 1px solid var(--border);
@@ -206,34 +216,140 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 
 .canvas-wrap {
   flex: 1;
+  position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  overflow: auto;
-  max-height: 75vh;
-  background: var(--bg);
+  overflow: hidden;
+  background:
+    radial-gradient(circle, var(--border) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--bg);
 }
-#topo-canvas { display: block; }
+#topo-canvas { display: block; width: 100%; height: 100%; }
+
+/* floating toolbar (tldraw-style) */
+.topo-toolbar {
+  position: absolute;
+  bottom: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+.toolbar-sep { width: 1px; height: 22px; background: var(--border); margin: 0 2px; }
+.tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  cursor: pointer;
+}
+.tool svg { width: 20px; height: 20px; }
+.tool[hidden] { display: none; }
+.tool:hover { background: var(--panel-bg-hover); }
+.tool.active { background: var(--accent); color: var(--accent-fg); }
+.tool.primary { font-weight: inherit; }
+.tool.primary:hover { background: var(--accent); filter: brightness(1.08); }
+.tool.danger { background: var(--danger); color: #fff; }
+.tool.danger:hover { filter: brightness(1.1); }
+.tool.danger:disabled { opacity: 0.45; cursor: default; }
+.tool.danger:disabled:hover { filter: none; }
+
+/* inline node-naming popover */
+.node-popover {
+  position: absolute;
+  z-index: 10;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: var(--space-2);
+}
+.node-popover form { display: flex; gap: var(--space-1); align-items: center; }
+.node-popover input { width: 9rem; }
+
+/* union frames (colors come as inline SVG attributes) */
+.union-frame { pointer-events: none; }
+.union-label { font-size: 12px; font-weight: 600; pointer-events: none; }
+
+/* right-click menu */
+.context-menu {
+  position: absolute;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  min-width: 12rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: var(--space-1);
+}
+.context-menu button {
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: none;
+  color: var(--fg);
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.context-menu button:hover { background: var(--panel-bg-hover); }
+.context-menu button.danger { color: var(--danger); }
+.context-menu button:disabled { opacity: 0.5; cursor: default; }
+
+/* submenu revealed by hover/focus on its wrapper */
+.ctx-sub { position: relative; display: flex; flex-direction: column; }
+.ctx-sub > button { display: flex; justify-content: space-between; gap: var(--space-2); }
+.ctx-sub > button::after { content: "▸"; }
+.submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: calc(-1 * var(--space-1));
+  z-index: 12;
+  flex-direction: column;
+  min-width: 12rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: var(--space-1);
+}
+.ctx-sub:hover .submenu, .ctx-sub:focus-within .submenu { display: flex; }
+
+/* canvas interaction affordances */
+.marquee { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; fill: rgba(37, 99, 235, 0.08); }
+.node-rect.selected, .subnet-rect.selected { stroke: var(--accent); stroke-width: 2.5; }
+.wire-preview { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 6 4; fill: none; pointer-events: none; }
 
 .node-rect { fill: var(--panel-bg); stroke: var(--border); stroke-width: 1.5; cursor: grab; }
-.node-rect.switch { stroke-dasharray: 4 2; }
-.node-rect.pending { stroke: var(--accent); stroke-width: 3; }
-.subnet-rect { fill: var(--panel-bg); stroke: var(--accent); stroke-width: 1.5; cursor: grab; rx: 8; }
+.node-rect.router { stroke: var(--kind-router); }
+.node-rect.switch { stroke: var(--kind-switch); }
+.node-rect.pending { stroke: var(--accent) !important; stroke-width: 3; }
+.subnet-rect { fill: var(--panel-bg); stroke: var(--kind-network); stroke-width: 1.5; cursor: grab; }
+.node-glyph { fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.node-glyph.router { stroke: var(--kind-router); }
+.node-glyph.switch { stroke: var(--kind-switch); }
 .node-label, .subnet-label { fill: var(--fg); font-size: 12px; user-select: none; pointer-events: none; }
-.wire { stroke: var(--muted); stroke-width: 1.5; fill: none; }
-.link-label circle {
-  fill: var(--bg);
-  stroke: var(--accent);
-  stroke-width: 1.2;
-  cursor: pointer;
-}
+.wire { stroke: var(--muted); stroke-width: 1.5; fill: none; pointer-events: none; }
+.wire.selected { stroke: var(--accent); stroke-width: 2.5; }
+/* invisible wide twin of each wire that enlarges the clickable zone */
+.wire-hit { stroke: transparent; stroke-width: 14; fill: none; pointer-events: stroke; cursor: pointer; }
 .link-label-text { font-size: 9px; fill: var(--muted); pointer-events: none; user-select: none; }
-.wire-x {
-  fill: var(--danger);
-  font-size: 11px;
-  cursor: pointer;
-  text-anchor: middle;
-}
-.node-close { fill: var(--danger); font-size: 13px; cursor: pointer; text-anchor: middle; }
 
 .zone {
   border: 1px solid var(--border);
@@ -327,6 +443,7 @@ td:has(> input[type="checkbox"]) {
   flex-wrap: wrap;
 }
 .table-toolbar h3 { margin: 0; font-size: 0.78rem; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+.toolbar-text { flex: 1 1 0; min-width: 0; }
 .table-toolbar label {
   display: flex;
   align-items: center;
@@ -484,6 +601,13 @@ details.multiselect.open-up .multiselect-panel {
 }
 .banner.ok { background: var(--success); color: var(--success-fg); }
 
+/* on the topology page the banner overlays the canvas bottom-right corner */
+body[data-nav="topology"] #error-banner {
+  left: auto;
+  right: var(--space-4);
+  transform: none;
+}
+
 #rules-banner-slot .banner {
   position: static;
   left: auto;
@@ -542,7 +666,8 @@ dialog.modal {
 }
 dialog.modal::backdrop { background: rgba(0, 0, 0, 0.45); }
 dialog.modal h3 { margin-top: 0; }
-dialog.modal label {
+dialog.modal label,
+dialog.modal .modal-field {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -551,7 +676,8 @@ dialog.modal label {
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
-.modal-grid label { margin-bottom: 0; }
+.modal-grid label,
+.modal-grid .modal-field { margin-bottom: 0; }
 .modal-check {
   flex-direction: row !important;
   align-items: center;
@@ -559,6 +685,16 @@ dialog.modal label {
   margin-top: var(--space-3);
 }
 .modal-check input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--accent); }
+/* Checkbox rows (links page export editors); the dialog.modal label rule
+   above would otherwise stack them vertically. */
+dialog.modal label.check-row,
+.check-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0;
+}
 
 /* Large modal variant (e.g. network editor with a long subnet list) */
 dialog.modal-lg { width: min(44rem, 92vw); }
@@ -630,3 +766,4 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   font-size: 0.88rem;
 }
 .member-suggestion.active, .member-suggestion:hover { background: var(--panel-bg-hover); }
+.member-suggestion.literal-add { color: var(--accent); }

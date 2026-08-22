@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>firenet — связи</title>
+<script>
+  try {
+    var saved = localStorage.getItem("firenet-theme");
+    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+  } catch (e) {}
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-nav="links" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
+<div id="site-header"></div>
+
+<main x-data="linksPage">
+  <div class="table-toolbar">
+    <div class="toolbar-text">
+      <h3>Связи</h3>
+      <p class="hint">Обычная связь даёт полную связность между устройствами. Фильтрованная связь пропускает только трафик между объявленными сетями: каждая сторона перечисляет, что она «анонсирует» через связь. Создание связей — на холсте топологии инструментом «связать».</p>
+    </div>
+  </div>
+  <div class="table-wrap" x-show="loaded" x-cloak>
+    <table class="data-table">
+      <thead>
+        <tr><th>Устройства</th><th>Режим</th><th>Экспорт стороны A</th><th>Экспорт стороны B</th><th></th></tr>
+      </thead>
+      <tbody>
+        <template x-for="(l, i) in links" :key="i">
+          <tr>
+            <td x-text="pairLabel(i)"></td>
+            <td>
+              <span class="owner-badge" x-show="l.filter">фильтрованная</span>
+              <span class="hint" x-show="!l.filter">обычная</span>
+            </td>
+            <td>
+              <template x-for="e in (l.filter?.aExports || [])" :key="e"><span class="owner-badge" x-text="e"></span></template>
+              <span class="hint" x-show="l.filter && !(l.filter.aExports || []).length">ничего</span>
+              <span class="hint" x-show="!l.filter">—</span>
+            </td>
+            <td>
+              <template x-for="e in (l.filter?.bExports || [])" :key="e"><span class="owner-badge" x-text="e"></span></template>
+              <span class="hint" x-show="l.filter && !(l.filter.bExports || []).length">ничего</span>
+              <span class="hint" x-show="!l.filter">—</span>
+            </td>
+            <td>
+              <button type="button" class="icon-btn edit" x-show="l.filter" title="Изменить фильтры" @click="openEdit(i)">✎</button>
+              <button type="button" class="secondary btn-sm" x-show="!l.filter" @click="makeFiltered(i)">Сделать фильтрованной</button>
+              <button type="button" class="secondary btn-sm" x-show="l.filter" @click="makePlain(i)">Вернуть обычную</button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="loaded && !links.length"><td colspan="5" class="empty-cell">Связей нет — создайте их на холсте топологии</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <dialog x-ref="dialog" class="modal">
+    <h3>Фильтры связи <span x-text="draft.index >= 0 ? pairLabel(draft.index) : ''"></span></h3>
+    <p class="cell-hint">Трафик между сетью X и сетью Y пройдёт через связь, только если X выбран в экспорте стороны, откуда пакет выходит, а Y — в экспорте стороны, куда он входит.</p>
+    <fieldset>
+      <legend>Сторона A (<span x-text="draft.index >= 0 ? links[draft.index]?.a.device : ''"></span>)</legend>
+      <template x-for="g in entityGroups()" :key="'a-' + g.label">
+        <div>
+          <p class="cell-hint" x-text="g.label"></p>
+          <template x-for="name in g.names" :key="'a-' + name">
+            <label class="check-row"><input type="checkbox" :value="name" x-model="draft.aExports"> <span x-text="name"></span></label>
+          </template>
+        </div>
+      </template>
+    </fieldset>
+    <fieldset>
+      <legend>Сторона B (<span x-text="draft.index >= 0 ? links[draft.index]?.b.device : ''"></span>)</legend>
+      <template x-for="g in entityGroups()" :key="'b-' + g.label">
+        <div>
+          <p class="cell-hint" x-text="g.label"></p>
+          <template x-for="name in g.names" :key="'b-' + name">
+            <label class="check-row"><input type="checkbox" :value="name" x-model="draft.bExports"> <span x-text="name"></span></label>
+          </template>
+        </div>
+      </template>
+    </fieldset>
+    <div class="modal-actions">
+      <button type="button" @click="closeModal()">Отмена</button>
+      <button type="button" class="primary" :disabled="saving" @click="saveDraft()">Сохранить</button>
+    </div>
+  </dialog>
+</main>
+
+<script src="/alpine.min.js" defer></script>
+<script src="/common.js"></script>
+<script src="/links.js"></script>
+</body>
+</html>

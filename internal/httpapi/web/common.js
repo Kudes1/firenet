@@ -26,6 +26,38 @@ function showBanner(message, kind) {
   window.dispatchEvent(new CustomEvent("notify", { detail: { message, kind: kind || "error" } }));
 }
 
+// DirtyGuard warns the user before leaving a page with unsaved edits.
+// A page arms it with a getter for its editable document and marks the
+// clean baseline after load/save; nav clicks and tab close then compare
+// against that baseline.
+const DirtyGuard = (() => {
+  const MESSAGE = "Есть несохранённые изменения. Покинуть страницу без сохранения?";
+  let getData = null;
+  let clean = null;
+
+  function arm(getter) {
+    getData = getter;
+    clean = JSON.stringify(getData()); // baseline: state at arm time
+    window.addEventListener("beforeunload", (e) => {
+      if (!isDirty()) return;
+      e.preventDefault();
+      e.returnValue = "";
+    });
+  }
+
+  const markClean = () => { if (getData) clean = JSON.stringify(getData()); };
+  const isDirty = () => !!getData && clean !== null && JSON.stringify(getData()) !== clean;
+
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("nav.tabs a");
+    if (!a || !isDirty()) return;
+    e.preventDefault();
+    if (confirm(MESSAGE)) window.location.href = a.href;
+  });
+
+  return { arm, markClean, isDirty };
+})();
+
 const Api = {
   async get(path) {
     const res = await fetch(path);
@@ -71,10 +103,102 @@ function ipv4CidrOverlap(a, b) {
   return (pa.base & commonMask) === (pb.base & commonMask);
 }
 
+// --- shared table-search helpers ---
+// Client-side column search, ported from the rules page (which mirrors
+// internal/rules/filter.go). Best-effort IPv4 only, like ipv4CidrOverlap.
+
+function containsFold(s, sub) {
+  return !sub || String(s || "").toLowerCase().includes(sub.toLowerCase());
+}
+
+function parseIPv4(s) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+  if (!m) return null;
+  const o = m.slice(1).map(Number);
+  if (o.some((v) => v > 255)) return null;
+  return ((o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0;
+}
+
+function normPrefix(base, bits) {
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return { base: (base & mask) >>> 0, mask, bits };
+}
+
+function parsePrefix(s) {
+  const i = s.indexOf("/");
+  if (i < 0) return null;
+  const base = parseIPv4(s.slice(0, i));
+  const bits = Number(s.slice(i + 1));
+  if (base === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return null;
+  return normPrefix(base, bits);
+}
+
+// partialPrefix turns a partially typed address ("10.", "10.0", "10.0.0")
+// into the implied CIDR block, so search matches before the full address
+// is entered.
+function partialPrefix(q) {
+  let parts = q.split(".");
+  if (parts.length > 4 || parts[0] === "") return null;
+  if (parts[parts.length - 1] === "") parts = parts.slice(0, -1);
+  if (!parts.length) return null;
+  const octets = [];
+  for (const p of parts) {
+    if (!/^\d+$/.test(p) || Number(p) > 255 || (p.startsWith("0") && p.length > 1)) return null;
+    octets.push(Number(p));
+  }
+  while (octets.length < 4) octets.push(0);
+  return normPrefix(((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0, parts.length * 8);
+}
+
+function parseQueryPrefix(q) {
+  if (!q.includes("/")) {
+    const addr = parseIPv4(q);
+    if (addr !== null) return normPrefix(addr, 32);
+    return partialPrefix(q);
+  }
+  return parsePrefix(q);
+}
+
+function formatIPv4(n) {
+  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+}
+
+const prefixContains = (p, addr) => (addr & p.mask) === p.base;
+const prefixOverlap = (a, b) => {
+  const common = a.mask & b.mask;
+  return (a.base & common) === (b.base & common);
+};
+
+// matchPrefixQuery searches a table cell's values ("subnet-name", "cidr",
+// "address") for a filter value: an IP/partial-IP/CIDR query is matched
+// semantically against the parsed prefixes, anything else as a
+// case-insensitive substring over the raw values.
+function matchPrefixQuery(entries, q) {
+  const query = (q || "").trim();
+  if (!query) return true;
+  const qp = parseQueryPrefix(query);
+  if (!qp) return entries.some((e) => containsFold(e, query));
+  const prefixes = entries.map(parsePrefix).filter(Boolean);
+  return qp.bits === 32 // exact address: containment
+    ? prefixes.some((p) => prefixContains(p, qp.base))
+    : prefixes.some((p) => prefixOverlap(p, qp));
+}
+
+// matchSubnetMembers searches a subnet-membership cell (networks/sets
+// pages) for a filter value: member names and their CIDRs as substrings,
+// IP/partial-IP/CIDR queries semantically against the members' CIDRs.
+function matchSubnetMembers(subnets, cidrOf, q) {
+  const names = subnets || [];
+  return matchPrefixQuery([...names, ...names.map((s) => cidrOf(s))], q);
+}
+
 const NAV_LINKS = [
   { id: "topology", href: "/ui/topology", label: "Топология" },
   { id: "subnets", href: "/ui/subnets", label: "Подсети" },
   { id: "networks", href: "/ui/networks", label: "Сети" },
+  { id: "sets", href: "/ui/sets", label: "Наборы" },
+  { id: "unions", href: "/ui/unions", label: "Объединения" },
+  { id: "links", href: "/ui/links", label: "Связи" },
   { id: "rules", href: "/ui/rules", label: "Правила" },
   { id: "compile", href: "/ui/compile", label: "Компиляция" },
 ];
