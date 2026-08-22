@@ -44,11 +44,18 @@ func (n Node) String() string {
 	}
 }
 
-// Edge is a directed graph edge, annotated with the interface used on the
-// "from" side (empty when "from" is a subnet node).
+// Edge is a directed graph edge.
 type Edge struct {
-	To         Node
-	LocalIface string
+	To Node
+	// Allow, when non-nil, carries only announced traffic: a path using
+	// this edge must have src ∈ From and dst ∈ To (filtered-link rules).
+	Allow *edgeAllow
+}
+
+// edgeAllow holds the subnet names each side of a filtered link announces
+// across it, resolved at Build time.
+type edgeAllow struct {
+	From, To map[string]struct{}
 }
 
 // Graph is a router/subnet adjacency list built from a Topology.
@@ -60,29 +67,32 @@ func newGraph() *Graph {
 	return &Graph{adj: make(map[Node][]Edge)}
 }
 
-func (g *Graph) addEdge(from, to Node, localIface string) {
+func (g *Graph) addEdge(from, to Node) {
+	g.addEdgeAllow(from, to, nil)
+}
+
+func (g *Graph) addEdgeAllow(from, to Node, allow *edgeAllow) {
 	for _, e := range g.adj[from] {
 		if e.To == to {
 			return
 		}
 	}
-	g.adj[from] = append(g.adj[from], Edge{To: to, LocalIface: localIface})
+	g.adj[from] = append(g.adj[from], Edge{To: to, Allow: allow})
 }
 
-func (g *Graph) addUndirected(a, b Node, ifaceA, ifaceB string) {
-	g.addEdge(a, b, ifaceA)
-	g.addEdge(b, a, ifaceB)
+func (g *Graph) addUndirected(a, b Node) {
+	g.addEdge(a, b)
+	g.addEdge(b, a)
 }
 
 // attachPoint is one endpoint reachable from within a single L2 domain (or
 // directly, without a switch in between).
 type attachPoint struct {
-	node  Node
-	iface string // interface on the router side; empty for subnet points
+	node Node
 }
 
 // Build derives the router/subnet graph. It assumes topo has already passed
-// Validate (interface/link references are known to be well-formed).
+// Validate (link references are known to be well-formed).
 func Build(topo *topology.Topology) (*Graph, error) {
 	g := newGraph()
 
@@ -94,7 +104,21 @@ func Build(topo *topology.Topology) (*Graph, error) {
 		case aIsSwitch && bIsSwitch:
 			switchLinks = append(switchLinks, l)
 		case !aIsSwitch && !bIsSwitch:
-			g.addUndirected(RouterNode(l.A.Device), RouterNode(l.B.Device), l.A.Interface, l.B.Interface)
+			var ab, ba *edgeAllow
+			if l.Filter != nil {
+				from, err := exportSubnets(topo, l.Filter.AExports)
+				if err != nil {
+					return nil, fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
+				}
+				to, err := exportSubnets(topo, l.Filter.BExports)
+				if err != nil {
+					return nil, fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
+				}
+				ab = &edgeAllow{From: from, To: to}
+				ba = &edgeAllow{From: to, To: from}
+			}
+			g.addEdgeAllow(RouterNode(l.A.Device), RouterNode(l.B.Device), ab)
+			g.addEdgeAllow(RouterNode(l.B.Device), RouterNode(l.A.Device), ba)
 		}
 	}
 
@@ -107,10 +131,10 @@ func Build(topo *topology.Topology) (*Graph, error) {
 		switch {
 		case aIsSwitch && !bIsSwitch:
 			id := domainOf[l.A.Device]
-			domainPoints[id] = append(domainPoints[id], attachPoint{node: RouterNode(l.B.Device), iface: l.B.Interface})
+			domainPoints[id] = append(domainPoints[id], attachPoint{node: RouterNode(l.B.Device)})
 		case bIsSwitch && !aIsSwitch:
 			id := domainOf[l.B.Device]
-			domainPoints[id] = append(domainPoints[id], attachPoint{node: RouterNode(l.A.Device), iface: l.A.Interface})
+			domainPoints[id] = append(domainPoints[id], attachPoint{node: RouterNode(l.A.Device)})
 		}
 	}
 
@@ -125,7 +149,7 @@ func Build(topo *topology.Topology) (*Graph, error) {
 					id := domainOf[ref.Device]
 					domainPoints[id] = append(domainPoints[id], attachPoint{node: SubnetNode(sname)})
 				case topology.DeviceRouter:
-					g.addUndirected(RouterNode(ref.Device), SubnetNode(sname), ref.Interface, "")
+					g.addUndirected(RouterNode(ref.Device), SubnetNode(sname))
 				}
 			}
 		}
@@ -137,7 +161,7 @@ func Build(topo *topology.Topology) (*Graph, error) {
 		}
 		bus := domainNode(id)
 		for _, p := range points {
-			g.addUndirected(p.node, bus, p.iface, "")
+			g.addUndirected(p.node, bus)
 		}
 	}
 
@@ -179,4 +203,20 @@ func assignL2Domains(topo *topology.Topology, switchLinks []topology.Link) map[s
 		}
 	}
 	return domainOf
+}
+
+// exportSubnets flattens export entity names (networks or bare subnets)
+// into one deduplicated subnet-name set.
+func exportSubnets(topo *topology.Topology, names []string) (map[string]struct{}, error) {
+	out := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		subs, err := topo.ResolveNetwork(name)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range subs {
+			out[s] = struct{}{}
+		}
+	}
+	return out, nil
 }

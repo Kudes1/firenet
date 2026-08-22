@@ -75,6 +75,16 @@ func (g *Graph) AllSimplePaths(src, dst Node, limits Limits) ([]Path, error) {
 			if visited[e.To] {
 				continue
 			}
+			// Filtered-link edges carry only announced traffic: the whole
+			// path must run from an announced source to an announced dest.
+			if e.Allow != nil {
+				if _, ok := e.Allow.From[src.Name]; !ok {
+					continue
+				}
+				if _, ok := e.Allow.To[dst.Name]; !ok {
+					continue
+				}
+			}
 			visited[e.To] = true
 			stack = append(stack, e.To)
 			if err := dfs(e.To); err != nil {

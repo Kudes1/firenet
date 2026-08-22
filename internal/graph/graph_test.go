@@ -37,15 +37,15 @@ func TestBuild_LinearChain(t *testing.T) {
 			"r2": {Name: "r2", Kind: topology.DeviceRouter},
 		},
 		Links: []topology.Link{
-			{A: topology.Endpoint{Device: "r1", Interface: "up"}, B: topology.Endpoint{Device: "r2", Interface: "down"}},
+			{A: topology.Endpoint{Device: "r1"}, B: topology.Endpoint{Device: "r2"}},
 		},
 		Subnets: map[string]topology.Subnet{
 			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
 			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
 		},
 		Networks: map[string]topology.Network{
-			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "r1", Interface: "a0"}),
-			"nB": netWithSubnets("nB", []string{"B"}, topology.Endpoint{Device: "r2", Interface: "b0"}),
+			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "r1"}),
+			"nB": netWithSubnets("nB", []string{"B"}, topology.Endpoint{Device: "r2"}),
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -83,9 +83,9 @@ func TestBuild_RedundantPaths(t *testing.T) {
 		},
 		Networks: map[string]topology.Network{
 			"nA": netWithSubnets("nA", []string{"A"},
-				topology.Endpoint{Device: "r1", Interface: "a0"}, topology.Endpoint{Device: "r2", Interface: "a0"}),
+				topology.Endpoint{Device: "r1"}, topology.Endpoint{Device: "r2"}),
 			"nB": netWithSubnets("nB", []string{"B"},
-				topology.Endpoint{Device: "r1", Interface: "b0"}, topology.Endpoint{Device: "r2", Interface: "b0"}),
+				topology.Endpoint{Device: "r1"}, topology.Endpoint{Device: "r2"}),
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -116,16 +116,16 @@ func TestBuild_SwitchChainCollapses(t *testing.T) {
 			"sw2": {Name: "sw2", Kind: topology.DeviceSwitch},
 		},
 		Links: []topology.Link{
-			{A: topology.Endpoint{Device: "r1", Interface: "up"}, B: topology.Endpoint{Device: "sw1", Interface: "p1"}},
-			{A: topology.Endpoint{Device: "sw1", Interface: "p2"}, B: topology.Endpoint{Device: "sw2", Interface: "p1"}},
+			{A: topology.Endpoint{Device: "r1"}, B: topology.Endpoint{Device: "sw1"}},
+			{A: topology.Endpoint{Device: "sw1"}, B: topology.Endpoint{Device: "sw2"}},
 		},
 		Subnets: map[string]topology.Subnet{
 			"X": {Name: "X", CIDR: prefix(t, "10.0.0.0/24")},
 			"A": {Name: "A", CIDR: prefix(t, "10.0.1.0/24")},
 		},
 		Networks: map[string]topology.Network{
-			"nX": netWithSubnets("nX", []string{"X"}, topology.Endpoint{Device: "r1", Interface: "x0"}),
-			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "sw2", Interface: "p2"}),
+			"nX": netWithSubnets("nX", []string{"X"}, topology.Endpoint{Device: "r1"}),
+			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "sw2"}),
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -160,7 +160,7 @@ func TestBuild_AllSubnetsOfNetworkShareSegment(t *testing.T) {
 			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
 		},
 		Networks: map[string]topology.Network{
-			"n": netWithSubnets("n", []string{"A", "B"}, topology.Endpoint{Device: "r1", Interface: "lan0"}),
+			"n": netWithSubnets("n", []string{"A", "B"}, topology.Endpoint{Device: "r1"}),
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -187,17 +187,17 @@ func TestAllSimplePaths_CycleDoesNotHang(t *testing.T) {
 			"r3": {Name: "r3", Kind: topology.DeviceRouter},
 		},
 		Links: []topology.Link{
-			{A: topology.Endpoint{Device: "r1", Interface: "toR2"}, B: topology.Endpoint{Device: "r2", Interface: "toR1"}},
-			{A: topology.Endpoint{Device: "r1", Interface: "toR3"}, B: topology.Endpoint{Device: "r3", Interface: "toR1"}},
-			{A: topology.Endpoint{Device: "r2", Interface: "toR3"}, B: topology.Endpoint{Device: "r3", Interface: "toR2"}},
+			{A: topology.Endpoint{Device: "r1"}, B: topology.Endpoint{Device: "r2"}},
+			{A: topology.Endpoint{Device: "r1"}, B: topology.Endpoint{Device: "r3"}},
+			{A: topology.Endpoint{Device: "r2"}, B: topology.Endpoint{Device: "r3"}},
 		},
 		Subnets: map[string]topology.Subnet{
 			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
 			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
 		},
 		Networks: map[string]topology.Network{
-			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "r1", Interface: "a0"}),
-			"nB": netWithSubnets("nB", []string{"B"}, topology.Endpoint{Device: "r2", Interface: "b0"}),
+			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "r1"}),
+			"nB": netWithSubnets("nB", []string{"B"}, topology.Endpoint{Device: "r2"}),
 		},
 	}
 	if err := topo.Validate(); err != nil {
@@ -220,14 +220,81 @@ func TestAllSimplePaths_CycleDoesNotHang(t *testing.T) {
 	}
 }
 
+func filteredTopo() *topology.Topology {
+	return &topology.Topology{
+		Devices: map[string]topology.Device{
+			"m": {Name: "m", Kind: topology.DeviceRouter},
+			"d": {Name: "d", Kind: topology.DeviceRouter},
+			"o": {Name: "o", Kind: topology.DeviceRouter},
+		},
+		Subnets: map[string]topology.Subnet{
+			"a": {Name: "a", CIDR: netip.MustParsePrefix("10.0.0.0/24")},
+			"b": {Name: "b", CIDR: netip.MustParsePrefix("10.0.1.0/24")},
+			"c": {Name: "c", CIDR: netip.MustParsePrefix("10.0.2.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"NA": {Name: "NA", Subnets: []string{"a"}, Attach: []topology.Endpoint{{Device: "m"}}},
+			"NB": {Name: "NB", Subnets: []string{"b"}, Attach: []topology.Endpoint{{Device: "d"}}},
+			"NC": {Name: "NC", Subnets: []string{"c"}, Attach: []topology.Endpoint{{Device: "o"}}},
+		},
+		Links: []topology.Link{
+			{A: topology.Endpoint{Device: "m"}, B: topology.Endpoint{Device: "d"},
+				Filter: &topology.LinkFilter{AExports: []string{"NA"}, BExports: []string{"NB"}}},
+			{A: topology.Endpoint{Device: "d"}, B: topology.Endpoint{Device: "o"}},
+		},
+	}
+}
+
+func TestBuild_FilteredLinkAllowsAnnouncedPairs(t *testing.T) {
+	g, err := Build(filteredTopo())
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	paths, err := g.AllSimplePaths(SubnetNode("a"), SubnetNode("b"), DefaultLimits())
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("a→b expected reachable, got %d paths (%v)", len(paths), err)
+	}
+}
+
+func TestBuild_FilteredLinkBlocksUnannouncedDst(t *testing.T) {
+	g, _ := Build(filteredTopo())
+	paths, err := g.AllSimplePaths(SubnetNode("a"), SubnetNode("c"), DefaultLimits())
+	if err != nil || len(paths) != 0 {
+		t.Fatalf("a→c must be filtered out, got %d paths (%v)", len(paths), err)
+	}
+}
+
+func TestBuild_FilteredLinkBlocksUnannouncedSrc(t *testing.T) {
+	g, _ := Build(filteredTopo())
+	paths, err := g.AllSimplePaths(SubnetNode("c"), SubnetNode("a"), DefaultLimits())
+	if err != nil || len(paths) != 0 {
+		t.Fatalf("c→a must be filtered out, got %d paths (%v)", len(paths), err)
+	}
+}
+
+func TestBuild_PlainLinkStillUnrestricted(t *testing.T) {
+	topo := filteredTopo()
+	topo.Links[0].Filter = nil // та же топология без фильтра
+	g, err := Build(topo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, pair := range [][2]string{{"a", "b"}, {"a", "c"}, {"c", "a"}} {
+		paths, err := g.AllSimplePaths(SubnetNode(pair[0]), SubnetNode(pair[1]), DefaultLimits())
+		if err != nil || len(paths) == 0 {
+			t.Fatalf("%s→%s expected reachable without filter, got %d paths (%v)", pair[0], pair[1], len(paths), err)
+		}
+	}
+}
+
 func TestAllSimplePaths_TooManyPaths(t *testing.T) {
 	devices := map[string]topology.Device{}
 	var epsA, epsB []topology.Endpoint
 	for i := 0; i < 4; i++ {
 		name := "r" + string(rune('1'+i))
 		devices[name] = topology.Device{Name: name, Kind: topology.DeviceRouter}
-		epsA = append(epsA, topology.Endpoint{Device: name, Interface: "a0"})
-		epsB = append(epsB, topology.Endpoint{Device: name, Interface: "b0"})
+		epsA = append(epsA, topology.Endpoint{Device: name})
+		epsB = append(epsB, topology.Endpoint{Device: name})
 	}
 	topo := &topology.Topology{
 		Devices: devices,
