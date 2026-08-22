@@ -36,7 +36,10 @@ func (t *Topology) Validate() error {
 	if err := t.validateNetworks(); err != nil {
 		return err
 	}
-	return t.validateSets()
+	if err := t.validateSets(); err != nil {
+		return err
+	}
+	return t.validateSites()
 }
 
 // validateLinks checks that every link and network attachment references a
@@ -132,6 +135,44 @@ func (t *Topology) validateSets() error {
 		}
 	}
 	return nil
+}
+
+// validateSites checks member references exist and every device/network is
+// a member of at most one site.
+func (t *Topology) validateSites() error {
+	devOwner := make(map[string]string, len(t.Devices))
+	netOwner := make(map[string]string, len(t.Networks))
+	for _, name := range sortedSiteNames(t.Sites) {
+		s := t.Sites[name]
+		for _, d := range s.Devices {
+			if _, ok := t.Devices[d]; !ok {
+				return fmt.Errorf("site %q: unknown device %q", name, d)
+			}
+			if prev, ok := devOwner[d]; ok {
+				return fmt.Errorf("device %q belongs to both site %q and %q", d, prev, name)
+			}
+			devOwner[d] = name
+		}
+		for _, n := range s.Networks {
+			if _, ok := t.Networks[n]; !ok {
+				return fmt.Errorf("site %q: unknown network %q", name, n)
+			}
+			if prev, ok := netOwner[n]; ok {
+				return fmt.Errorf("network %q belongs to both site %q and %q", n, prev, name)
+			}
+			netOwner[n] = name
+		}
+	}
+	return nil
+}
+
+func sortedSiteNames(m map[string]Site) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // subnetContaining returns the name of the unique known subnet whose CIDR

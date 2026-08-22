@@ -224,3 +224,39 @@ func TestResolveNetwork_UnknownName(t *testing.T) {
 		t.Fatal("expected error for unknown name")
 	}
 }
+
+func TestValidate_Sites(t *testing.T) {
+	base := func() *Topology {
+		return &Topology{
+			Devices:  map[string]Device{"r1": {Name: "r1", Kind: DeviceRouter}},
+			Subnets:  map[string]Subnet{},
+			Networks: map[string]Network{"net1": {Name: "net1"}},
+			Sets:     map[string]Set{},
+			Sites: map[string]Site{"office": {
+				Name: "office", Devices: []string{"r1"}, Networks: []string{"net1"},
+			}},
+		}
+	}
+	if err := base().Validate(); err != nil {
+		t.Fatalf("valid sites rejected: %v", err)
+	}
+
+	badRef := base()
+	badRef.Sites["office"] = Site{Name: "office", Devices: []string{"ghost"}}
+	if err := badRef.Validate(); err == nil || !strings.Contains(err.Error(), `unknown device "ghost"`) {
+		t.Fatalf("want unknown device error, got %v", err)
+	}
+
+	double := base()
+	double.Sites["zavod"] = Site{Name: "zavod", Devices: []string{"r1"}}
+	err := double.Validate()
+	if err == nil || !strings.Contains(err.Error(), `both site "office" and "zavod"`) {
+		t.Fatalf("want double membership error, got %v", err)
+	}
+
+	badNet := base()
+	badNet.Sites["office"] = Site{Name: "office", Networks: []string{"ghost"}}
+	if err := badNet.Validate(); err == nil || !strings.Contains(err.Error(), `unknown network "ghost"`) {
+		t.Fatalf("want unknown network error, got %v", err)
+	}
+}
