@@ -347,6 +347,8 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .node-label, .subnet-label { fill: var(--fg); font-size: 12px; user-select: none; pointer-events: none; }
 .wire { stroke: var(--muted); stroke-width: 1.5; fill: none; pointer-events: none; }
 .wire.selected { stroke: var(--accent); stroke-width: 2.5; }
+.wire-filtered { stroke: #d29922; stroke-dasharray: 6 4; }
+.wire-filtered.selected { stroke-dasharray: 6 4; }
 /* invisible wide twin of each wire that enlarges the clickable zone */
 .wire-hit { stroke: transparent; stroke-width: 14; fill: none; pointer-events: stroke; cursor: pointer; }
 .link-label-text { font-size: 9px; fill: var(--muted); pointer-events: none; user-select: none; }
