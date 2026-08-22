@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 type yamlEndpoint struct {
-	Device    string `yaml:"device"`
-	Interface string `yaml:"interface,omitempty"`
+	Device string `yaml:"device"`
 }
 
 type yamlLink struct {
@@ -24,15 +24,32 @@ type yamlDevice struct {
 }
 
 type yamlNetwork struct {
-	Name    string         `yaml:"name"`
-	Subnets []string       `yaml:"subnets"`
-	Attach  []yamlEndpoint `yaml:"attach"`
+	Name        string         `yaml:"name"`
+	Subnets     []string       `yaml:"subnets"`
+	Attach      []yamlEndpoint `yaml:"attach"`
+	Description string         `yaml:"description,omitempty"`
+}
+
+type yamlSet struct {
+	Name        string   `yaml:"name"`
+	Subnets     []string `yaml:"subnets,omitempty"`
+	Addresses   []string `yaml:"addresses,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+}
+
+type yamlSite struct {
+	Name        string   `yaml:"name"`
+	Devices     []string `yaml:"devices,omitempty"`
+	Networks    []string `yaml:"networks,omitempty"`
+	Description string   `yaml:"description,omitempty"`
 }
 
 type yamlTopology struct {
 	Devices  []yamlDevice  `yaml:"devices"`
 	Links    []yamlLink    `yaml:"links"`
 	Networks []yamlNetwork `yaml:"networks"`
+	Sets     []yamlSet     `yaml:"sets"`
+	Sites    []yamlSite    `yaml:"sites"`
 }
 
 type yamlSubnetDoc struct {
@@ -40,8 +57,9 @@ type yamlSubnetDoc struct {
 }
 
 type yamlSubnet struct {
-	Name string `yaml:"name"`
-	CIDR string `yaml:"cidr"`
+	Name        string `yaml:"name"`
+	CIDR        string `yaml:"cidr"`
+	Description string `yaml:"description,omitempty"`
 }
 
 // Load decodes a topology.yaml document (devices, links, networks).
@@ -57,6 +75,8 @@ func Load(r io.Reader) (*Topology, error) {
 	topo := &Topology{
 		Devices:  make(map[string]Device, len(raw.Devices)),
 		Networks: make(map[string]Network, len(raw.Networks)),
+		Sets:     make(map[string]Set, len(raw.Sets)),
+		Sites:    make(map[string]Site, len(raw.Sites)),
 	}
 
 	for _, d := range raw.Devices {
@@ -72,8 +92,8 @@ func Load(r io.Reader) (*Topology, error) {
 
 	for _, l := range raw.Links {
 		topo.Links = append(topo.Links, Link{
-			A: Endpoint{Device: l.A.Device, Interface: l.A.Interface},
-			B: Endpoint{Device: l.B.Device, Interface: l.B.Interface},
+			A: Endpoint{Device: l.A.Device},
+			B: Endpoint{Device: l.B.Device},
 		})
 	}
 
@@ -83,12 +103,54 @@ func Load(r io.Reader) (*Topology, error) {
 		}
 		attach := make([]Endpoint, 0, len(n.Attach))
 		for _, a := range n.Attach {
-			attach = append(attach, Endpoint{Device: a.Device, Interface: a.Interface})
+			attach = append(attach, Endpoint{Device: a.Device})
 		}
-		topo.Networks[n.Name] = Network{Name: n.Name, Subnets: n.Subnets, Attach: attach}
+		topo.Networks[n.Name] = Network{Name: n.Name, Subnets: n.Subnets, Attach: attach, Description: n.Description}
+	}
+
+	for _, s := range raw.Sets {
+		if _, exists := topo.Sets[s.Name]; exists {
+			return nil, fmt.Errorf("duplicate set name %q", s.Name)
+		}
+		addresses := make([]netip.Prefix, 0, len(s.Addresses))
+		for _, a := range s.Addresses {
+			prefix, err := parseHostPrefix(a)
+			if err != nil {
+				return nil, fmt.Errorf("set %q: %w", s.Name, err)
+			}
+			addresses = append(addresses, prefix)
+		}
+		topo.Sets[s.Name] = Set{Name: s.Name, Subnets: s.Subnets, Addresses: addresses, Description: s.Description}
+	}
+
+	for _, s := range raw.Sites {
+		if _, exists := topo.Sites[s.Name]; exists {
+			return nil, fmt.Errorf("duplicate site name %q", s.Name)
+		}
+		topo.Sites[s.Name] = Site{Name: s.Name, Devices: s.Devices, Networks: s.Networks, Description: s.Description}
 	}
 
 	return topo, nil
+}
+
+// parseHostPrefix accepts a bare IP or a host prefix and normalizes it to
+// its full-length form (/32 for IPv4, /128 for IPv6).
+func parseHostPrefix(s string) (netip.Prefix, error) {
+	if strings.Contains(s, "/") {
+		prefix, err := netip.ParsePrefix(s)
+		if err != nil {
+			return netip.Prefix{}, fmt.Errorf("invalid address prefix %q: %w", s, err)
+		}
+		if bits := prefix.Addr().BitLen(); prefix.Bits() != bits {
+			return netip.Prefix{}, fmt.Errorf("address %q must be a single host (/%d)", s, bits)
+		}
+		return prefix, nil
+	}
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Prefix{}, fmt.Errorf("invalid address %q: %w", s, err)
+	}
+	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
 // LoadSubnets decodes a subnets.yaml document. It does not call Validate.
@@ -109,7 +171,7 @@ func LoadSubnets(r io.Reader) (map[string]Subnet, error) {
 		if _, exists := subnets[s.Name]; exists {
 			return nil, fmt.Errorf("duplicate subnet name %q", s.Name)
 		}
-		subnets[s.Name] = Subnet{Name: s.Name, CIDR: prefix}
+		subnets[s.Name] = Subnet{Name: s.Name, CIDR: prefix, Description: s.Description}
 	}
 	return subnets, nil
 }

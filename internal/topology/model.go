@@ -20,16 +20,13 @@ type Device struct {
 	Kind DeviceKind
 }
 
-// Endpoint is one side of a logical connection: a device, with an optional
-// interface label kept purely for documentation — it has no bearing on
-// validation, rule matching, or compiled output.
+// Endpoint is one side of a logical connection.
 type Endpoint struct {
-	Device    string
-	Interface string // optional
+	Device string
 }
 
-// Link is a logical connection between two devices. Multiple links between
-// the same pair of devices are allowed (e.g. redundant paths).
+// Link is a logical connection between two devices. At most one link may
+// connect the same pair of devices.
 type Link struct {
 	A, B Endpoint
 }
@@ -37,16 +34,37 @@ type Link struct {
 // Subnet is a named CIDR block. It carries no attachment of its own: where
 // it lives on the wire is defined by the Network that contains it.
 type Subnet struct {
-	Name string
-	CIDR netip.Prefix
+	Name        string
+	CIDR        netip.Prefix
+	Description string // optional note
 }
 
 // Network is one L2 segment: an attachment to one or more devices plus the
 // named list of member subnets (which becomes one ipset at compile time).
 type Network struct {
-	Name    string
-	Subnets []string
-	Attach  []Endpoint
+	Name        string
+	Subnets     []string
+	Attach      []Endpoint
+	Description string // optional note
+}
+
+// Set is a named address group for rule matching: references to subnets
+// plus individual host addresses. Unlike Network it has no attachment —
+// it only defines what an ipset contains.
+type Set struct {
+	Name        string
+	Subnets     []string       // references to Subnet
+	Addresses   []netip.Prefix // host prefixes (/32, /128)
+	Description string         // optional note
+}
+
+// Site is a visual grouping of devices and networks: one location.
+// Purely presentational — it never affects compilation.
+type Site struct {
+	Name        string
+	Devices     []string // refs to Device
+	Networks    []string // refs to Network
+	Description string   // optional note
 }
 
 // Topology is the full declared network: devices, their links, and the
@@ -56,4 +74,6 @@ type Topology struct {
 	Links    []Link
 	Subnets  map[string]Subnet
 	Networks map[string]Network
+	Sets     map[string]Set
+	Sites    map[string]Site
 }

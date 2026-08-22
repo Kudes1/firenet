@@ -2,8 +2,27 @@ package topology
 
 import (
 	"fmt"
+	"net/netip"
 	"sort"
+	"strings"
 )
+
+// ParseEndpointPrefix parses a rule endpoint written literally as an IPv4
+// address (becomes /32) or CIDR. It rejects names, garbage, and IPv6.
+func ParseEndpointPrefix(s string) (netip.Prefix, bool) {
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		p, err := netip.ParsePrefix(s)
+		if err != nil || !p.Addr().Is4() {
+			return netip.Prefix{}, false
+		}
+		return p.Masked(), true
+	}
+	a, err := netip.ParseAddr(s)
+	if err != nil || !a.Is4() {
+		return netip.Prefix{}, false
+	}
+	return netip.PrefixFrom(a, a.BitLen()), true
+}
 
 // Validate checks structural invariants: unique names, valid references,
 // non-overlapping subnets, and each subnet in at most one network.
@@ -14,12 +33,17 @@ func (t *Topology) Validate() error {
 	if err := t.validateSubnets(); err != nil {
 		return err
 	}
-	return t.validateNetworks()
+	if err := t.validateNetworks(); err != nil {
+		return err
+	}
+	return t.validateSets()
 }
 
 // validateLinks checks that every link and network attachment references a
-// known device, and that no link connects a device to itself.
+// known device, no link connects a device to itself, and each device pair is
+// connected by at most one link.
 func (t *Topology) validateLinks() error {
+	seen := make(map[[2]string]int, len(t.Links))
 	for i, l := range t.Links {
 		where := fmt.Sprintf("link[%d]", i)
 		if _, ok := t.Devices[l.A.Device]; !ok {
@@ -31,6 +55,14 @@ func (t *Topology) validateLinks() error {
 		if l.A.Device == l.B.Device {
 			return fmt.Errorf("%s: both ends on the same device %q", where, l.A.Device)
 		}
+		pair := [2]string{l.A.Device, l.B.Device}
+		if pair[0] > pair[1] {
+			pair[0], pair[1] = pair[1], pair[0]
+		}
+		if prev, dup := seen[pair]; dup {
+			return fmt.Errorf("%s: duplicate link between %q and %q (already link[%d])", where, pair[0], pair[1], prev)
+		}
+		seen[pair] = i
 	}
 
 	for _, name := range sortedNetworkNames(t.Networks) {
@@ -73,19 +105,127 @@ func (t *Topology) validateNetworks() error {
 	return nil
 }
 
-// ResolveNetwork flattens a subnet or network name into its constituent
-// subnet names (a bare subnet name resolves to itself).
+// validateSets checks set names don't collide with subnet/network names
+// (rules reference all of them in one flat namespace), subnet references
+// exist, and every address falls inside exactly one known subnet.
+func (t *Topology) validateSets() error {
+	for _, name := range sortedSetNames(t.Sets) {
+		s := t.Sets[name]
+		if _, ok := t.Subnets[name]; ok {
+			return fmt.Errorf("set %q: name collides with subnet %q", name, name)
+		}
+		if _, ok := t.Networks[name]; ok {
+			return fmt.Errorf("set %q: name collides with network %q", name, name)
+		}
+		if len(s.Subnets) == 0 && len(s.Addresses) == 0 {
+			return fmt.Errorf("set %q: must contain at least one subnet or address", name)
+		}
+		for _, ref := range s.Subnets {
+			if _, ok := t.Subnets[ref]; !ok {
+				return fmt.Errorf("set %q: unknown subnet %q", name, ref)
+			}
+		}
+		for _, addr := range s.Addresses {
+			if _, ok := t.subnetContaining(addr); !ok {
+				return fmt.Errorf("set %q: address %s is outside every known subnet", name, addr)
+			}
+		}
+	}
+	return nil
+}
+
+// subnetContaining returns the name of the unique known subnet whose CIDR
+// contains prefix (subnets are validated non-overlapping).
+func (t *Topology) subnetContaining(p netip.Prefix) (string, bool) {
+	for _, name := range sortedSubnetNames(t.Subnets) {
+		if t.Subnets[name].CIDR.Contains(p.Addr()) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// ResolveNetwork flattens a subnet, network, or set name into the subnet
+// names pathfinding should use: for a set that's its member subnets plus
+// the subnets containing its addresses.
 func (t *Topology) ResolveNetwork(name string) ([]string, error) {
 	if _, ok := t.Subnets[name]; ok {
 		return []string{name}, nil
 	}
 	n, ok := t.Networks[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown network or subnet %q", name)
+	if ok {
+		out := append([]string(nil), n.Subnets...)
+		sort.Strings(out)
+		return out, nil
 	}
-	out := append([]string(nil), n.Subnets...)
+	s, ok := t.Sets[name]
+	if ok {
+		seen := make(map[string]struct{}, len(s.Subnets)+len(s.Addresses))
+		out := make([]string, 0, len(s.Subnets)+len(s.Addresses))
+		for _, sub := range s.Subnets {
+			if _, dup := seen[sub]; !dup {
+				seen[sub] = struct{}{}
+				out = append(out, sub)
+			}
+		}
+		for _, addr := range s.Addresses {
+			if sub, ok := t.subnetContaining(addr); ok {
+				if _, dup := seen[sub]; !dup {
+					seen[sub] = struct{}{}
+					out = append(out, sub)
+				}
+			}
+		}
+		sort.Strings(out)
+		return out, nil
+	}
+	return nil, fmt.Errorf("unknown network, subnet, or set %q", name)
+}
+
+func sortedSetNames(m map[string]Set) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// EntityCIDRs returns the CIDR entries an ipset for name should contain:
+// subnet CIDRs plus host addresses for a set, subnet CIDRs for a network
+// or bare subnet.
+func (t *Topology) EntityCIDRs(name string) []string {
+	var out []string
+	if s, ok := t.Sets[name]; ok {
+		for _, ref := range s.Subnets {
+			out = append(out, t.Subnets[ref].CIDR.String())
+		}
+		for _, addr := range s.Addresses {
+			out = append(out, addr.String())
+		}
+		return out
+	}
+	subs, err := t.ResolveNetwork(name)
+	if err != nil {
+		return nil
+	}
+	for _, sub := range subs {
+		out = append(out, t.Subnets[sub].CIDR.String())
+	}
+	return out
+}
+
+// SubnetsOverlapping returns the sorted names of declared subnets whose
+// CIDR overlaps p — the placement anchors for a literally written endpoint.
+func (t *Topology) SubnetsOverlapping(p netip.Prefix) []string {
+	var out []string
+	for name, s := range t.Subnets {
+		if s.CIDR.Overlaps(p) {
+			out = append(out, name)
+		}
+	}
 	sort.Strings(out)
-	return out, nil
+	return out
 }
 
 func sortedNetworkNames(m map[string]Network) []string {

@@ -2,6 +2,7 @@ package topology
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -22,15 +23,15 @@ func baseTopology(t *testing.T) *Topology {
 			"r2": {Name: "r2", Kind: DeviceRouter},
 		},
 		Links: []Link{
-			{A: Endpoint{"r1", "wan0"}, B: Endpoint{"r2", "wan0"}},
+			{A: Endpoint{"r1"}, B: Endpoint{"r2"}},
 		},
 		Subnets: map[string]Subnet{
 			"a": {Name: "a", CIDR: mustPrefix(t, "10.0.0.0/24")},
 			"b": {Name: "b", CIDR: mustPrefix(t, "10.0.1.0/24")},
 		},
 		Networks: map[string]Network{
-			"n1": {Name: "n1", Subnets: []string{"a"}, Attach: []Endpoint{{Device: "r1", Interface: "lan0"}}},
-			"n2": {Name: "n2", Subnets: []string{"b"}, Attach: []Endpoint{{Device: "r2", Interface: "lan0"}}},
+			"n1": {Name: "n1", Subnets: []string{"a"}, Attach: []Endpoint{{Device: "r1"}}},
+			"n2": {Name: "n2", Subnets: []string{"b"}, Attach: []Endpoint{{Device: "r2"}}},
 		},
 	}
 }
@@ -42,11 +43,11 @@ func TestValidate_OK(t *testing.T) {
 	}
 }
 
-func TestValidate_InterfaceLabelUnconstrained(t *testing.T) {
+func TestValidate_DuplicateAttach(t *testing.T) {
 	topo := baseTopology(t)
-	// Interface labels are free-form annotations: duplicates, reuse across
-	// links/attachments, and omitting them entirely are all fine.
-	topo.Links = append(topo.Links, Link{A: Endpoint{Device: "r1", Interface: "lan0"}, B: Endpoint{Device: "r2"}})
+	n1 := topo.Networks["n1"]
+	n1.Attach = append(n1.Attach, Endpoint{Device: "r1"})
+	topo.Networks["n1"] = n1
 	if err := topo.Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,6 +66,20 @@ func TestValidate_SelfLoopLink(t *testing.T) {
 	topo.Links[0] = Link{A: Endpoint{Device: "r1"}, B: Endpoint{Device: "r1"}}
 	if err := topo.Validate(); err == nil {
 		t.Fatal("expected error for self-loop link")
+	}
+}
+
+func TestValidate_DuplicateLink(t *testing.T) {
+	for _, dup := range []Link{
+		{A: Endpoint{Device: "r1"}, B: Endpoint{Device: "r2"}}, // same order
+		{A: Endpoint{Device: "r2"}, B: Endpoint{Device: "r1"}}, // reversed
+	} {
+		topo := baseTopology(t)
+		topo.Links = append(topo.Links, dup)
+		err := topo.Validate()
+		if err == nil || !strings.Contains(err.Error(), "duplicate link") {
+			t.Errorf("expected duplicate link error for %+v, got %v", dup, err)
+		}
 	}
 }
 
@@ -123,6 +138,83 @@ func TestResolveNetwork_BareSubnet(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "a" {
 		t.Fatalf("ResolveNetwork(a) = %v, want [a]", got)
+	}
+}
+
+func mustHostPrefix(t *testing.T, s string) netip.Prefix {
+	t.Helper()
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		t.Fatalf("parse addr %q: %v", s, err)
+	}
+	return netip.PrefixFrom(addr, addr.BitLen())
+}
+
+func TestValidate_SetOK(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Sets = map[string]Set{
+		"s1": {Name: "s1", Subnets: []string{"a"}, Addresses: []netip.Prefix{mustHostPrefix(t, "10.0.1.5")}},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_SetNameCollidesWithSubnet(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Sets = map[string]Set{"a": {Name: "a", Subnets: []string{"b"}}}
+	if err := topo.Validate(); err == nil {
+		t.Fatal("expected error for set name colliding with subnet")
+	}
+}
+
+func TestValidate_SetNameCollidesWithNetwork(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Sets = map[string]Set{"n1": {Name: "n1", Subnets: []string{"a"}}}
+	if err := topo.Validate(); err == nil {
+		t.Fatal("expected error for set name colliding with network")
+	}
+}
+
+func TestValidate_SetUnknownSubnet(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Sets = map[string]Set{"s1": {Name: "s1", Subnets: []string{"ghost"}}}
+	if err := topo.Validate(); err == nil {
+		t.Fatal("expected error for unknown subnet in set")
+	}
+}
+
+func TestValidate_SetAddressOutsideKnownSubnets(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Sets = map[string]Set{"s1": {Name: "s1", Addresses: []netip.Prefix{mustHostPrefix(t, "192.168.5.5")}}}
+	if err := topo.Validate(); err == nil {
+		t.Fatal("expected error for address outside known subnets")
+	}
+}
+
+func TestValidate_EmptySet(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Sets = map[string]Set{"s1": {Name: "s1"}}
+	if err := topo.Validate(); err == nil {
+		t.Fatal("expected error for empty set")
+	}
+}
+
+func TestResolveNetwork_FlattensSetToContainingSubnets(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Sets = map[string]Set{
+		"s1": {Name: "s1", Subnets: []string{"a"}, Addresses: []netip.Prefix{
+			mustHostPrefix(t, "10.0.1.5"),
+			mustHostPrefix(t, "10.0.0.7"),
+		}},
+	}
+	got, err := topo.ResolveNetwork("s1")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	want := []string{"a", "b"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("ResolveNetwork(s1) = %v, want %v", got, want)
 	}
 }
 
