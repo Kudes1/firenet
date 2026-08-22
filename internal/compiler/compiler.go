@@ -3,6 +3,7 @@ package compiler
 import (
 	"fmt"
 	"hash/crc32"
+	"net/netip"
 	"sort"
 
 	"github.com/kudes1/firenet/internal/graph"
@@ -43,15 +44,20 @@ func expandAtomic(r rules.Rule) []atomicRule {
 type pairKey struct{ src, dst string }
 
 type deviceAccum struct {
-	rules      []CompiledRule
-	ipsetNames map[string]struct{}
+	rules  []CompiledRule
+	ips    []IPSet
+	ipsets map[string]int // entity name -> index into ips
 }
 
-func (a *deviceAccum) addIPSetRef(name string) {
-	if a.ipsetNames == nil {
-		a.ipsetNames = make(map[string]struct{})
+func (a *deviceAccum) addIPSetRef(entity, setName string) {
+	if _, ok := a.ipsets[entity]; ok {
+		return
 	}
-	a.ipsetNames[name] = struct{}{}
+	if a.ipsets == nil {
+		a.ipsets = make(map[string]int)
+	}
+	a.ipsets[entity] = len(a.ips)
+	a.ips = append(a.ips, IPSet{Name: setName, DisplayName: entity})
 }
 
 func (a *deviceAccum) addRule(r CompiledRule) {
@@ -65,31 +71,81 @@ func (a *deviceAccum) addRule(r CompiledRule) {
 }
 
 func ruleKey(r CompiledRule) string {
-	return fmt.Sprintf("%s|%s|%s|%v|%v|%s", r.SrcSet, r.DstSet, r.Proto, r.SrcPorts, r.DstPorts, r.Action)
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%v|%v|%s", r.SrcSet, r.DstSet, r.SrcAddr, r.DstAddr, r.Proto, r.SrcPorts, r.DstPorts, r.Action)
 }
 
 func (a *deviceAccum) ipsetList(topo *topology.Topology) []IPSet {
-	names := make([]string, 0, len(a.ipsetNames))
-	for n := range a.ipsetNames {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-
-	out := make([]IPSet, 0, len(names))
-	for _, n := range names {
-		subnets, _ := topo.ResolveNetwork(n) // already validated to succeed
-		cidrs := make([]string, 0, len(subnets))
-		for _, s := range subnets {
-			cidrs = append(cidrs, topo.Subnets[s].CIDR.String())
-		}
+	out := append([]IPSet(nil), a.ips...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	for i := range out {
+		cidrs := topo.EntityCIDRs(out[i].DisplayName)
 		sort.Strings(cidrs)
-		out = append(out, IPSet{Name: ipsetName(n), DisplayName: n, CIDRs: cidrs})
+		out[i].CIDRs = cidrs
 	}
 	return out
 }
 
+// ipsetNameMax is the kernel limit for an ipset name.
+const ipsetNameMax = 31
+
+// ipsetName derives a readable, ipset-safe set name from an entity name:
+// "office-net" becomes "fn_office-net". Names too long for the kernel limit
+// keep their readable head and gain a short hash tail to stay unique.
 func ipsetName(entity string) string {
-	return fmt.Sprintf("fn_%08x", crc32.ChecksumIEEE([]byte(entity)))
+	s := "fn_" + sanitizeName(entity)
+	if len(s) <= ipsetNameMax {
+		return s
+	}
+	tail := "_" + fmt.Sprintf("%08x", crc32.ChecksumIEEE([]byte(entity)))
+	return s[:ipsetNameMax-len(tail)] + tail
+}
+
+// sanitizeName keeps only characters valid in an ipset name; everything
+// else collapses to '_'.
+func sanitizeName(s string) string {
+	out := []byte(s)
+	for i, c := range out {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '_', c == '-', c == '.':
+		default:
+			out[i] = '_'
+		}
+	}
+	return string(out)
+}
+
+// ipsetNamer assigns each entity one stable ipset name within a compile run.
+// Entities whose sanitized names coincide ("a-b" vs "a_b") get a numeric
+// suffix so a collision can never silently merge two different address sets.
+type ipsetNamer struct {
+	assigned map[string]string // entity -> ipset name
+	taken    map[string]struct{}
+}
+
+func newIPSetNamer() *ipsetNamer {
+	return &ipsetNamer{assigned: make(map[string]string), taken: make(map[string]struct{})}
+}
+
+func (n *ipsetNamer) get(entity string) string {
+	if name, ok := n.assigned[entity]; ok {
+		return name
+	}
+	name := ipsetName(entity)
+	for seq := 2; ; seq++ {
+		if _, taken := n.taken[name]; !taken {
+			break
+		}
+		tail := fmt.Sprintf("_%d", seq)
+		base := ipsetName(entity)
+		if len(base)+len(tail) > ipsetNameMax {
+			base = base[:ipsetNameMax-len(tail)]
+		}
+		name = base + tail
+	}
+	n.assigned[entity] = name
+	n.taken[name] = struct{}{}
+	return name
 }
 
 func routerNames(topo *topology.Topology) []string {
@@ -116,27 +172,45 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 	}
 
 	pairCache := make(map[pairKey][]string)
+	names := newIPSetNamer()
 
 	for _, rule := range pol.Rules {
 		for _, ar := range expandAtomic(rule) {
 			srcAny := ar.Src == rules.Any
 			dstAny := ar.Dst == rules.Any
 
+			// resolveEndpoint maps an endpoint to the declared subnets
+			// pathfinding should use. A literally written address/CIDR
+			// anchors to the subnets overlapping it; the returned prefix
+			// is non-nil only for that case (the rule matches the address
+			// directly, no ipset is created).
+			resolveEndpoint := func(ep, side string) ([]string, *netip.Prefix, error) {
+				subs, err := topo.ResolveNetwork(ep)
+				if err == nil {
+					return subs, nil, nil
+				}
+				if p, ok := topology.ParseEndpointPrefix(ep); ok {
+					return topo.SubnetsOverlapping(p), &p, nil
+				}
+				return nil, nil, fmt.Errorf("rule %q: %s %q: %w", rule.Name, side, ep, err)
+			}
+
 			var srcSubnets, dstSubnets []string
+			var srcLit, dstLit *netip.Prefix
 			var err error
 			if !srcAny {
-				if srcSubnets, err = topo.ResolveNetwork(ar.Src); err != nil {
-					return nil, fmt.Errorf("rule %q: src %q: %w", rule.Name, ar.Src, err)
+				if srcSubnets, srcLit, err = resolveEndpoint(ar.Src, "src"); err != nil {
+					return nil, err
 				}
 			}
 			if !dstAny {
-				if dstSubnets, err = topo.ResolveNetwork(ar.Dst); err != nil {
-					return nil, fmt.Errorf("rule %q: dst %q: %w", rule.Name, ar.Dst, err)
+				if dstSubnets, dstLit, err = resolveEndpoint(ar.Dst, "dst"); err != nil {
+					return nil, err
 				}
 			}
 
 			var targets []string
-			if srcAny || dstAny {
+			if srcAny || dstAny || (srcLit != nil && len(srcSubnets) == 0) || (dstLit != nil && len(dstSubnets) == 0) {
 				// One side is unbounded (e.g. real external traffic beyond
 				// any declared subnet) — pathfinding can't tell which
 				// routers are relevant, so place on all of them. This is
@@ -178,21 +252,31 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 				DstPorts: ar.DstPorts,
 				Action:   ar.Action,
 			}
+			var srcSet, dstSet string
 			if !srcAny {
-				compiled.SrcSet = ipsetName(ar.Src)
+				if srcLit != nil {
+					compiled.SrcAddr = srcLit.String()
+				} else {
+					srcSet = names.get(ar.Src)
+				}
 			}
 			if !dstAny {
-				compiled.DstSet = ipsetName(ar.Dst)
+				if dstLit != nil {
+					compiled.DstAddr = dstLit.String()
+				} else {
+					dstSet = names.get(ar.Dst)
+				}
 			}
+			compiled.SrcSet, compiled.DstSet = srcSet, dstSet
 
 			for _, target := range targets {
 				a := accum[target]
 				a.addRule(compiled)
-				if !srcAny {
-					a.addIPSetRef(ar.Src)
+				if srcSet != "" {
+					a.addIPSetRef(ar.Src, srcSet)
 				}
-				if !dstAny {
-					a.addIPSetRef(ar.Dst)
+				if dstSet != "" {
+					a.addIPSetRef(ar.Dst, dstSet)
 				}
 			}
 		}

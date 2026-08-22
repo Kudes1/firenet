@@ -4,9 +4,9 @@ rules:
     - name: test
       comment: AI-55432
       src:
-        - office-net
+        - 10.10.10.2/32
       dst:
-        - main
+        - mr-1
       proto: tcp
       dstPorts:
         - "443"

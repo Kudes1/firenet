@@ -21,7 +21,7 @@ func testTopology(t *testing.T) *topology.Topology {
 			"office": {Name: "office", CIDR: prefix},
 		},
 		Networks: map[string]topology.Network{
-			"internal": {Name: "internal", Subnets: []string{"office"}, Attach: []topology.Endpoint{{Device: "r1", Interface: "lan0"}}},
+			"internal": {Name: "internal", Subnets: []string{"office"}, Attach: []topology.Endpoint{{Device: "r1"}}},
 		},
 	}
 }
@@ -43,6 +43,42 @@ func TestValidate_NetworkEndpointOK(t *testing.T) {
 	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
 	if err := pol.Validate(testTopology(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_SetEndpointOK(t *testing.T) {
+	topo := testTopology(t)
+	addr, _ := netip.ParseAddr("10.0.0.9")
+	topo.Sets = map[string]topology.Set{
+		"blocked": {Name: "blocked", Subnets: []string{"office"}, Addresses: []netip.Prefix{netip.PrefixFrom(addr, addr.BitLen())}},
+	}
+	r := baseRule()
+	r.Src = []string{"blocked"}
+	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LiteralEndpointOK(t *testing.T) {
+	for _, ep := range []string{"10.0.0.5", "10.0.0.0/24", "10.0.0.9/32"} {
+		r := baseRule()
+		r.Src = []string{ep}
+		pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+		if err := pol.Validate(testTopology(t)); err != nil {
+			t.Errorf("literal endpoint %q: unexpected error: %v", ep, err)
+		}
+	}
+}
+
+func TestValidate_InvalidLiteralEndpoint(t *testing.T) {
+	for _, ep := range []string{"10.0.0", "300.1.1.1", "10.0.0.5/33", "10.0.0.5/24/x", "::1", "fe80::/64"} {
+		r := baseRule()
+		r.Src = []string{ep}
+		pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+		if err := pol.Validate(testTopology(t)); err == nil {
+			t.Errorf("literal endpoint %q: expected error", ep)
+		}
 	}
 }
 

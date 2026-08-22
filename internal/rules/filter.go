@@ -95,6 +95,13 @@ func matchByAddr(names []string, topo *topology.Topology, hit func(netip.Prefix)
 		if n == Any {
 			return true
 		}
+		if p, ok := topology.ParseEndpointPrefix(n); ok {
+			// A literally written endpoint matches by its own CIDR.
+			if hit(p) {
+				return true
+			}
+			continue
+		}
 		subs, err := topo.ResolveNetwork(n)
 		if err != nil {
 			continue

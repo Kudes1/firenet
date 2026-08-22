@@ -82,6 +82,25 @@ func TestRenderRules_SrcAndDstPorts(t *testing.T) {
 	}
 }
 
+func TestRenderRules_LiteralAddressMatch(t *testing.T) {
+	ds := compiler.DeviceRuleset{
+		Device: "r1",
+		Rules: []compiler.CompiledRule{
+			{Comment: "host-ssh", SrcAddr: "10.0.0.5/32", DstAddr: "10.0.1.0/24", Proto: rules.ProtoTCP, DstPorts: []string{"22"}, Action: rules.ActionAllow},
+		},
+		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
+	}
+	out := string(RenderRules(ds))
+	if !strings.Contains(out, "-s 10.0.0.5/32") || !strings.Contains(out, "-d 10.0.1.0/24") {
+		t.Fatalf("missing literal address match clauses:\n%s", out)
+	}
+	if strings.Contains(out, "--match-set") {
+		t.Fatalf("literal addresses must not be rendered as ipset matches:\n%s", out)
+	}
+}
+
 func TestRenderRules_ChainPositionTop(t *testing.T) {
 	ds := compiler.DeviceRuleset{Device: "r1", DefaultAction: rules.ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: rules.ChainTop}
 	out := string(RenderRules(ds))

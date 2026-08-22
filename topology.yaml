@@ -7,8 +7,12 @@ devices:
       kind: switch
     - name: office1
       kind: router
-    - name: zavod
+    - name: core2
+      kind: switch
+    - name: market
       kind: router
+    - name: core_office1
+      kind: switch
 links:
     - a:
         device: test1
@@ -19,22 +23,67 @@ links:
       b:
         device: test2
     - a:
-        device: core
+        device: core2
+      b:
+        device: market
+    - a:
+        device: office1
+      b:
+        device: core_office1
+    - a:
+        device: market
+      b:
+        device: test2
+    - a:
+        device: market
+      b:
+        device: test1
+    - a:
+        device: test1
       b:
         device: office1
     - a:
-        device: zavod
+        device: test2
       b:
-        device: core
+        device: office1
+    - a:
+        device: market
+      b:
+        device: office1
 networks:
-    - name: servers
-      subnets:
-        - main
-      attach:
-        - device: test1
-        - device: test2
-    - name: test1
+    - name: OFFICE-NETWORK
       subnets:
         - office-net
       attach:
-        - device: office1
+        - device: core_office1
+    - name: MAIN
+      subnets:
+        - main
+      attach:
+        - device: core
+    - name: MARKET
+      subnets:
+        - mr-1
+      attach:
+        - device: core2
+sets: []
+unions:
+    - name: Главный офис
+      devices:
+        - office1
+        - core_office1
+      networks:
+        - OFFICE-NETWORK
+    - name: Дата-Центр
+      devices:
+        - core
+        - test2
+        - test1
+      networks:
+        - MAIN
+    - name: Магазин
+      devices:
+        - core2
+        - market
+      networks:
+        - MARKET

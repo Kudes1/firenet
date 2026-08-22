@@ -74,14 +74,20 @@ test("draftHint flags empty fields, duplicates and CIDR overlaps", () => {
 
 test("saveDraft appends a new subnet and persists the whole document", async () => {
   const { page, calls } = bootPage();
-  page.rows = [{ name: "a", cidr: "10.0.0.0/24", owner: "net1" }];
-  page.draft = { index: -1, name: "b", cidr: "10.0.1.0/24" };
+  page.rows = [{ name: "a", cidr: "10.0.0.0/24", description: "офис", owner: "net1" }];
+  page.draft = { index: -1, name: "b", cidr: "10.0.1.0/24", description: "гостевая" };
 
   await page.saveDraft();
 
   const put = calls.find((c) => c.path === "/api/subnets" && c.method === "PUT");
-  assert.deepEqual(put.body, { subnets: [{ name: "a", cidr: "10.0.0.0/24" }, { name: "b", cidr: "10.0.1.0/24" }] });
+  assert.deepEqual(put.body, {
+    subnets: [
+      { name: "a", cidr: "10.0.0.0/24", description: "офис" },
+      { name: "b", cidr: "10.0.1.0/24", description: "гостевая" },
+    ],
+  });
   assert.equal(page.rows.length, 2);
+  assert.equal(page.rows[0].description, "офис"); // description survives persist
   assert.equal(page.rows[0].owner, "net1"); // owner refreshed from topology
   assert.ok(calls.some((c) => c.path === "dialog.close"));
 });
@@ -94,6 +100,32 @@ test("saveDraft is blocked while the draft is invalid", async () => {
   await page.saveDraft();
 
   assert.equal(calls.filter((c) => c.method === "PUT").length, 0);
+});
+
+test("filteredRows filters by name, cidr, owner and description substrings", () => {
+  const { page } = bootPage();
+  page.rows = [
+    { name: "a", cidr: "10.0.0.0/24", owner: "net1", description: "офис" },
+    { name: "b", cidr: "192.168.1.0/24", owner: "", description: "" },
+  ];
+
+  page.filters = { ...page.filters, name: "A" };
+  assert.deepEqual(page.filteredRows.map((r) => r.row.name), ["a"]);
+
+  page.filters = { ...page.filters, name: "", cidr: "192.168." };
+  assert.deepEqual(page.filteredRows.map((r) => r.row.name), ["b"]);
+
+  page.filters = { ...page.filters, cidr: "", owner: "NET" };
+  assert.deepEqual(page.filteredRows.map((r) => r.row.name), ["a"]);
+
+  page.filters = { ...page.filters, owner: "", description: "ФИС" };
+  assert.deepEqual(page.filteredRows.map((r) => r.row.name), ["a"]);
+
+  page.filters = { ...page.filters, description: "nope" };
+  assert.deepEqual(page.filteredRows, []);
+
+  page.resetFilters();
+  assert.deepEqual(page.filteredRows.map((r) => r.row.name), ["a", "b"]);
 });
 
 test("removeRow deletes after confirmation", async () => {

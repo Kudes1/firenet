@@ -70,6 +70,28 @@ func TestFilterRules_EndpointNameSubstring(t *testing.T) {
 	}
 }
 
+func TestFilterRules_LiteralEndpointMatchesIP(t *testing.T) {
+	host := baseRule()
+	host.Name, host.Src = "host", []string{"10.0.0.5"} // dst stays "any"
+
+	cases := []struct {
+		f       Filters
+		wantLen int
+	}{
+		{Filters{Src: "10.0.0.5"}, 1}, // exact address hits the /32
+		{Filters{Src: "10.0.0.9"}, 0}, // other addresses of the subnet don't
+		{Filters{Src: "10.0."}, 1},    // partial IPv4 overlaps the /32
+		{Filters{Src: "10.0.0"}, 1},
+		{Filters{Dst: "10.0.0.9"}, 1}, // dst is "any": matches every IP
+	}
+	for i, tc := range cases {
+		got := FilterRules([]Rule{host}, tc.f, testTopology(t))
+		if len(got) != tc.wantLen {
+			t.Errorf("case %d filters %+v: got %d rules, want %d", i, tc.f, len(got), tc.wantLen)
+		}
+	}
+}
+
 func TestFilterRules_IPMatchesSubnet(t *testing.T) {
 	inOffice := baseRule() // src=office 10.0.0.0/24
 	other := baseRule()

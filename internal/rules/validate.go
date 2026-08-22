@@ -83,7 +83,11 @@ func validEndpoint(topo *topology.Topology, name string) bool {
 	if _, ok := topo.Networks[name]; ok {
 		return true
 	}
-	return false
+	if _, ok := topo.Sets[name]; ok {
+		return true
+	}
+	_, ok := topology.ParseEndpointPrefix(name)
+	return ok
 }
 
 func validatePortList(ports []string) error {
