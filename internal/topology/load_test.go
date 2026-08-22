@@ -6,6 +6,49 @@ import (
 	"testing"
 )
 
+func TestLoad_FilteredLink(t *testing.T) {
+	in := `
+devices:
+  - {name: m, kind: router}
+  - {name: d, kind: router}
+links:
+  - a: {device: m}
+    b: {device: d}
+    filter:
+      a-exports: [MARKET, mr-extra]
+      b-exports: [MAIN]
+`
+	topo, err := Load(strings.NewReader(in))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	l := topo.Links[0]
+	if l.Filter == nil {
+		t.Fatal("expected filter on link")
+	}
+	if !slices.Equal(l.Filter.AExports, []string{"MARKET", "mr-extra"}) || !slices.Equal(l.Filter.BExports, []string{"MAIN"}) {
+		t.Fatalf("unexpected filter: %+v", l.Filter)
+	}
+}
+
+func TestLoad_PlainLinkHasNoFilter(t *testing.T) {
+	in := `
+devices:
+  - {name: m, kind: router}
+  - {name: d, kind: router}
+links:
+  - a: {device: m}
+    b: {device: d}
+`
+	topo, err := Load(strings.NewReader(in))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if topo.Links[0].Filter != nil {
+		t.Fatal("plain link must have nil filter")
+	}
+}
+
 func TestLoad_TopologyYAML(t *testing.T) {
 	in := `
 devices:
@@ -32,14 +75,14 @@ networks:
 	}
 }
 
-func TestLoad_Sites(t *testing.T) {
+func TestLoad_Unions(t *testing.T) {
 	in := `
 devices:
   - {name: r1, kind: router}
 links: []
 networks:
   - {name: net1, subnets: [a]}
-sites:
+unions:
   - name: office
     description: Главный офис
     devices:  [r1]
@@ -49,37 +92,37 @@ sites:
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	s, ok := topo.Sites["office"]
+	s, ok := topo.Unions["office"]
 	if !ok {
-		t.Fatalf("site office missing: %+v", topo.Sites)
+		t.Fatalf("union office missing: %+v", topo.Unions)
 	}
 	if s.Description != "Главный офис" || !slices.Equal(s.Devices, []string{"r1"}) || !slices.Equal(s.Networks, []string{"net1"}) {
-		t.Fatalf("unexpected site: %+v", s)
+		t.Fatalf("unexpected union: %+v", s)
 	}
 }
 
-func TestLoad_TopologyWithoutSitesStillLoads(t *testing.T) {
+func TestLoad_TopologyWithoutUnionsStillLoads(t *testing.T) {
 	in := "devices:\n  - {name: r1, kind: router}\nlinks: []\nnetworks: []\nsets: []\n"
 	topo, err := Load(strings.NewReader(in))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(topo.Sites) != 0 {
-		t.Fatalf("expected no sites, got %+v", topo.Sites)
+	if len(topo.Unions) != 0 {
+		t.Fatalf("expected no unions, got %+v", topo.Unions)
 	}
 }
 
-func TestLoad_DuplicateSiteName(t *testing.T) {
+func TestLoad_DuplicateUnionName(t *testing.T) {
 	in := `
 devices: []
 links: []
 networks: []
-sites:
+unions:
   - {name: office}
   - {name: office}
 `
-	if _, err := Load(strings.NewReader(in)); err == nil || !strings.Contains(err.Error(), "duplicate site") {
-		t.Fatalf("want duplicate site error, got %v", err)
+	if _, err := Load(strings.NewReader(in)); err == nil || !strings.Contains(err.Error(), "duplicate union") {
+		t.Fatalf("want duplicate union error, got %v", err)
 	}
 }
 

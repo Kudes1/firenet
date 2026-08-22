@@ -13,9 +13,15 @@ type yamlEndpoint struct {
 	Device string `yaml:"device"`
 }
 
+type yamlLinkFilter struct {
+	AExports []string `yaml:"a-exports"`
+	BExports []string `yaml:"b-exports"`
+}
+
 type yamlLink struct {
-	A yamlEndpoint `yaml:"a"`
-	B yamlEndpoint `yaml:"b"`
+	A      yamlEndpoint    `yaml:"a"`
+	B      yamlEndpoint    `yaml:"b"`
+	Filter *yamlLinkFilter `yaml:"filter,omitempty"`
 }
 
 type yamlDevice struct {
@@ -37,7 +43,7 @@ type yamlSet struct {
 	Description string   `yaml:"description,omitempty"`
 }
 
-type yamlSite struct {
+type yamlUnion struct {
 	Name        string   `yaml:"name"`
 	Devices     []string `yaml:"devices,omitempty"`
 	Networks    []string `yaml:"networks,omitempty"`
@@ -49,7 +55,7 @@ type yamlTopology struct {
 	Links    []yamlLink    `yaml:"links"`
 	Networks []yamlNetwork `yaml:"networks"`
 	Sets     []yamlSet     `yaml:"sets"`
-	Sites    []yamlSite    `yaml:"sites"`
+	Unions   []yamlUnion   `yaml:"unions"`
 }
 
 type yamlSubnetDoc struct {
@@ -76,7 +82,7 @@ func Load(r io.Reader) (*Topology, error) {
 		Devices:  make(map[string]Device, len(raw.Devices)),
 		Networks: make(map[string]Network, len(raw.Networks)),
 		Sets:     make(map[string]Set, len(raw.Sets)),
-		Sites:    make(map[string]Site, len(raw.Sites)),
+		Unions:   make(map[string]Union, len(raw.Unions)),
 	}
 
 	for _, d := range raw.Devices {
@@ -91,10 +97,11 @@ func Load(r io.Reader) (*Topology, error) {
 	}
 
 	for _, l := range raw.Links {
-		topo.Links = append(topo.Links, Link{
-			A: Endpoint{Device: l.A.Device},
-			B: Endpoint{Device: l.B.Device},
-		})
+		link := Link{A: Endpoint{Device: l.A.Device}, B: Endpoint{Device: l.B.Device}}
+		if l.Filter != nil {
+			link.Filter = &LinkFilter{AExports: l.Filter.AExports, BExports: l.Filter.BExports}
+		}
+		topo.Links = append(topo.Links, link)
 	}
 
 	for _, n := range raw.Networks {
@@ -123,11 +130,11 @@ func Load(r io.Reader) (*Topology, error) {
 		topo.Sets[s.Name] = Set{Name: s.Name, Subnets: s.Subnets, Addresses: addresses, Description: s.Description}
 	}
 
-	for _, s := range raw.Sites {
-		if _, exists := topo.Sites[s.Name]; exists {
-			return nil, fmt.Errorf("duplicate site name %q", s.Name)
+	for _, s := range raw.Unions {
+		if _, exists := topo.Unions[s.Name]; exists {
+			return nil, fmt.Errorf("duplicate union name %q", s.Name)
 		}
-		topo.Sites[s.Name] = Site{Name: s.Name, Devices: s.Devices, Networks: s.Networks, Description: s.Description}
+		topo.Unions[s.Name] = Union{Name: s.Name, Devices: s.Devices, Networks: s.Networks, Description: s.Description}
 	}
 
 	return topo, nil

@@ -25,10 +25,19 @@ type Endpoint struct {
 	Device string
 }
 
+// LinkFilter restricts which entities each side exports across the link
+// (route-filter semantics): traffic from subnet S to subnet D may cross
+// in direction A→B only if S resolves from AExports and D from BExports.
+type LinkFilter struct {
+	AExports []string // networks/subnets side A announces
+	BExports []string // networks/subnets side B announces
+}
+
 // Link is a logical connection between two devices. At most one link may
 // connect the same pair of devices.
 type Link struct {
-	A, B Endpoint
+	A, B   Endpoint
+	Filter *LinkFilter // nil = обычная связь полной связности
 }
 
 // Subnet is a named CIDR block. It carries no attachment of its own: where
@@ -58,9 +67,9 @@ type Set struct {
 	Description string         // optional note
 }
 
-// Site is a visual grouping of devices and networks: one location.
+// Union is a visual grouping of devices and networks: one location.
 // Purely presentational — it never affects compilation.
-type Site struct {
+type Union struct {
 	Name        string
 	Devices     []string // refs to Device
 	Networks    []string // refs to Network
@@ -75,5 +84,5 @@ type Topology struct {
 	Subnets  map[string]Subnet
 	Networks map[string]Network
 	Sets     map[string]Set
-	Sites    map[string]Site
+	Unions   map[string]Union
 }
