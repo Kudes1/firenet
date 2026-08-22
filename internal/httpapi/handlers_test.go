@@ -607,12 +607,16 @@ func TestPutTopology_LinkFilterRoundTrip(t *testing.T) {
 func TestPutTopology_RejectsFilteredLinkWithSwitch(t *testing.T) {
 	h, _ := newTestServer(t)
 	doc := TopologyDoc{
-		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "sw", Kind: "switch"}},
+		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}, {Name: "sw", Kind: "switch"}},
 		Links: []LinkDoc{{
 			A:      EndpointDoc{Device: "r1"},
 			B:      EndpointDoc{Device: "sw"},
-			Filter: &LinkFilterDoc{AExports: []string{"n1"}, BExports: []string{"n2"}},
+			Filter: &LinkFilterDoc{AExports: []string{"n-office"}, BExports: []string{"n-dmz"}},
 		}},
+		Networks: []NetworkDoc{
+			{Name: "n-office", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
+			{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []EndpointDoc{{Device: "r2"}}},
+		},
 	}
 	res := doJSON(t, h, http.MethodPut, "/api/topology", doc)
 	if res.Code != http.StatusUnprocessableEntity {

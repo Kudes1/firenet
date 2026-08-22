@@ -59,8 +59,7 @@ document.addEventListener("alpine:init", () => {
       next[this.draft.index] = { ...next[this.draft.index], filter: { aExports: [...this.draft.aExports], bExports: [...this.draft.bExports] } };
       this.saving = true;
       try {
-        await this.persist(next);
-        this.closeModal();
+        if (await this.persist(next)) this.closeModal();
       } finally {
         this.saving = false;
       }
@@ -101,8 +100,10 @@ document.addEventListener("alpine:init", () => {
           ...(l.filter ? { filter: { aExports: [...(l.filter.aExports || [])], bExports: [...(l.filter.bExports || [])] } } : {}),
         }));
         showBanner("Связи сохранены", "ok");
+        return true;
       } catch (e) {
         showBanner("Ошибка сохранения: " + e.message);
+        return false;
       }
     },
   }));

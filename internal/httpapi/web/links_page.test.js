@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function bootPage() {
+function bootPage(failPut = false) {
   const factories = {};
   const calls = [];
   const banners = [];
@@ -29,7 +29,7 @@ function bootPage() {
     window: { dispatchEvent: notify },
     localStorage: { getItem: () => null, setItem() {} },
     matchMedia: () => ({ matches: false }),
-    CustomEvent: class {},
+    CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
     dispatchEvent: notify,
     confirm: () => true,
     setTimeout,
@@ -38,6 +38,7 @@ function bootPage() {
     fetch: async (path_, opts) => {
       calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
       if (path_ === "/api/topology") {
+        if (failPut && opts?.method === "PUT") return { ok: false, status: 422, json: async () => ({ error: "x" }) };
         return { ok: true, status: 200, json: async () => calls.find((c) => c.method === "PUT")?.body || topoFixture };
       }
       if (path_ === "/api/subnets") {
@@ -59,8 +60,8 @@ function bootPage() {
   return { page, calls, banners };
 }
 
-async function bootLoadedPage() {
-  const ctx = bootPage();
+async function bootLoadedPage(failPut = false) {
+  const ctx = bootPage(failPut);
   await ctx.page.init();
   return ctx;
 }
@@ -109,6 +110,17 @@ test("saveDraft writes edited exports preserving the rest verbatim", async () =>
   function topoNetworks() {
     return [{ name: "NA", subnets: ["a"], attach: [{ device: "m" }] }, { name: "NC", subnets: ["c"], attach: [{ device: "o" }] }];
   }
+});
+
+test("saveDraft keeps the dialog open when the PUT fails", async () => {
+  const { page, calls, banners } = await bootLoadedPage(true);
+  page.openEdit(0);
+  page.draft.aExports = ["NA"];
+
+  await page.saveDraft();
+
+  assert.ok(!calls.some((c) => c.path === "dialog.close"), "dialog stays open on failure");
+  assert.ok(banners.some((b) => b.message.includes("Ошибка сохранения")), "error banner shown");
 });
 
 test("makeFiltered adds an empty filter and keeps other sections", async () => {
