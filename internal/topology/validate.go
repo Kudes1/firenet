@@ -39,7 +39,7 @@ func (t *Topology) Validate() error {
 	if err := t.validateSets(); err != nil {
 		return err
 	}
-	return t.validateSites()
+	return t.validateUnions()
 }
 
 // validateLinks checks that every link and network attachment references a
@@ -66,6 +66,25 @@ func (t *Topology) validateLinks() error {
 			return fmt.Errorf("%s: duplicate link between %q and %q (already link[%d])", where, pair[0], pair[1], prev)
 		}
 		seen[pair] = i
+
+		if l.Filter != nil {
+			if t.Devices[l.A.Device].Kind != DeviceRouter || t.Devices[l.B.Device].Kind != DeviceRouter {
+				return fmt.Errorf("%s: filtered link must connect two routers", where)
+			}
+			if l.Filter.AExports == nil || l.Filter.BExports == nil {
+				return fmt.Errorf("%s: filter must declare both a-exports and b-exports", where)
+			}
+			for _, name := range l.Filter.AExports {
+				if !t.knownExport(name) {
+					return fmt.Errorf("%s: unknown export entity %q", where, name)
+				}
+			}
+			for _, name := range l.Filter.BExports {
+				if !t.knownExport(name) {
+					return fmt.Errorf("%s: unknown export entity %q", where, name)
+				}
+			}
+		}
 	}
 
 	for _, name := range sortedNetworkNames(t.Networks) {
@@ -137,28 +156,28 @@ func (t *Topology) validateSets() error {
 	return nil
 }
 
-// validateSites checks member references exist and every device/network is
-// a member of at most one site.
-func (t *Topology) validateSites() error {
+// validateUnions checks member references exist and every device/network is
+// a member of at most one union.
+func (t *Topology) validateUnions() error {
 	devOwner := make(map[string]string, len(t.Devices))
 	netOwner := make(map[string]string, len(t.Networks))
-	for _, name := range sortedSiteNames(t.Sites) {
-		s := t.Sites[name]
+	for _, name := range sortedUnionNames(t.Unions) {
+		s := t.Unions[name]
 		for _, d := range s.Devices {
 			if _, ok := t.Devices[d]; !ok {
-				return fmt.Errorf("site %q: unknown device %q", name, d)
+				return fmt.Errorf("union %q: unknown device %q", name, d)
 			}
 			if prev, ok := devOwner[d]; ok {
-				return fmt.Errorf("device %q belongs to both site %q and %q", d, prev, name)
+				return fmt.Errorf("device %q belongs to both union %q and %q", d, prev, name)
 			}
 			devOwner[d] = name
 		}
 		for _, n := range s.Networks {
 			if _, ok := t.Networks[n]; !ok {
-				return fmt.Errorf("site %q: unknown network %q", name, n)
+				return fmt.Errorf("union %q: unknown network %q", name, n)
 			}
 			if prev, ok := netOwner[n]; ok {
-				return fmt.Errorf("network %q belongs to both site %q and %q", n, prev, name)
+				return fmt.Errorf("network %q belongs to both union %q and %q", n, prev, name)
 			}
 			netOwner[n] = name
 		}
@@ -166,13 +185,21 @@ func (t *Topology) validateSites() error {
 	return nil
 }
 
-func sortedSiteNames(m map[string]Site) []string {
+func sortedUnionNames(m map[string]Union) []string {
 	names := make([]string, 0, len(m))
 	for name := range m {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
+}
+
+// knownExport reports whether name may appear in a link filter's export
+// list: networks and bare subnets qualify, sets do not.
+func (t *Topology) knownExport(name string) bool {
+	_, isSubnet := t.Subnets[name]
+	_, isNetwork := t.Networks[name]
+	return isSubnet || isNetwork
 }
 
 // subnetContaining returns the name of the unique known subnet whose CIDR

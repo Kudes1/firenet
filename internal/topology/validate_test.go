@@ -225,37 +225,97 @@ func TestResolveNetwork_UnknownName(t *testing.T) {
 	}
 }
 
-func TestValidate_Sites(t *testing.T) {
+func TestValidate_FilteredLink_OK(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Links[0] = Link{
+		A: Endpoint{"r1"}, B: Endpoint{"r2"},
+		Filter: &LinkFilter{AExports: []string{"n1"}, BExports: []string{"n2"}},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_FilteredLink_NeedsTwoRouters(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Devices["sw"] = Device{Name: "sw", Kind: DeviceSwitch}
+	topo.Links[0] = Link{
+		A: Endpoint{"r1"}, B: Endpoint{"sw"},
+		Filter: &LinkFilter{AExports: []string{"n1"}, BExports: []string{"n2"}},
+	}
+	err := topo.Validate()
+	if err == nil || !strings.Contains(err.Error(), "two routers") {
+		t.Fatalf("expected two-routers error, got: %v", err)
+	}
+}
+
+func TestValidate_FilteredLink_MissingSide(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Links[0] = Link{A: Endpoint{"r1"}, B: Endpoint{"r2"}, Filter: &LinkFilter{}}
+	err := topo.Validate()
+	if err == nil || !strings.Contains(err.Error(), "must declare") {
+		t.Fatalf("expected missing-side error, got: %v", err)
+	}
+}
+
+func TestValidate_FilteredLink_UnknownExport(t *testing.T) {
+	for _, f := range []LinkFilter{
+		{AExports: []string{"ghost"}, BExports: []string{"n2"}},
+		{AExports: []string{"n1"}, BExports: []string{"ghost"}},
+	} {
+		topo := baseTopology(t)
+		topo.Links[0] = Link{A: Endpoint{"r1"}, B: Endpoint{"r2"}, Filter: &f}
+		err := topo.Validate()
+		if err == nil || !strings.Contains(err.Error(), "unknown export entity") {
+			t.Fatalf("expected unknown export error, got: %v", err)
+		}
+	}
+}
+
+func TestValidate_FilteredLink_RejectsSetExport(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Sets = map[string]Set{"s1": {Name: "s1", Subnets: []string{"a"}}}
+	topo.Links[0] = Link{
+		A: Endpoint{"r1"}, B: Endpoint{"r2"},
+		Filter: &LinkFilter{AExports: []string{"s1"}, BExports: []string{"n2"}},
+	}
+	err := topo.Validate()
+	if err == nil || !strings.Contains(err.Error(), "unknown export entity") {
+		t.Fatalf("sets are not valid exports, got: %v", err)
+	}
+}
+
+func TestValidate_Unions(t *testing.T) {
 	base := func() *Topology {
 		return &Topology{
 			Devices:  map[string]Device{"r1": {Name: "r1", Kind: DeviceRouter}},
 			Subnets:  map[string]Subnet{},
 			Networks: map[string]Network{"net1": {Name: "net1"}},
 			Sets:     map[string]Set{},
-			Sites: map[string]Site{"office": {
+			Unions: map[string]Union{"office": {
 				Name: "office", Devices: []string{"r1"}, Networks: []string{"net1"},
 			}},
 		}
 	}
 	if err := base().Validate(); err != nil {
-		t.Fatalf("valid sites rejected: %v", err)
+		t.Fatalf("valid unions rejected: %v", err)
 	}
 
 	badRef := base()
-	badRef.Sites["office"] = Site{Name: "office", Devices: []string{"ghost"}}
+	badRef.Unions["office"] = Union{Name: "office", Devices: []string{"ghost"}}
 	if err := badRef.Validate(); err == nil || !strings.Contains(err.Error(), `unknown device "ghost"`) {
 		t.Fatalf("want unknown device error, got %v", err)
 	}
 
 	double := base()
-	double.Sites["zavod"] = Site{Name: "zavod", Devices: []string{"r1"}}
+	double.Unions["zavod"] = Union{Name: "zavod", Devices: []string{"r1"}}
 	err := double.Validate()
-	if err == nil || !strings.Contains(err.Error(), `both site "office" and "zavod"`) {
+	if err == nil || !strings.Contains(err.Error(), `both union "office" and "zavod"`) {
 		t.Fatalf("want double membership error, got %v", err)
 	}
 
 	badNet := base()
-	badNet.Sites["office"] = Site{Name: "office", Networks: []string{"ghost"}}
+	badNet.Unions["office"] = Union{Name: "office", Networks: []string{"ghost"}}
 	if err := badNet.Validate(); err == nil || !strings.Contains(err.Error(), `unknown network "ghost"`) {
 		t.Fatalf("want unknown network error, got %v", err)
 	}
