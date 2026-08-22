@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -15,10 +16,10 @@ devices:
 networks:
   - name: office
     subnets: [office]
-    attach: [{device: r1, interface: a0}, {device: r2, interface: a0}]
+    attach: [{device: r1}, {device: r2}]
   - name: dmz
     subnets: [dmz]
-    attach: [{device: r1, interface: b0}, {device: r2, interface: b0}]
+    attach: [{device: r1}, {device: r2}]
 `
 
 const e2eSubnets = `
@@ -108,4 +109,78 @@ networks:
 	if err == nil || !strings.Contains(err.Error(), "unknown subnet") {
 		t.Fatalf("expected unknown subnet error, got: %v", err)
 	}
+}
+
+const filteredChainTopology = `
+devices:
+  - {name: m, kind: router}
+  - {name: d, kind: router}
+  - {name: o, kind: router}
+links:
+  - a: {device: m}
+    b: {device: d}
+    filter:
+      a-exports: [NA]
+      b-exports: [NB]
+  - a: {device: d}
+    b: {device: o}
+networks:
+  - {name: NA, subnets: [a], attach: [{device: m}]}
+  - {name: NB, subnets: [b], attach: [{device: d}]}
+  - {name: NC, subnets: [c], attach: [{device: o}]}
+`
+
+const filteredChainSubnets = `
+subnets:
+  - {name: a, cidr: 10.0.10.0/24}
+  - {name: b, cidr: 10.0.11.0/24}
+  - {name: c, cidr: 10.0.12.0/24}
+`
+
+func TestCompile_FilteredLinkBlocksUnannouncedPair(t *testing.T) {
+	rules := `
+defaultAction: deny
+rules:
+  - {name: blocked, src: [NA], dst: [NC], action: allow}
+`
+	out, err := Compile(context.Background(), discardLogger(), CompileOptions{
+		TopologyYAML: []byte(filteredChainTopology),
+		SubnetsYAML:  []byte(filteredChainSubnets),
+		RulesYAML:    []byte(rules),
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("unannounced pair must place no rules, got devices: %v", names(out))
+	}
+}
+
+func TestCompile_FilteredLinkKeepsAnnouncedPair(t *testing.T) {
+	rules := `
+defaultAction: deny
+rules:
+  - {name: allowed, src: [NB], dst: [NC], action: allow}
+`
+	out, err := Compile(context.Background(), discardLogger(), CompileOptions{
+		TopologyYAML: []byte(filteredChainTopology),
+		SubnetsYAML:  []byte(filteredChainSubnets),
+		RulesYAML:    []byte(rules),
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	got := names(out)
+	want := []string{"d", "o"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("announced pair places on %v, want %v", got, want)
+	}
+}
+
+func names(out []CompiledDevice) []string {
+	var s []string
+	for _, d := range out {
+		s = append(s, d.Name)
+	}
+	return s
 }
