@@ -19,6 +19,8 @@ type CompiledRule struct {
 	Comment  string // source rule name, for traceability
 	SrcSet   string // ipset name; "" = unconditional (any)
 	DstSet   string
+	SrcAddr  string // literal address/CIDR match (-s), when no ipset is used
+	DstAddr  string // literal address/CIDR match (-d), when no ipset is used
 	Proto    rules.Proto
 	SrcPorts []string
 	DstPorts []string

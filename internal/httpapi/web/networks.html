@@ -16,12 +16,12 @@
 
 <main x-data="networksPage">
   <div class="table-toolbar">
-    <div>
+    <div class="toolbar-text">
       <h3>Сети (списки ipset)</h3>
       <p class="hint">Сеть — именованный список подсетей, из которого при компиляции получается один ipset. Подсеть может входить только в одну сеть. Привязка сетей к устройствам — на странице «Топология».</p>
     </div>
     <div class="toolbar-actions">
-      <button type="button" class="primary" @click="openAdd()">+ сеть</button>
+      <button type="button" class="secondary btn-sm" @click="searchOpen = !searchOpen" title="Поиск по сетям">&#128269;</button>
     </div>
   </div>
   <div class="table-wrap" x-show="loaded" x-cloak>
@@ -29,36 +29,51 @@
       <colgroup>
         <col data-default-width="220" data-min-width="120">
         <col data-default-width="520" data-min-width="200">
+        <col data-default-width="280" data-min-width="160">
         <col data-default-width="100" data-min-width="80">
       </colgroup>
       <thead>
-        <tr><th>Имя</th><th>Подсети</th><th></th></tr>
+        <tr><th>Имя</th><th>Подсети</th><th>Описание</th><th></th></tr>
+        <tr class="search-row" x-show="searchOpen" x-cloak>
+          <th><input x-model.trim="filters.name" placeholder="поиск..."></th>
+          <th><input x-model.trim="filters.subnets" placeholder="имя или IP" title="Имя подсети, IP или CIDR (можно частично: 10.0.) внутри неё"></th>
+          <th><input x-model.trim="filters.description" placeholder="поиск..."></th>
+          <th><button type="button" class="icon-btn reset-search" title="Сбросить фильтры" @click="resetFilters()">&#10005;</button></th>
+        </tr>
       </thead>
       <tbody>
-        <template x-for="(net, i) in networks" :key="net.name">
+        <template x-for="row in filteredNetworks" :key="row.net.name">
           <tr>
-            <td x-text="net.name"></td>
+            <td x-text="row.net.name"></td>
             <td>
-              <template x-for="s in net.subnets" :key="s">
+              <template x-for="s in row.net.subnets" :key="s">
                 <span class="owner-badge" x-text="s"></span>
               </template>
-              <span class="hint" x-show="!net.subnets.length">нет подсетей</span>
+              <span class="hint" x-show="!row.net.subnets.length">нет подсетей</span>
             </td>
             <td>
-              <button type="button" class="icon-btn edit" title="Изменить" @click="openEdit(i)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.3 2.1a1.6 1.6 0 0 1 2.3 2.3L5.4 12.6l-3.1.8.8-3.1z"/></svg></button>
-              <button type="button" class="icon-btn delete" title="Удалить" @click="removeNetwork(i)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11"/><path d="M5.5 4V2.7c0-.4.3-.7.7-.7h3.6c.4 0 .7.3.7.7V4"/><path d="M3.5 4l.6 9.3c0 .4.4.7.8.7h6.2c.4 0 .8-.3.8-.7L12.5 4"/><path d="M6.5 6.8v4.4"/><path d="M9.5 6.8v4.4"/></svg></button>
+              <span x-show="row.net.description" x-text="row.net.description"></span>
+              <span class="hint" x-show="!row.net.description">—</span>
+            </td>
+            <td>
+              <button type="button" class="icon-btn edit" title="Изменить" @click="openEdit(row.index)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.3 2.1a1.6 1.6 0 0 1 2.3 2.3L5.4 12.6l-3.1.8.8-3.1z"/></svg></button>
+              <button type="button" class="icon-btn delete" title="Удалить" @click="removeNetwork(row.index)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11"/><path d="M5.5 4V2.7c0-.4.3-.7.7-.7h3.6c.4 0 .7.3.7.7V4"/><path d="M3.5 4l.6 9.3c0 .4.4.7.8.7h6.2c.4 0 .8-.3.8-.7L12.5 4"/><path d="M6.5 6.8v4.4"/><path d="M9.5 6.8v4.4"/></svg></button>
             </td>
           </tr>
         </template>
-        <tr x-show="loaded && !networks.length"><td colspan="3" class="empty-cell">Сетей нет — добавьте первую</td></tr>
+        <tr x-show="loaded && !networks.length"><td colspan="4" class="empty-cell">Сетей нет — создайте их на странице «Топология»</td></tr>
+        <tr x-show="loaded && networks.length && !filteredNetworks.length"><td colspan="4" class="empty-cell">Ничего не найдено</td></tr>
       </tbody>
     </table>
   </div>
 
   <dialog x-ref="dialog" class="modal modal-lg">
-    <h3 x-text="draft.index >= 0 ? 'Изменить сеть' : 'Новая сеть'"></h3>
+    <h3>Изменить сеть</h3>
     <label>Имя
       <input x-model.trim="draft.name" placeholder="office">
+    </label>
+    <label>Описание
+      <textarea x-model.trim="draft.description" rows="3" placeholder="Заметка о сети"></textarea>
     </label>
     <label>Подсети</label>
     <div class="member-list">
@@ -77,6 +92,7 @@
                placeholder="все подсети — начните вводить для поиска"
                title="Список всех доступных подсетей; ввод фильтрует его по имени или CIDR"
                @focus="memberOpen = true"
+               @click="memberOpen = true"
                @input="memberOpen = true; memberCursor = 0"
                @keydown.arrow-down.prevent="moveCursor(1)"
                @keydown.arrow-up.prevent="moveCursor(-1)"

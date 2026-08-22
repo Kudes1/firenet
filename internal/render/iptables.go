@@ -65,6 +65,12 @@ func matchArgs(r compiler.CompiledRule) string {
 	if r.DstSet != "" {
 		parts = append(parts, fmt.Sprintf("-m set --match-set %s dst", r.DstSet))
 	}
+	if r.SrcAddr != "" {
+		parts = append(parts, "-s "+r.SrcAddr)
+	}
+	if r.DstAddr != "" {
+		parts = append(parts, "-d "+r.DstAddr)
+	}
 	if r.Proto != "" && r.Proto != rules.ProtoAny {
 		parts = append(parts, fmt.Sprintf("-p %s", r.Proto))
 		if len(r.SrcPorts) > 0 {

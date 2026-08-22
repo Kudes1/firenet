@@ -2,12 +2,88 @@ package compiler
 
 import (
 	"net/netip"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/kudes1/firenet/internal/graph"
 	"github.com/kudes1/firenet/internal/rules"
 	"github.com/kudes1/firenet/internal/topology"
 )
+
+func TestIPSetName_IsReadableEntityName(t *testing.T) {
+	cases := map[string]string{
+		"office-net": "fn_office-net",
+		"MAIN":       "fn_MAIN",
+		"mr/1":       "fn_mr_1",
+		"a b":        "fn_a_b",
+	}
+	for entity, want := range cases {
+		if got := ipsetName(entity); got != want {
+			t.Errorf("ipsetName(%q) = %q, want %q", entity, got, want)
+		}
+	}
+}
+
+func TestIPSetName_FitsIpsetNameLimit(t *testing.T) {
+	long := strings.Repeat("office", 10)
+	got := ipsetName(long)
+	if len(got) > 31 {
+		t.Fatalf("ipset name %q exceeds 31 chars", got)
+	}
+	if !strings.HasPrefix(got, "fn_") {
+		t.Fatalf("truncated name %q lost the fn_ prefix", got)
+	}
+	if got != ipsetName(long) {
+		t.Fatalf("ipsetName is not deterministic: %q vs %q", got, ipsetName(long))
+	}
+}
+
+func TestCompile_SanitizationCollisionsGetDistinctNames(t *testing.T) {
+	topo := redundantTopology(t)
+	topo.Subnets["a/b"] = topology.Subnet{Name: "a/b", CIDR: prefix(t, "10.0.5.0/24")}
+	topo.Subnets["a b"] = topology.Subnet{Name: "a b", CIDR: prefix(t, "10.0.6.0/24")}
+	topo.Networks["nAB1"] = topology.Network{Name: "nAB1", Subnets: []string{"a/b"}, Attach: []topology.Endpoint{{Device: "r1"}}}
+	topo.Networks["nAB2"] = topology.Network{Name: "nAB2", Subnets: []string{"a b"}, Attach: []topology.Endpoint{{Device: "r1"}}}
+	pol := &rules.Policy{
+		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
+		Rules: []rules.Rule{
+			{Name: "to-a-slash-b", Src: []string{"A"}, Dst: []string{"a/b"}, Proto: rules.ProtoAny, Action: rules.ActionAllow},
+			{Name: "to-a-space-b", Src: []string{"A"}, Dst: []string{"a b"}, Proto: rules.ProtoAny, Action: rules.ActionAllow},
+		},
+	}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	d := deviceOf(t, out, "r1")
+	names := make(map[string]string) // ipset name -> display name
+	for _, s := range d.IPSets {
+		if !strings.HasPrefix(strings.ToLower(s.Name), "fn_a") {
+			t.Fatalf("ipset %q must derive from entity name, not a bare hash", s.Name)
+		}
+		if prev, dup := names[s.Name]; dup {
+			t.Fatalf("distinct entities %q and %q share ipset name %q", prev, s.DisplayName, s.Name)
+		}
+		names[s.Name] = s.DisplayName
+	}
+	dstSets := map[string]bool{}
+	for _, r := range d.Rules {
+		if dstSets[r.DstSet] {
+			t.Fatalf("two rules reference the same DstSet %q", r.DstSet)
+		}
+		dstSets[r.DstSet] = true
+	}
+}
 
 func prefix(t *testing.T, s string) netip.Prefix {
 	t.Helper()
@@ -35,10 +111,10 @@ func redundantTopology(t *testing.T) *topology.Topology {
 		},
 		Networks: map[string]topology.Network{
 			"ab": {Name: "ab", Subnets: []string{"A", "B"}, Attach: []topology.Endpoint{
-				{Device: "r1", Interface: "ab0"}, {Device: "r2", Interface: "ab0"},
+				{Device: "r1"}, {Device: "r2"},
 			}},
 			"nC": {Name: "nC", Subnets: []string{"C"}, Attach: []topology.Endpoint{
-				{Device: "r3", Interface: "c0"},
+				{Device: "r3"},
 			}},
 		},
 	}
@@ -165,6 +241,52 @@ func TestCompile_AnyAnyPlacesOnAllRouters(t *testing.T) {
 	}
 }
 
+func TestCompile_SetIpsetContainsSubnetsAndAddresses(t *testing.T) {
+	topo := redundantTopology(t)
+	host, _ := netip.ParseAddr("10.0.0.9")
+	topo.Sets = map[string]topology.Set{
+		"blocked": {Name: "blocked", Subnets: []string{"B"}, Addresses: []netip.Prefix{netip.PrefixFrom(host, host.BitLen())}},
+	}
+	pol := &rules.Policy{
+		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
+		Rules: []rules.Rule{
+			{Name: "a-to-blocked", Src: []string{"A"}, Dst: []string{"blocked"}, Proto: rules.ProtoAny, Action: rules.ActionDeny},
+		},
+	}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+
+	d := deviceOf(t, out, "r1")
+	var blocked *IPSet
+	for i := range d.IPSets {
+		if d.IPSets[i].DisplayName == "blocked" {
+			blocked = &d.IPSets[i]
+		}
+	}
+	if blocked == nil {
+		t.Fatalf("no ipset for set \"blocked\", got %+v", d.IPSets)
+	}
+	wantCIDRs := []string{"10.0.0.9/32", "10.0.1.0/24"}
+	sort.Strings(blocked.CIDRs)
+	if len(blocked.CIDRs) != len(wantCIDRs) || blocked.CIDRs[0] != wantCIDRs[0] || blocked.CIDRs[1] != wantCIDRs[1] {
+		t.Fatalf("ipset CIDRs = %v, want %v", blocked.CIDRs, wantCIDRs)
+	}
+	if d.Rules[0].DstSet != ipsetName("blocked") {
+		t.Fatalf("rule must reference the set's ipset, got %+v", d.Rules[0])
+	}
+}
+
 func TestCompile_DedupIdenticalRules(t *testing.T) {
 	topo := redundantTopology(t)
 	pol := &rules.Policy{
@@ -230,6 +352,102 @@ func TestCompile_CommentPrefersCommentOverName(t *testing.T) {
 	}
 	if described == nil {
 		t.Fatalf("rule comment must reach CompiledRule.Comment, got rules: %+v", d.Rules)
+	}
+}
+
+func TestCompile_LiteralEndpointInsideSubnet(t *testing.T) {
+	topo := redundantTopology(t)
+	pol := &rules.Policy{
+		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
+		Rules: []rules.Rule{
+			{Name: "host-to-b", Src: []string{"10.0.0.5"}, Dst: []string{"B"}, Proto: rules.ProtoAny, Action: rules.ActionAllow},
+		},
+	}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+
+	for _, name := range []string{"r1", "r2"} {
+		d := deviceOf(t, out, name)
+		r := d.Rules[0]
+		if r.SrcSet != "" || r.SrcAddr != "10.0.0.5/32" {
+			t.Fatalf("%s: literal src must match by address without an ipset, got %+v", name, r)
+		}
+	}
+	requireNoDevice(t, out, "r3")
+
+	// No ipset may be created for the literal host: only B's set remains.
+	d := deviceOf(t, out, "r1")
+	if len(d.IPSets) != 1 || d.IPSets[0].DisplayName != "B" {
+		t.Fatalf("literal endpoint must not create an ipset, got %+v", d.IPSets)
+	}
+}
+
+func TestCompile_LiteralCIDRMatchesByAddress(t *testing.T) {
+	topo := redundantTopology(t)
+	pol := &rules.Policy{
+		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
+		Rules: []rules.Rule{
+			{Name: "range-to-b", Src: []string{"10.0.0.77/24"}, Dst: []string{"B"}, Proto: rules.ProtoAny, Action: rules.ActionDeny},
+		},
+	}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	d := deviceOf(t, out, "r1")
+	if len(d.IPSets) != 1 || d.IPSets[0].DisplayName != "B" {
+		t.Fatalf("literal CIDR must not create an ipset, got %+v", d.IPSets)
+	}
+	if d.Rules[0].SrcAddr != "10.0.0.0/24" {
+		t.Fatalf("literal CIDR must be masked in SrcAddr, got %+v", d.Rules[0])
+	}
+}
+
+func TestCompile_LiteralEndpointOutsideSubnetsPlacesEverywhere(t *testing.T) {
+	topo := redundantTopology(t)
+	pol := &rules.Policy{
+		DefaultAction: rules.ActionDeny,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
+		Rules: []rules.Rule{
+			{Name: "wan-host-to-a", Src: []string{"192.168.9.9"}, Dst: []string{"A"}, Proto: rules.ProtoTCP, DstPorts: []string{"22"}, Action: rules.ActionAllow},
+		},
+	}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	// The address belongs to no declared subnet, so pathfinding cannot tell
+	// where it enters the network — place conservatively on every router.
+	for _, name := range []string{"r1", "r2", "r3"} {
+		deviceOf(t, out, name)
 	}
 }
 

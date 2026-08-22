@@ -1,6 +1,6 @@
 # Правила читаются сверху вниз, первое совпадение побеждает (как в iptables).
-# Имена src/dst — это подсети или сети из topology.yaml/subnets.yaml, либо
-# зарезервированное "any".
+# Имена src/dst — это подсети, сети или наборы (sets) из topology.yaml/
+# subnets.yaml, либо зарезервированное "any".
 
 defaultAction: deny
 
@@ -32,4 +32,12 @@ rules:
     src: [any]
     dst: [any]
     proto: icmp
+    action: allow
+
+  # набор (set) в правиле — как обычная сущность
+  - name: trusted-to-db-ssh
+    src: [trusted-hosts]
+    dst: [dmz-db]
+    proto: tcp
+    dstPorts: ["22"]
     action: allow

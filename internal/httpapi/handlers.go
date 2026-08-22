@@ -3,9 +3,11 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -59,6 +61,10 @@ func (h *handlers) putTopology(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if errs := h.deletionErrors(raw, subnetsRaw); len(errs) > 0 {
+		writeError(w, http.StatusConflict, errors.New(strings.Join(errs, "; ")))
+		return
+	}
 	if _, err := app.LoadProject(raw, subnetsRaw); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
@@ -100,6 +106,10 @@ func (h *handlers) putSubnets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if errs := h.deletionErrors(topoRaw, raw); len(errs) > 0 {
+		writeError(w, http.StatusConflict, errors.New(strings.Join(errs, "; ")))
+		return
+	}
 	if _, err := app.LoadProject(topoRaw, raw); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
@@ -109,6 +119,34 @@ func (h *handlers) putSubnets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, doc)
+}
+
+// deletionErrors diffs the stored project against the proposed one
+// (nextTopologyYAML merged with subnetsYAML) and reports removed objects
+// that are still referenced. A broken stored state or unparseable proposal
+// yields no deletions here — full validation reports those instead.
+func (h *handlers) deletionErrors(nextTopologyYAML, subnetsYAML []byte) []string {
+	prev, err := h.loadTopology()
+	if err != nil {
+		return nil
+	}
+	next, err := app.ParseProject(nextTopologyYAML, subnetsYAML)
+	if err != nil {
+		return nil
+	}
+	pol, err := h.loadPolicy()
+	if err != nil {
+		pol = nil // broken rules.yaml: topology-only checks; rules load reports the breakage
+	}
+	return app.DeletionErrors(prev, next, pol)
+}
+
+func (h *handlers) loadPolicy() (*rules.Policy, error) {
+	raw, err := h.store.ReadRules()
+	if err != nil {
+		return nil, err
+	}
+	return rules.Load(bytes.NewReader(raw))
 }
 
 func (h *handlers) readStoredSubnets() ([]byte, error) {

@@ -74,6 +74,8 @@ func emptyTopologyYAML() []byte {
 		Devices:  []DeviceDoc{},
 		Links:    []LinkDoc{},
 		Networks: []NetworkDoc{},
+		Sets:     []SetDoc{},
+		Unions:   []UnionDoc{},
 	})
 	if err != nil {
 		panic(err) // static value, can't fail

@@ -25,6 +25,7 @@ function bootPage({ failPut = null } = {}) {
       { name: "office", subnets: ["a"], attach: [] },
       { name: "dmz", subnets: ["b"], attach: [] },
     ],
+    sets: [{ name: "blocked", subnets: ["a"], addresses: ["10.0.0.9"] }],
   };
   const rulesFixture = {
     defaultAction: "deny",
@@ -94,11 +95,26 @@ async function bootLoadedPage() {
   return ctx;
 }
 
-test("init loads the policy doc and orders endpoints as any, subnets, networks", async () => {
+test("init loads the policy doc and orders endpoints as any, subnets, sets", async () => {
   const { page } = await bootLoadedPage();
 
   assert.equal(page.doc.defaultAction, "deny");
-  assert.deepEqual([...page.endpoints], ["any", "a", "b", "dmz", "office"]);
+  assert.deepEqual([...page.endpoints], ["any", "a", "b", "blocked"]);
+});
+
+test("resolvePrefixes expands a set to its subnet CIDRs and host addresses", async () => {
+  const { page } = await bootLoadedPage();
+
+  const prefixes = [...page.resolvePrefixes("blocked")].map((p) => `${p.base}/${p.bits}`);
+  assert.deepEqual([...prefixes].sort(), ["167772160/24", "167772169/32"]);
+});
+
+test("resolvePrefixes matches a literal endpoint by its own CIDR", async () => {
+  const { page } = await bootLoadedPage();
+
+  const prefixes = [...page.resolvePrefixes("10.0.0.77/24")].map((p) => `${p.base}/${p.bits}`);
+  assert.deepEqual(prefixes, ["167772160/24"]); // masked, not the containing subnet's view
+  assert.deepEqual([...page.resolvePrefixes("10.0.0.5")].map((p) => p.bits), [32]);
 });
 
 test("draftHint mirrors server-side rule validation", async () => {
@@ -152,14 +168,42 @@ test("endpoint search filters out selected endpoints per field", async () => {
   const { page } = await bootLoadedPage();
   page.openEdit(0); // src: ["office"], dst: ["dmz"]
 
-  assert.deepEqual([...page.availableEndpoints("src")], ["any", "a", "b", "dmz"]);
-  assert.deepEqual([...page.availableEndpoints("dst")], ["any", "a", "b", "office"]);
+  assert.deepEqual([...page.availableEndpoints("src")], ["any", "a", "b", "blocked"]);
+  assert.deepEqual([...page.availableEndpoints("dst")], ["any", "a", "b", "blocked"]);
 
-  page.srcSearch = "dm";
-  assert.deepEqual([...page.availableEndpoints("src")], ["dmz"]);
+  page.srcSearch = "bl";
+  assert.deepEqual([...page.availableEndpoints("src")], ["blocked"]);
 
   page.srcSearch = "zzz";
   assert.deepEqual([...page.availableEndpoints("src")], []);
+});
+
+test("availableEndpoints offers a typed address/CIDR and addEndpoint stores its canonical form", async () => {
+  const { page } = await bootLoadedPage();
+  page.openAdd();
+
+  page.srcSearch = "10.0.0.";
+  assert.deepEqual([...page.availableEndpoints("src")], []); // incomplete address is not addable
+
+  page.srcSearch = "10.0.0.5";
+  assert.deepEqual([...page.availableEndpoints("src")], ["10.0.0.5/32"]);
+
+  page.addEndpoint("src", "10.0.0.5/32");
+  assert.deepEqual([...page.draft.src], ["10.0.0.5/32"]);
+  assert.equal(page.srcOpen, false);
+
+  // The already selected endpoint is not offered again.
+  page.srcSearch = "10.0.0.5";
+  assert.deepEqual([...page.availableEndpoints("src")], []);
+
+  page.draft.src = [];
+  page.srcSearch = "10.0.0.77/24";
+  assert.deepEqual([...page.availableEndpoints("src")], ["10.0.0.0/24"]); // masked
+
+  for (const bad of ["abc", "300.1.1.1", "10.0.0.5/33", "::1"]) {
+    page.srcSearch = bad;
+    assert.deepEqual([...page.availableEndpoints("src")], [], `invalid input ${bad} must offer nothing`);
+  }
 });
 
 test("addEndpoint/removeEndpoint manage the draft list and reset the search", async () => {
@@ -181,12 +225,12 @@ test("addEndpoint/removeEndpoint manage the draft list and reset the search", as
 test("pickCursor adds the highlighted endpoint suggestion", async () => {
   const { page } = await bootLoadedPage();
   page.openAdd();
-  page.dstSearch = "dm";
+  page.dstSearch = "bl";
   page.dstCursor = 0;
 
   page.pickCursor("dst");
 
-  assert.deepEqual([...page.draft.dst], ["dmz"]);
+  assert.deepEqual([...page.draft.dst], ["blocked"]);
 });
 
 test("saveDraft appends a new rule and persists the whole policy doc", async () => {

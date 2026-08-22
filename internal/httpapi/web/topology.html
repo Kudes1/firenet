@@ -16,36 +16,65 @@
 
 <main>
   <div class="topology-layout">
-    <aside class="sidebar">
-      <div class="panel">
-        <h3>Устройство</h3>
-        <form id="add-device-form">
-          <input name="name" placeholder="имя" required>
-          <select name="kind">
+    <div class="canvas-wrap">
+      <svg id="topo-canvas"></svg>
+      <div class="topo-toolbar">
+        <button id="topo-delete" class="tool danger" disabled title="Удалить выбранное (Del)" aria-label="Удалить выбранное">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+          </svg>
+        </button>
+        <span class="toolbar-sep"></span>
+        <button id="tool-select" class="tool" title="Выбор и перемещение (V)" aria-label="Выбор">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 8-6 1.6L9.4 19z"/></svg>
+        </button>
+        <button id="tool-connect" class="tool" title="Соединить устройства/сети (C)" aria-label="Связь">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M7 12c3-6 7 6 10 0"/>
+            <circle cx="4" cy="12" r="2" fill="currentColor" stroke="none"/>
+            <circle cx="20" cy="12" r="2" fill="currentColor" stroke="none"/>
+          </svg>
+        </button>
+        <button id="tool-device" class="tool" title="Добавить устройство (D)" aria-label="Устройство">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="5" y="3" width="14" height="18" rx="1.5"/>
+            <path d="M5 9h14M5 15h14"/>
+            <circle cx="8" cy="6" r="0.6" fill="currentColor"/><circle cx="11" cy="6" r="0.6" fill="currentColor"/>
+            <circle cx="8" cy="12" r="0.6" fill="currentColor"/><circle cx="11" cy="12" r="0.6" fill="currentColor"/>
+            <circle cx="8" cy="18" r="0.6" fill="currentColor"/><circle cx="11" cy="18" r="0.6" fill="currentColor"/>
+          </svg>
+        </button>
+        <button id="tool-network" class="tool" title="Добавить сеть (N)" aria-label="Сеть">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17.5 19a4.5 4.5 0 0 0 .34-8.99A6 6 0 0 0 6.2 11.6 4 4 0 0 0 7 19z"/>
+          </svg>
+        </button>
+        <span class="toolbar-sep"></span>
+        <button id="topo-save" class="primary tool" title="Сохранить топологию" aria-label="Сохранить топологию">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <path d="M17 21v-8H7v8M7 3v5h8"/>
+          </svg>
+        </button>
+      </div>
+      <div id="node-popover" class="node-popover" hidden>
+        <form id="node-name-form">
+          <input id="node-name-input" placeholder="имя" autocomplete="off">
+          <select id="node-kind-select">
             <option value="router">router</option>
             <option value="switch">switch</option>
           </select>
-          <button type="submit">Добавить</button>
+          <button type="submit">OK</button>
         </form>
       </div>
-      <div class="panel">
-        <h3>Сеть</h3>
-        <form id="add-network-form">
-          <input name="name" placeholder="имя сети" required>
-          <button type="submit">Добавить сеть</button>
-        </form>
-      </div>
-      <p class="hint">Клик по устройству начинает соединение; клик по второму устройству или сети — завершает его. Клик по сети после выбора устройства подключает сегмент к устройству. Клик по кружку у конца соединения — метка интерфейса. Перетаскивайте узлы мышью.</p>
-      <button id="topo-save" class="primary">Сохранить топологию</button>
-    </aside>
-    <div class="canvas-wrap">
-      <svg id="topo-canvas"></svg>
+      <div id="topo-context-menu" class="context-menu" hidden></div>
     </div>
   </div>
 </main>
 
 <script src="/alpine.min.js" defer></script>
 <script src="/common.js"></script>
+<script src="/camera.js"></script>
 <script src="/topology.js"></script>
 </body>
 </html>

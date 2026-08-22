@@ -21,7 +21,7 @@ function bootPage() {
     devices: [{ name: "r1", kind: "router" }],
     links: [],
     networks: [
-      { name: "office", subnets: ["a"], attach: [{ device: "r1" }] },
+      { name: "office", subnets: ["a"], attach: [{ device: "r1" }], description: "офисная" },
       { name: "dmz", subnets: ["b"], attach: [] },
     ],
   };
@@ -70,14 +70,13 @@ async function bootLoadedPage() {
   return ctx;
 }
 
-test("draftHint requires a unique network name", () => {
-  const { page } = bootPage();
-  page.networks = [{ name: "office", subnets: [] }];
+test("draftHint requires a unique network name", async () => {
+  const { page } = await bootLoadedPage();
 
-  page.draft = { index: -1, name: "", subnets: [] };
+  page.draft = { index: 0, name: "", subnets: [] };
   assert.match(page.draftHint, /Укажите имя/);
 
-  page.draft = { index: -1, name: "office", subnets: [] };
+  page.draft = { index: 0, name: "dmz", subnets: [] };
   assert.match(page.draftHint, /уже используется/);
 
   page.draft = { index: 0, name: "office", subnets: [] };
@@ -96,12 +95,14 @@ test("availableSubnets excludes own members and foreign-owned subnets", async ()
 
 test("addMember/removeMember manage the draft list one at a time", async () => {
   const { page } = await bootLoadedPage();
-  page.draft = { index: -1, name: "guest", subnets: [] };
+  page.draft = { index: 0, name: "office", subnets: [] };
+  page.memberSearch = "b";
+  page.memberOpen = true;
 
   page.addMember("b");
   assert.deepEqual(page.draft.subnets, ["b"]);
   assert.equal(page.memberSearch, ""); // search reset after pick
-  assert.equal(page.memberOpen, false);
+  assert.equal(page.memberOpen, false); // dropdown closes after pick
 
   page.addMember("b"); // duplicate is ignored
   assert.deepEqual(page.draft.subnets, ["b"]);
@@ -112,7 +113,7 @@ test("addMember/removeMember manage the draft list one at a time", async () => {
 
 test("pickCursor adds the highlighted suggestion", async () => {
   const { page } = await bootLoadedPage();
-  page.draft = { index: -1, name: "guest", subnets: [] };
+  page.draft = { index: 0, name: "office", subnets: [] };
   page.memberSearch = "10.0.2";
   page.memberCursor = 0;
 
@@ -123,7 +124,7 @@ test("pickCursor adds the highlighted suggestion", async () => {
 
 test("memberSearch filters available subnets by name and CIDR", async () => {
   const { page } = await bootLoadedPage();
-  page.draft = { index: -1, name: "guest", subnets: [] };
+  page.draft = { index: 0, name: "office", subnets: [] };
 
   page.memberSearch = "10.0.2";
   assert.deepEqual(page.availableSubnets.map((s) => s.name), ["c"]);
@@ -135,9 +136,37 @@ test("memberSearch filters available subnets by name and CIDR", async () => {
   assert.deepEqual(page.availableSubnets, []);
 });
 
+test("filteredNetworks matches by name, description and subnets with IP expansion", async () => {
+  const { page } = await bootLoadedPage(); // office: [a=10.0.0.0/24], dmz: [b=10.0.1.0/24]
+
+  page.filters = { ...page.filters, name: "OFF" };
+  assert.deepEqual(page.filteredNetworks.map((n) => n.net.name), ["office"]);
+
+  page.filters = { ...page.filters, name: "", description: "фисная" };
+  assert.deepEqual(page.filteredNetworks.map((n) => n.net.name), ["office"]);
+
+  page.filters = { ...page.filters, description: "", subnets: "b" }; // subnet name substring
+  assert.deepEqual(page.filteredNetworks.map((n) => n.net.name), ["dmz"]);
+
+  page.filters.subnets = "10.0.0.5"; // exact address inside a
+  assert.deepEqual(page.filteredNetworks.map((n) => n.net.name), ["office"]);
+
+  page.filters.subnets = "10.0."; // partial prefix overlaps both members
+  assert.deepEqual(page.filteredNetworks.map((n) => n.net.name), ["office", "dmz"]);
+
+  page.filters.subnets = "10.0.1.0/24"; // CIDR overlapping b only
+  assert.deepEqual(page.filteredNetworks.map((n) => n.net.name), ["dmz"]);
+
+  page.filters.subnets = "10.9.";
+  assert.deepEqual(page.filteredNetworks, []);
+
+  page.resetFilters();
+  assert.deepEqual(page.filteredNetworks.map((n) => n.net.name), ["office", "dmz"]);
+});
+
 test("saveDraft persists the whole topology preserving devices, links and attach", async () => {
   const { page, calls } = await bootLoadedPage();
-  page.draft = { index: -1, name: "guest", subnets: ["c"] };
+  page.draft = { index: 0, name: "office", subnets: ["a", "c"], description: "офисная" };
 
   await page.saveDraft();
 
@@ -145,11 +174,11 @@ test("saveDraft persists the whole topology preserving devices, links and attach
   assert.deepEqual(put.body.devices, [{ name: "r1", kind: "router" }]);
   assert.deepEqual(put.body.links, []);
   assert.deepEqual(put.body.networks, [
-    { name: "office", subnets: ["a"], attach: [{ device: "r1" }] },
+    { name: "office", subnets: ["a", "c"].sort(), attach: [{ device: "r1" }], description: "офисная" },
     { name: "dmz", subnets: ["b"], attach: [] },
-    { name: "guest", subnets: ["c"], attach: [] },
   ]);
-  assert.equal(page.networks.length, 3);
+  assert.equal(page.networks[0].description, "офисная"); // description survives persist
+  assert.equal(page.networks.length, 2);
   assert.ok(calls.some((c) => c.path === "dialog.close"));
 });
 

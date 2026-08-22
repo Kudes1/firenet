@@ -13,6 +13,20 @@ import (
 // belongs to two networks — are enforced here because the files reference
 // each other.
 func LoadProject(topologyYAML, subnetsYAML []byte) (*topology.Topology, error) {
+	topo, err := ParseProject(topologyYAML, subnetsYAML)
+	if err != nil {
+		return nil, err
+	}
+	if err := topo.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid project: %w", err)
+	}
+	return topo, nil
+}
+
+// ParseProject merges topology and subnets YAML without validating
+// cross-references. Callers either validate explicitly (LoadProject) or
+// diff against a previous state first (DeletionErrors).
+func ParseProject(topologyYAML, subnetsYAML []byte) (*topology.Topology, error) {
 	topo, err := topology.Load(bytes.NewReader(topologyYAML))
 	if err != nil {
 		return nil, fmt.Errorf("load topology: %w", err)
@@ -22,8 +36,5 @@ func LoadProject(topologyYAML, subnetsYAML []byte) (*topology.Topology, error) {
 		return nil, fmt.Errorf("load subnets: %w", err)
 	}
 	topo.Subnets = subnets
-	if err := topo.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid project: %w", err)
-	}
 	return topo, nil
 }

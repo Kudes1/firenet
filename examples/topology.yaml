@@ -28,23 +28,23 @@ devices:
 
 links:
   # прямой резервный линк между ядрами (не через свитч)
-  - a: {device: core-r1, interface: wan0}
-    b: {device: core-r2, interface: wan0}
+  - a: {device: core-r1}
+    b: {device: core-r2}
   # оба ядра подключены к общему свитчу
-  - a: {device: core-r1, interface: sw-uplink}
-    b: {device: sw-core, interface: p1}
-  - a: {device: core-r2, interface: sw-uplink}
-    b: {device: sw-core, interface: p2}
+  - a: {device: core-r1}
+    b: {device: sw-core}
+  - a: {device: core-r2}
+    b: {device: sw-core}
   # edge-роутер офиса тоже висит на этом свитче
-  - a: {device: edge-r1, interface: uplink}
-    b: {device: sw-core, interface: p3}
+  - a: {device: edge-r1}
+    b: {device: sw-core}
 
 networks:
   # office-lan — сегмент за edge-r1
   - name: office
     subnets: [office-lan]
     attach:
-      - {device: edge-r1, interface: lan0}
+      - {device: edge-r1}
 
   # dmz-web и dmz-db "висят" прямо на свитче — оба core-роутера видят их
   # как соседей по L2-сегменту, поэтому оба становятся кандидатами на путь.
@@ -52,9 +52,33 @@ networks:
   - name: dmz-web-net
     subnets: [dmz-web]
     attach:
-      - {device: sw-core, interface: p4}
+      - {device: sw-core}
 
   - name: dmz-db-net
     subnets: [dmz-db]
     attach:
-      - {device: sw-core, interface: p5}
+      - {device: sw-core}
+
+# Наборы адресов: смесь подсетей и одиночных хостов, из которой при
+# компиляции получается один ipset. Используются в правилах наравне
+# с сетями и подсетями. Каждый адрес должен попадать в известную подсеть.
+sets:
+  # всё, что ходит в интернет через edge-r1 (пример с внешними хостами)
+  - name: trusted-hosts
+    subnets: [office-lan]
+    addresses:
+      - 10.10.0.10   # админская станция
+      - 10.20.0.5    # веб-сервер dmz-web
+
+# Локации — чисто визуальные группы устройств и сетей для графа топологии.
+# На компиляцию и правила не влияют. Каждый объект максимум в одной локации.
+unions:
+  - name: office
+    description: Офис
+    devices:  [edge-r1]
+    networks: [office]
+
+  - name: dc
+    description: ЦОД
+    devices:  [core-r1, core-r2, sw-core]
+    networks: [dmz-web-net, dmz-db-net]

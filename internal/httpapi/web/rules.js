@@ -25,65 +25,28 @@ function splitPorts(s) {
     .filter(Boolean);
 }
 
-function containsFold(s, sub) {
-  return !sub || String(s || "").toLowerCase().includes(sub.toLowerCase());
+// --- table search: IPv4 helpers live in common.js, shared with the
+// subnets/networks/sets pages; only name resolution stays page-specific ---
+
+function splitPorts(s) {
+  return (s || "")
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
 }
 
-// --- IPv4 prefix matching (best-effort, IPv4 only, like common.js helpers) ---
-
-function parseIPv4(s) {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
-  if (!m) return null;
-  const o = m.slice(1).map(Number);
-  if (o.some((v) => v > 255)) return null;
-  return ((o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0;
-}
-
-function normPrefix(base, bits) {
-  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-  return { base: (base & mask) >>> 0, mask, bits };
-}
-
-function parsePrefix(s) {
+// parseEndpointPrefix validates a manually typed rule endpoint: an IPv4
+// address (→ /32) or CIDR. Returns its canonical "addr[/bits]" form or null.
+function parseEndpointPrefix(s) {
+  s = (s || "").trim();
   const i = s.indexOf("/");
-  if (i < 0) return null;
-  const base = parseIPv4(s.slice(0, i));
-  const bits = Number(s.slice(i + 1));
-  if (base === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return null;
-  return normPrefix(base, bits);
-}
-
-// partialPrefix turns a partially typed address ("10.", "10.0", "10.0.0")
-// into the implied CIDR block, so search matches before the full address
-// is entered.
-function partialPrefix(q) {
-  let parts = q.split(".");
-  if (parts.length > 4 || parts[0] === "") return null;
-  if (parts[parts.length - 1] === "") parts = parts.slice(0, -1);
-  if (!parts.length) return null;
-  const octets = [];
-  for (const p of parts) {
-    if (!/^\d+$/.test(p) || Number(p) > 255 || (p.startsWith("0") && p.length > 1)) return null;
-    octets.push(Number(p));
+  if (i >= 0) {
+    const p = parsePrefix(s);
+    return p ? `${formatIPv4(p.base)}/${p.bits}` : null;
   }
-  while (octets.length < 4) octets.push(0);
-  return normPrefix(((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0, parts.length * 8);
+  const addr = parseIPv4(s);
+  return addr === null ? null : `${formatIPv4(addr)}/32`;
 }
-
-function parseQueryPrefix(q) {
-  if (!q.includes("/")) {
-    const addr = parseIPv4(q);
-    if (addr !== null) return normPrefix(addr, 32);
-    return partialPrefix(q);
-  }
-  return parsePrefix(q);
-}
-
-const prefixContains = (p, addr) => (addr & p.mask) === p.base;
-const prefixOverlap = (a, b) => {
-  const common = a.mask & b.mask;
-  return (a.base & common) === (b.base & common);
-};
 
 function registerRulesPage() {
   document.addEventListener("alpine:init", () => {
@@ -91,6 +54,7 @@ function registerRulesPage() {
     doc: { defaultAction: "deny", chainName: "", chainPosition: "top", rules: [] },
     subnets: [], // {name, cidr}
     networks: [], // {name, subnets}
+    sets: [], // {name, subnets, addresses}
     settings: { defaultAction: "deny", chainName: "", chainPosition: "top" },
     filters: { name: "", comment: "", src: "", dst: "", proto: "", srcPorts: "", dstPorts: "", action: "" },
     draft: { index: -1, name: "", comment: "", src: [], dst: [], proto: "any", action: "deny", srcPorts: "", dstPorts: "", mirror: false },
@@ -111,6 +75,7 @@ function registerRulesPage() {
         const [doc, topo, subnets] = await Promise.all([Api.get("/api/rules"), Api.get("/api/topology"), Api.get("/api/subnets")]);
         this._applyDoc(doc);
         this.networks = topo.networks || [];
+        this.sets = topo.sets || [];
         this.subnets = subnets.subnets || [];
         this.loaded = true;
         this.$nextTick(() => this.initTable(this.$refs.table));
@@ -141,9 +106,14 @@ function registerRulesPage() {
     },
 
     get endpoints() {
-      // Same ordering as the former server-side endpointNames(): "any",
-      // then subnets sorted, then networks sorted.
-      return ["any", ...this.subnets.map((s) => s.name).sort(), ...this.networks.map((n) => n.name).sort()];
+      // "any", then subnets sorted, then sets sorted. Networks are
+      // deliberately not offered (rules target subnets/sets/addresses);
+      // they stay resolvable below for legacy rules and filtering.
+      return [
+        "any",
+        ...this.subnets.map((s) => s.name).sort(),
+        ...this.sets.map((s) => s.name).sort(),
+      ];
     },
 
     resetFilters() {
@@ -158,6 +128,24 @@ function registerRulesPage() {
       if (n) for (const sn of n.subnets || []) {
         const x = this.subnets.find((y) => y.name === sn);
         if (x) cidrs.push(x.cidr);
+      }
+      // A set contributes its member subnets' CIDRs plus its host addresses
+      // as /32 entries, mirroring what the compiled ipset contains.
+      const set = this.sets.find((x) => x.name === name);
+      if (set) {
+        for (const sn of set.subnets || []) {
+          const x = this.subnets.find((y) => y.name === sn);
+          if (x) cidrs.push(x.cidr);
+        }
+        for (const a of set.addresses || []) {
+          const addr = a.split("/")[0];
+          if (parseIPv4(addr) !== null) cidrs.push(`${addr}/32`);
+        }
+      }
+      // A literally written endpoint matches by its own CIDR.
+      if (!cidrs.length) {
+        const lit = parseEndpointPrefix(name);
+        if (lit) cidrs.push(lit);
       }
       return cidrs.map(parsePrefix).filter(Boolean);
     },
@@ -243,9 +231,19 @@ function registerRulesPage() {
     },
 
     availableEndpoints(field) {
-      const q = this[field + "Search"].trim().toLowerCase();
+      const raw = this[field + "Search"].trim();
+      const q = raw.toLowerCase();
       const selected = this.draft[field];
-      return this.endpoints.filter((e) => !selected.includes(e) && (!q || e.toLowerCase().includes(q)));
+      const rest = this.endpoints.filter((e) => !selected.includes(e) && (!q || e.toLowerCase().includes(q)));
+      // A fully typed address/CIDR is always addable for quick edits; it
+      // leads the list so it is the first thing to see and pick.
+      const lit = parseEndpointPrefix(raw);
+      if (!lit || selected.includes(lit)) return rest;
+      return [lit, ...rest.filter((e) => e !== lit)];
+    },
+
+    isLiteralEndpoint(e) {
+      return parseEndpointPrefix(e) !== null;
     },
 
     moveCursor(field, delta) {
@@ -263,8 +261,9 @@ function registerRulesPage() {
     addEndpoint(field, name) {
       if (!name || this.draft[field].includes(name)) return;
       this.draft[field].push(name);
-      this[field + "Search"] = ""; // keep the dropdown open for consecutive picks
+      this[field + "Search"] = "";
       this[field + "Cursor"] = 0;
+      this[field + "Open"] = false;
     },
 
     removeEndpoint(field, name) {

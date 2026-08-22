@@ -134,7 +134,7 @@
       </label>
     </div>
     <div class="modal-grid">
-      <label>Src
+      <div class="modal-field">Src
         <div class="member-list">
           <template x-for="e in draft.src" :key="e">
             <div class="member-row">
@@ -146,9 +146,10 @@
         </div>
         <div class="member-combo" @click.outside="srcOpen = false">
           <input x-model.trim="srcSearch"
-                 placeholder="все эндпоинты — начните вводить для поиска"
+                 placeholder="имя, IP или CIDR — начните вводить"
                  title="Подсети и сети; ввод фильтрует список по имени"
                  @focus="srcOpen = true"
+                 @click="srcOpen = true"
                  @input="srcOpen = true; srcCursor = 0"
                  @keydown.arrow-down.prevent="moveCursor('src', 1)"
                  @keydown.arrow-up.prevent="moveCursor('src', -1)"
@@ -159,16 +160,16 @@
           </button>
           <div class="member-suggestions" x-show="srcOpen" x-cloak>
             <template x-for="(e, i) in availableEndpoints('src')" :key="e">
-              <button type="button" class="member-suggestion" :class="{ active: i === srcCursor }"
+              <button type="button" class="member-suggestion" :class="{ active: i === srcCursor, 'literal-add': isLiteralEndpoint(e) }"
                       @mousedown.prevent="addEndpoint('src', e)"
                       @mouseenter="srcCursor = i"
-                      x-text="e"></button>
+                      x-text="isLiteralEndpoint(e) ? 'Добавить ' + e : e"></button>
             </template>
             <p class="hint member-empty" x-show="!availableEndpoints('src').length">Ничего не найдено</p>
           </div>
         </div>
-      </label>
-      <label>Dst
+      </div>
+      <div class="modal-field">Dst
         <div class="member-list">
           <template x-for="e in draft.dst" :key="e">
             <div class="member-row">
@@ -180,9 +181,10 @@
         </div>
         <div class="member-combo" @click.outside="dstOpen = false">
           <input x-model.trim="dstSearch"
-                 placeholder="все эндпоинты — начните вводить для поиска"
+                 placeholder="имя, IP или CIDR — начните вводить"
                  title="Подсети и сети; ввод фильтрует список по имени"
                  @focus="dstOpen = true"
+                 @click="dstOpen = true"
                  @input="dstOpen = true; dstCursor = 0"
                  @keydown.arrow-down.prevent="moveCursor('dst', 1)"
                  @keydown.arrow-up.prevent="moveCursor('dst', -1)"
@@ -193,15 +195,15 @@
           </button>
           <div class="member-suggestions" x-show="dstOpen" x-cloak>
             <template x-for="(e, i) in availableEndpoints('dst')" :key="e">
-              <button type="button" class="member-suggestion" :class="{ active: i === dstCursor }"
+              <button type="button" class="member-suggestion" :class="{ active: i === dstCursor, 'literal-add': isLiteralEndpoint(e) }"
                       @mousedown.prevent="addEndpoint('dst', e)"
                       @mouseenter="dstCursor = i"
-                      x-text="e"></button>
+                      x-text="isLiteralEndpoint(e) ? 'Добавить ' + e : e"></button>
             </template>
             <p class="hint member-empty" x-show="!availableEndpoints('dst').length">Ничего не найдено</p>
           </div>
         </div>
-      </label>
+      </div>
     </div>
     <div class="modal-grid">
       <label>Proto
