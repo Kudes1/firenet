@@ -8,7 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const fixtureTopology = `
@@ -16,10 +20,10 @@ devices:
   - {name: r1, kind: router}
   - {name: r2, kind: router}
 links:
-  - {a: {device: r1, interface: wan0}, b: {device: r2, interface: wan0}}
+  - {a: {device: r1}, b: {device: r2}}
 networks:
-  - {name: n-office, subnets: [office], attach: [{device: r1, interface: lan0}]}
-  - {name: n-dmz, subnets: [dmz], attach: [{device: r2, interface: lan0}]}
+  - {name: n-office, subnets: [office], attach: [{device: r1}]}
+  - {name: n-dmz, subnets: [dmz], attach: [{device: r2}]}
 `
 
 const fixtureSubnets = `
@@ -57,6 +61,18 @@ func newTestServer(t *testing.T) (http.Handler, FileProjectStore) {
 		t.Fatalf("seed rules: %v", err)
 	}
 	return NewServer(store, discardLogger()), store
+}
+
+// errorBody decodes the {"error": ...} envelope into the raw message.
+func errorBody(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	return out.Error
 }
 
 func doJSON(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
@@ -111,6 +127,124 @@ func TestGetPutSubnets(t *testing.T) {
 	}
 }
 
+func TestGetPutTopologyWithUnions(t *testing.T) {
+	h, store := newTestServer(t)
+
+	rec := doJSON(t, h, http.MethodGet, "/api/topology", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got TopologyDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Unions) != 0 {
+		t.Fatalf("expected empty unions on fixture, got %+v", got.Unions)
+	}
+
+	doc := TopologyDoc{
+		Devices:  []DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}},
+		Links:    []LinkDoc{{A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "r2"}}},
+		Networks: []NetworkDoc{{Name: "n-office", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}}},
+		Sets:     []SetDoc{},
+		Unions:   []UnionDoc{{Name: "office", Devices: []string{"r1", "r2"}, Networks: []string{"n-office"}, Description: "hq"}},
+	}
+	rec = doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	raw, err := store.ReadTopology()
+	if err != nil {
+		t.Fatalf("read stored: %v", err)
+	}
+	var stored TopologyDoc
+	if err := yaml.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("parse stored: %v", err)
+	}
+	if len(stored.Unions) != 1 || stored.Unions[0].Name != "office" || len(stored.Unions[0].Devices) != 2 {
+		t.Fatalf("unexpected stored unions: %+v", stored.Unions)
+	}
+
+	// битая ссылка отклоняется
+	doc.Unions[0].Devices = []string{"ghost"}
+	if rec := doJSON(t, h, http.MethodPut, "/api/topology", doc); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown union member: status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	// двойное членство отклоняется
+	doc.Unions[0].Devices = []string{"r1"}
+	doc.Unions = append(doc.Unions, UnionDoc{Name: "second", Devices: []string{"r1"}})
+	if rec := doJSON(t, h, http.MethodPut, "/api/topology", doc); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("double membership: status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestDeletionGuardBlocksDeviceInUnion(t *testing.T) {
+	h, _ := newTestServer(t)
+	base := func(devices []DeviceDoc, unions []UnionDoc) TopologyDoc {
+		return TopologyDoc{
+			Devices: devices,
+			Links:   []LinkDoc{},
+			Networks: []NetworkDoc{
+				{Name: "n-office", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
+				{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []EndpointDoc{{Device: "r2"}}},
+			},
+			Sets:   []SetDoc{},
+			Unions: unions,
+		}
+	}
+	all := base(
+		[]DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}, {Name: "r3", Kind: "router"}},
+		[]UnionDoc{{Name: "office", Devices: []string{"r3"}}},
+	)
+	if rec := doJSON(t, h, http.MethodPut, "/api/topology", all); rec.Code != http.StatusOK {
+		t.Fatalf("seed status = %d, body = %s", rec.Code, rec.Body)
+	}
+	// r3 ссылается только сайт — удаление блокируется с 409
+	shrink := base(all.Devices[:2], []UnionDoc{{Name: "office", Devices: []string{"r3"}}})
+	rec := doJSON(t, h, http.MethodPut, "/api/topology", shrink)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("device in union: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if msg := errorBody(t, rec); !strings.Contains(msg, `union "office"`) {
+		t.Fatalf("want union dependency in error, got %s", msg)
+	}
+}
+
+func TestPutSubnets_DescriptionRoundTrip(t *testing.T) {
+	h, store := newTestServer(t)
+	doc := SubnetsDoc{Subnets: []SubnetDoc{
+		{Name: "office", CIDR: "10.0.0.0/24", Description: "офисный сегмент"},
+		{Name: "dmz", CIDR: "10.0.1.0/24"},
+	}}
+	rec := doJSON(t, h, http.MethodPut, "/api/subnets", doc)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	rec = doJSON(t, h, http.MethodGet, "/api/subnets", nil)
+	var got SubnetsDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Subnets[0].Description != "офисный сегмент" {
+		t.Fatalf("description lost: %+v", got.Subnets[0])
+	}
+	if got.Subnets[1].Description != "" {
+		t.Fatalf("unexpected description: %+v", got.Subnets[1])
+	}
+	raw, err := store.ReadSubnets()
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	dmzStart := bytes.Index(raw, []byte("name: dmz"))
+	next := bytes.IndexByte(raw[dmzStart:], '\n')
+	if bytes.Contains(raw[dmzStart:dmzStart+next], []byte("description")) {
+		t.Fatalf("empty description must not be stored: %s", raw)
+	}
+}
+
 func TestPutSubnets_RejectsOverlap(t *testing.T) {
 	h, _ := newTestServer(t)
 	doc := SubnetsDoc{Subnets: []SubnetDoc{
@@ -123,12 +257,88 @@ func TestPutSubnets_RejectsOverlap(t *testing.T) {
 	}
 }
 
-func TestPutSubnets_RejectsSubnetInUse(t *testing.T) {
-	h, _ := newTestServer(t)
+func TestPutSubnets_RejectsDeletingUsedSubnet(t *testing.T) {
+	h, store := newTestServer(t)
+	before, _ := store.ReadSubnets()
 	doc := SubnetsDoc{Subnets: []SubnetDoc{{Name: "office", CIDR: "10.0.0.0/24"}}}
 	rec := doJSON(t, h, http.MethodPut, "/api/subnets", doc)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 (dmz still referenced by n-dmz), got status = %d, body = %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 (dmz still referenced), got status = %d, body = %s", rec.Code, rec.Body)
+	}
+	msg := errorBody(t, rec)
+	for _, want := range []string{`subnet "dmz"`, `network "n-dmz"`, `rule "office-to-dmz"`} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q must mention %s", msg, want)
+		}
+	}
+	after, _ := store.ReadSubnets()
+	if !bytes.Equal(before, after) {
+		t.Fatalf("rejected document must not be persisted")
+	}
+}
+
+func TestPutSubnets_AllowsDeletingUnusedSubnet(t *testing.T) {
+	h, _ := newTestServer(t)
+	withGuest := SubnetsDoc{Subnets: []SubnetDoc{
+		{Name: "office", CIDR: "10.0.0.0/24"},
+		{Name: "dmz", CIDR: "10.0.1.0/24"},
+		{Name: "guest", CIDR: "10.0.2.0/24"},
+	}}
+	if rec := doJSON(t, h, http.MethodPut, "/api/subnets", withGuest); rec.Code != http.StatusOK {
+		t.Fatalf("add guest: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	rec := doJSON(t, h, http.MethodPut, "/api/subnets", SubnetsDoc{Subnets: withGuest.Subnets[:2]})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete guest: status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPutTopology_RejectsDeletingUsedDevice(t *testing.T) {
+	h, store := newTestServer(t)
+	before, _ := store.ReadTopology()
+	doc := TopologyDoc{
+		Devices: []DeviceDoc{{Name: "r2", Kind: "router"}}, // r1 removed, its link/attach kept
+		Links:   []LinkDoc{{A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "r2"}}},
+		Networks: []NetworkDoc{
+			{Name: "n-office", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
+			{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []EndpointDoc{{Device: "r2"}}},
+		},
+	}
+	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 (r1 still referenced), got status = %d, body = %s", rec.Code, rec.Body)
+	}
+	msg := errorBody(t, rec)
+	for _, want := range []string{`device "r1"`, `link[0]`, `network "n-office"`} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q must mention %s", msg, want)
+		}
+	}
+	after, _ := store.ReadTopology()
+	if !bytes.Equal(before, after) {
+		t.Fatalf("rejected document must not be persisted")
+	}
+}
+
+func TestPutTopology_AllowsDeletingFreeDevice(t *testing.T) {
+	h, _ := newTestServer(t)
+	base := func(devices []DeviceDoc) TopologyDoc {
+		return TopologyDoc{
+			Devices: devices,
+			Links:   []LinkDoc{{A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "r2"}}},
+			Networks: []NetworkDoc{
+				{Name: "n-office", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
+				{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []EndpointDoc{{Device: "r2"}}},
+			},
+		}
+	}
+	all := append([]DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}}, DeviceDoc{Name: "sw1", Kind: "switch"})
+	if rec := doJSON(t, h, http.MethodPut, "/api/topology", base(all)); rec.Code != http.StatusOK {
+		t.Fatalf("add sw1: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	rec := doJSON(t, h, http.MethodPut, "/api/topology", base(all[:2]))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete sw1: status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
@@ -151,7 +361,7 @@ func TestPutTopology_Valid(t *testing.T) {
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}},
 		Links:   []LinkDoc{},
 		Networks: []NetworkDoc{
-			{Name: "n1", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1", Interface: "lan0"}}},
+			{Name: "n1", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
 		},
 	}
 	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
@@ -174,7 +384,7 @@ func TestPutTopology_RejectsSelfLoopLink(t *testing.T) {
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}},
 		Links: []LinkDoc{
-			{A: EndpointDoc{Device: "r1", Interface: "a0"}, B: EndpointDoc{Device: "r1", Interface: "a0"}},
+			{A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "r1"}},
 		},
 		Networks: []NetworkDoc{},
 	}
@@ -185,6 +395,88 @@ func TestPutTopology_RejectsSelfLoopLink(t *testing.T) {
 	after, _ := store.ReadTopology()
 	if !bytes.Equal(before, after) {
 		t.Fatalf("invalid topology must not be persisted")
+	}
+}
+
+func TestPutTopology_SetRoundTrip(t *testing.T) {
+	h, store := newTestServer(t)
+	doc := TopologyDoc{
+		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}},
+		Links:   []LinkDoc{},
+		Networks: []NetworkDoc{
+			{Name: "n1", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
+		},
+		Sets: []SetDoc{
+			{Name: "blocked", Subnets: []string{"office"}, Addresses: []string{"10.0.0.9"}},
+		},
+	}
+	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	raw, err := store.ReadTopology()
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	var stored TopologyDoc
+	if err := yaml.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("unmarshal stored topology: %v", err)
+	}
+	if len(stored.Sets) != 1 || stored.Sets[0].Name != "blocked" || len(stored.Sets[0].Addresses) != 1 || stored.Sets[0].Addresses[0] != "10.0.0.9" {
+		t.Fatalf("stored sets = %+v", stored.Sets)
+	}
+}
+
+func TestPutTopology_DescriptionRoundTrip(t *testing.T) {
+	h, store := newTestServer(t)
+	doc := TopologyDoc{
+		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}},
+		Links:   []LinkDoc{},
+		Networks: []NetworkDoc{
+			{Name: "n1", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}, Description: "офисная сеть"},
+		},
+		Sets: []SetDoc{{Name: "blocked", Subnets: []string{"office"}, Description: "блоклист"}},
+	}
+	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	raw, err := store.ReadTopology()
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	var stored TopologyDoc
+	if err := yaml.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("unmarshal stored topology: %v", err)
+	}
+	if stored.Networks[0].Description != "офисная сеть" {
+		t.Fatalf("network description lost: %+v", stored.Networks[0])
+	}
+	if stored.Sets[0].Description != "блоклист" {
+		t.Fatalf("set description lost: %+v", stored.Sets[0])
+	}
+
+	rec = doJSON(t, h, http.MethodGet, "/api/topology", nil)
+	var got TopologyDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Networks[0].Description != "офисная сеть" || got.Sets[0].Description != "блоклист" {
+		t.Fatalf("descriptions lost over GET: %+v %+v", got.Networks[0], got.Sets[0])
+	}
+}
+
+func TestPutTopology_RejectsSetAddressOutsideSubnets(t *testing.T) {
+	h, _ := newTestServer(t)
+	doc := TopologyDoc{
+		Devices:  []DeviceDoc{{Name: "r1", Kind: "router"}},
+		Links:    []LinkDoc{},
+		Networks: []NetworkDoc{{Name: "n1", Subnets: []string{"office"}}},
+		Sets:     []SetDoc{{Name: "bad", Addresses: []string{"192.168.5.5"}}},
+	}
+	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
@@ -270,5 +562,82 @@ func TestLayoutRoundTrip(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"r1"`)) {
 		t.Fatalf("layout not persisted: %s", rec.Body)
+	}
+}
+
+func TestPutTopology_LinkFilterRoundTrip(t *testing.T) {
+	h, store := newTestServer(t)
+
+	doc := TopologyDoc{
+		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}},
+		Links: []LinkDoc{{
+			A:      EndpointDoc{Device: "r1"},
+			B:      EndpointDoc{Device: "r2"},
+			Filter: &LinkFilterDoc{AExports: []string{"n-office"}, BExports: []string{"n-dmz"}},
+		}},
+		Networks: []NetworkDoc{
+			{Name: "n-office", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
+			{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []EndpointDoc{{Device: "r2"}}},
+		},
+	}
+	if rec := doJSON(t, h, http.MethodPut, "/api/topology", doc); rec.Code != http.StatusOK {
+		t.Fatalf("put status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	rec := doJSON(t, h, http.MethodGet, "/api/topology", nil)
+	var got TopologyDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if got.Links[0].Filter == nil ||
+		!slices.Equal(got.Links[0].Filter.AExports, []string{"n-office"}) ||
+		!slices.Equal(got.Links[0].Filter.BExports, []string{"n-dmz"}) {
+		t.Fatalf("filter did not survive round-trip: %+v", got.Links[0])
+	}
+
+	stored, err := store.ReadTopology()
+	if err != nil {
+		t.Fatalf("read stored topology: %v", err)
+	}
+	if !strings.Contains(string(stored), "a-exports") {
+		t.Fatalf("stored yaml missing a-exports:\n%s", stored)
+	}
+}
+
+func TestPutTopology_RejectsFilteredLinkWithSwitch(t *testing.T) {
+	h, _ := newTestServer(t)
+	doc := TopologyDoc{
+		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "sw", Kind: "switch"}},
+		Links: []LinkDoc{{
+			A:      EndpointDoc{Device: "r1"},
+			B:      EndpointDoc{Device: "sw"},
+			Filter: &LinkFilterDoc{AExports: []string{"n1"}, BExports: []string{"n2"}},
+		}},
+	}
+	res := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	if res.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d", res.Code)
+	}
+	if !strings.Contains(errorBody(t, res), "two routers") {
+		t.Fatalf("unexpected error body: %s", errorBody(t, res))
+	}
+}
+
+func TestPutTopology_RejectsUnknownExport(t *testing.T) {
+	h, _ := newTestServer(t)
+	doc := TopologyDoc{
+		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}},
+		Links: []LinkDoc{{
+			A:      EndpointDoc{Device: "r1"},
+			B:      EndpointDoc{Device: "r2"},
+			Filter: &LinkFilterDoc{AExports: []string{"ghost"}, BExports: []string{"n2"}},
+		}},
+	}
+	res := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	if res.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d", res.Code)
+	}
+	if !strings.Contains(errorBody(t, res), "unknown export entity") {
+		t.Fatalf("unexpected error body: %s", errorBody(t, res))
 	}
 }

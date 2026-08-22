@@ -4,22 +4,29 @@
 // and knows nothing about the CLI.
 package httpapi
 
-// EndpointDoc is one side of a logical connection: a device, with an
-// optional interface label kept purely for documentation. The Doc types in
+// EndpointDoc is one side of a logical connection. The Doc types in
 // this file mirror the private YAML wire structs in
 // internal/topology/load.go and internal/rules/load.go field-for-field, but
 // exported and tagged for both YAML (the file format) and JSON (the
 // browser) — the same value round-trips through either encoding, so no
 // separate mapping layer is needed between the two.
 type EndpointDoc struct {
-	Device    string `json:"device" yaml:"device"`
-	Interface string `json:"interface,omitempty" yaml:"interface,omitempty"`
+	Device string `json:"device" yaml:"device"`
+}
+
+// LinkFilterDoc mirrors topology.LinkFilter on the wire. Export lists
+// always serialize (no omitempty): an empty list means "announces
+// nothing" and must survive round-trips.
+type LinkFilterDoc struct {
+	AExports []string `json:"aExports" yaml:"a-exports"`
+	BExports []string `json:"bExports" yaml:"b-exports"`
 }
 
 // LinkDoc is a logical connection between two devices.
 type LinkDoc struct {
-	A EndpointDoc `json:"a" yaml:"a"`
-	B EndpointDoc `json:"b" yaml:"b"`
+	A      EndpointDoc    `json:"a" yaml:"a"`
+	B      EndpointDoc    `json:"b" yaml:"b"`
+	Filter *LinkFilterDoc `json:"filter,omitempty" yaml:"filter,omitempty"`
 }
 
 // DeviceDoc is a network node.
@@ -31,8 +38,9 @@ type DeviceDoc struct {
 // SubnetDoc is a named CIDR block. Attachment lives on the Network that
 // contains it.
 type SubnetDoc struct {
-	Name string `json:"name" yaml:"name"`
-	CIDR string `json:"cidr" yaml:"cidr"`
+	Name        string `json:"name" yaml:"name"`
+	CIDR        string `json:"cidr" yaml:"cidr"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // SubnetsDoc is the full wire shape of subnets.yaml.
@@ -43,9 +51,28 @@ type SubnetsDoc struct {
 // NetworkDoc is one L2 segment: an attachment to devices plus the named
 // list of member subnets (which becomes one ipset at compile time).
 type NetworkDoc struct {
-	Name    string        `json:"name" yaml:"name"`
-	Subnets []string      `json:"subnets,omitempty" yaml:"subnets,omitempty"`
-	Attach  []EndpointDoc `json:"attach,omitempty" yaml:"attach,omitempty"`
+	Name        string        `json:"name" yaml:"name"`
+	Subnets     []string      `json:"subnets,omitempty" yaml:"subnets,omitempty"`
+	Attach      []EndpointDoc `json:"attach,omitempty" yaml:"attach,omitempty"`
+	Description string        `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+// SetDoc is a named address group for rule matching: references to subnets
+// plus individual host addresses.
+type SetDoc struct {
+	Name        string   `json:"name" yaml:"name"`
+	Subnets     []string `json:"subnets,omitempty" yaml:"subnets,omitempty"`
+	Addresses   []string `json:"addresses,omitempty" yaml:"addresses,omitempty"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+// UnionDoc is a visual location grouping devices and networks. Purely
+// presentational: it never reaches the compiler.
+type UnionDoc struct {
+	Name        string   `json:"name" yaml:"name"`
+	Devices     []string `json:"devices,omitempty" yaml:"devices,omitempty"`
+	Networks    []string `json:"networks,omitempty" yaml:"networks,omitempty"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // TopologyDoc is the full wire shape of topology.yaml.
@@ -53,6 +80,8 @@ type TopologyDoc struct {
 	Devices  []DeviceDoc  `json:"devices" yaml:"devices"`
 	Links    []LinkDoc    `json:"links" yaml:"links"`
 	Networks []NetworkDoc `json:"networks" yaml:"networks"`
+	Sets     []SetDoc     `json:"sets" yaml:"sets"`
+	Unions   []UnionDoc   `json:"unions" yaml:"unions"`
 }
 
 // RuleDoc matches traffic between named subnets/zones (or "any").
