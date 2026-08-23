@@ -13,6 +13,9 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/kudes1/firenet/internal/rules"
+	"github.com/kudes1/firenet/internal/simulate"
 )
 
 const fixtureTopology = `
@@ -644,4 +647,53 @@ func TestPutTopology_RejectsUnknownExport(t *testing.T) {
 	if !strings.Contains(errorBody(t, res), "unknown export entity") {
 		t.Fatalf("unexpected error body: %s", errorBody(t, res))
 	}
+}
+
+func TestSimulateHandler(t *testing.T) {
+	h, _ := newTestServer(t)
+
+	t.Run("allowed flow reports matched rule", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, "/api/simulate",
+			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"443"}})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var rep simulate.Report
+		if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if rep.SrcSubnet != "office" || rep.DstSubnet != "dmz" || len(rep.Paths) != 1 {
+			t.Fatalf("unexpected report: %+v", rep)
+		}
+		if rep.Paths[0].Verdict != rules.ActionAllow || rep.Paths[0].Routers[0].MatchedRule != "office-to-dmz" {
+			t.Fatalf("unexpected verdict: %+v", rep.Paths[0])
+		}
+	})
+
+	t.Run("invalid IP is unprocessable", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, "/api/simulate", map[string]any{"src": "nonsense", "dst": "10.0.1.7"})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status %d", rec.Code)
+		}
+		if msg := errorBody(t, rec); !strings.Contains(msg, "src") {
+			t.Fatalf("error should mention src, got %q", msg)
+		}
+	})
+
+	t.Run("unknown IP is unprocessable", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, "/api/simulate", map[string]any{"src": "10.0.0.5", "dst": "192.168.99.99"})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status %d", rec.Code)
+		}
+		if msg := errorBody(t, rec); !strings.Contains(msg, "не принадлежит") {
+			t.Fatalf("error should explain unknown IP, got %q", msg)
+		}
+	})
+
+	t.Run("bad proto is unprocessable", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, "/api/simulate", map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "sctp"})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status %d", rec.Code)
+		}
+	})
 }

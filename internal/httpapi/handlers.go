@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/kudes1/firenet/internal/app"
 	"github.com/kudes1/firenet/internal/rules"
+	"github.com/kudes1/firenet/internal/simulate"
 	"github.com/kudes1/firenet/internal/topology"
 )
 
@@ -293,6 +295,72 @@ func (h *handlers) compile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, devices)
+}
+
+type simulateRequest struct {
+	Src      string   `json:"src"`
+	Dst      string   `json:"dst"`
+	Proto    string   `json:"proto"`
+	SrcPorts []string `json:"srcPorts"`
+	DstPorts []string `json:"dstPorts"`
+}
+
+var simulateProtos = map[string]bool{"": true, "tcp": true, "udp": true, "icmp": true}
+
+func (h *handlers) simulate(w http.ResponseWriter, r *http.Request) {
+	var req simulateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid body: %w", err))
+		return
+	}
+	if !simulateProtos[req.Proto] {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid proto %q", req.Proto))
+		return
+	}
+	src, err := netip.ParseAddr(req.Src)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid src IP: %w", err))
+		return
+	}
+	dst, err := netip.ParseAddr(req.Dst)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid dst IP: %w", err))
+		return
+	}
+
+	topoRaw, err := h.store.ReadTopology()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	subnetsRaw, err := h.readStoredSubnets()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	rulesRaw, err := h.store.ReadRules()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	rep, err := app.Simulate(r.Context(), h.log, app.SimulateOptions{
+		TopologyYAML: topoRaw,
+		SubnetsYAML:  subnetsRaw,
+		RulesYAML:    rulesRaw,
+		Flow: simulate.Flow{
+			Src:      src,
+			Dst:      dst,
+			Proto:    rules.Proto(req.Proto),
+			SrcPorts: req.SrcPorts,
+			DstPorts: req.DstPorts,
+		},
+	})
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
 }
 
 func (h *handlers) getLayout(w http.ResponseWriter, r *http.Request) {
