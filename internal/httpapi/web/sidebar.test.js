@@ -81,7 +81,7 @@ test("buildNav renders an aside.sidebar with brand, toggle and nav links", () =>
   assert.ok(nav, "sidebar contains a nav");
 
   const links = byTag(nav, "a");
-  assert.equal(links.length, 8, "all sections are linked");
+  assert.equal(links.length, 9, "all sections are linked");
   const label = (a) => a.children[a.children.length - 1].textContent;
   assert.equal(label(links[0]), "Топология");
   assert.equal(

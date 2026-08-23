@@ -64,6 +64,15 @@ const Api = {
     if (!res.ok) throw await apiError(res);
     return res.json();
   },
+  async post(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await apiError(res);
+    return res.status === 204 ? null : res.json();
+  },
   async put(path, body) {
     const res = await fetch(path, {
       method: "PUT",
@@ -201,6 +210,7 @@ const NAV_LINKS = [
   { id: "links", href: "/ui/links", label: "Связи" },
   { id: "rules", href: "/ui/rules", label: "Правила" },
   { id: "compile", href: "/ui/compile", label: "Компиляция" },
+  { id: "simulate", href: "/ui/simulate", label: "Симуляция" },
 ];
 
 const svgOpen = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
@@ -213,6 +223,7 @@ const NAV_ICONS = {
   links: svgOpen + '<path d="M10 14a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L11 5.93"/><path d="M14 10a5 5 0 0 0-7.07 0l-2.12 2.12a5 5 0 0 0 7.07 7.07L13 18.07"/></svg>',
   rules: svgOpen + '<path d="M12 3l8 3v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3z"/></svg>',
   compile: svgOpen + '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+  simulate: svgOpen + '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
 };
 
 // buildNav renders the shared sidebar shell (brand, collapsible nav with

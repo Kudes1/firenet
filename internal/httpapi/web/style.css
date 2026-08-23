@@ -824,3 +824,20 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 }
 .member-suggestion.active, .member-suggestion:hover { background: var(--panel-bg-hover); }
 .member-suggestion.literal-add { color: var(--accent); }
+
+/* — симуляция трафика — */
+.sim-layout { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: var(--space-3); align-items: start; }
+.sim-form-panel form { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
+.sim-path { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-2); margin-bottom: var(--space-2); }
+.sim-path header { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-1); }
+.sim-chain { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+.sim-chip { border: 1px solid var(--border); border-radius: 999px; padding: 0 var(--space-2); font-size: 0.85em; }
+.sim-chip-router { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.sim-arrow { opacity: 0.5; }
+.badge { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 0.8em; }
+.badge-ok { background: rgba(16, 185, 129, 0.18); color: #10b981; }
+.badge-drop { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
+.badge-default { background: rgba(148, 163, 184, 0.2); color: inherit; }
+.sim-dim { opacity: 0.25; }
+.sim-unreachable { color: #ef4444; }
+.sim-note { opacity: 0.75; font-size: 0.85em; }

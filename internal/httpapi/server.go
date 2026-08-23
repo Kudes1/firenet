@@ -45,6 +45,7 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /ui/links", servePage("links.html"))
 	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
 	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
+	mux.HandleFunc("GET /ui/simulate", servePage("simulate.html"))
 
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {

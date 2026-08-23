@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>firenet — симуляция</title>
+<script>
+  try {
+    var saved = localStorage.getItem("firenet-theme");
+    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+  } catch (e) {}
+</script>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-nav="simulate" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
+
+<main>
+  <div class="sim-layout">
+    <section class="sim-form-panel">
+      <h1>Симуляция трафика</h1>
+      <form id="sim-form">
+        <label>Источник (IP)
+          <input id="sim-src" placeholder="10.0.0.5" autocomplete="off" spellcheck="false" required>
+        </label>
+        <label>Назначение (IP)
+          <input id="sim-dst" placeholder="10.0.1.7" autocomplete="off" spellcheck="false" required>
+        </label>
+        <label>Протокол
+          <select id="sim-proto">
+            <option value="">любой</option>
+            <option value="tcp">tcp</option>
+            <option value="udp">udp</option>
+            <option value="icmp">icmp</option>
+          </select>
+        </label>
+        <label>Порты назначения (через запятую)
+          <input id="sim-dstports" placeholder="443, 8080" autocomplete="off" spellcheck="false">
+        </label>
+        <button type="submit" class="primary">Симулировать</button>
+      </form>
+      <section id="sim-summary" hidden></section>
+      <section id="sim-paths"></section>
+    </section>
+    <div class="canvas-wrap">
+      <svg id="sim-canvas"></svg>
+    </div>
+  </div>
+</main>
+
+<script src="/alpine.min.js" defer></script>
+<script src="/common.js"></script>
+<script src="/camera.js"></script>
+<script src="/netmap.js"></script>
+<script src="/simulate.js"></script>
+</body>
+</html>
