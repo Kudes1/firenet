@@ -91,7 +91,7 @@ const Simulate = (() => {
       const kind = KINDS[d.kind] || { rx: 6 };
       viewport.append(el("rect", { class: "node-rect " + d.kind + dim(d.name), x: pos.x, y: pos.y, width: DEVICE_W, height: DEVICE_H, rx: kind.rx }));
       if (kind.glyph) {
-        viewport.append(el("path", { class: "node-glyph " + d.kind, d: kind.glyph, transform: `translate(${pos.x + 8} ${pos.y + 8})` }));
+        viewport.append(el("path", { class: "node-glyph " + d.kind + dim(d.name), d: kind.glyph, transform: `translate(${pos.x + 8} ${pos.y + 8})` }));
         viewport.append(el("text", { class: "node-label" + dim(d.name), x: pos.x + 24, y: pos.y + 18 }, `${d.name} (${d.kind})`));
       } else {
         viewport.append(el("text", { class: "node-label" + dim(d.name), x: pos.x + 8, y: pos.y + 18 }, `${d.name} (${d.kind})`));
