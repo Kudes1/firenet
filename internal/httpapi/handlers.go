@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -307,6 +308,33 @@ type simulateRequest struct {
 
 var simulateProtos = map[string]bool{"": true, "tcp": true, "udp": true, "icmp": true}
 
+// validatePortSpec accepts a single port number or a "lo:hi" range,
+// mirroring the compiled-rule port syntax MatchFlow compares against.
+func validatePortSpec(spec string) error {
+	loStr, hiStr, ranged := strings.Cut(spec, ":")
+	if !ranged {
+		hiStr = loStr
+	}
+	lo, err1 := strconv.Atoi(loStr)
+	hi, err2 := strconv.Atoi(hiStr)
+	switch {
+	case err1 != nil || err2 != nil || lo < 1 || hi > 65535:
+		return fmt.Errorf("invalid port spec %q", spec)
+	case lo > hi:
+		return fmt.Errorf("invalid port range %q: from must not exceed to", spec)
+	}
+	return nil
+}
+
+func validatePortList(ports []string) error {
+	for _, p := range ports {
+		if err := validatePortSpec(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (h *handlers) simulate(w http.ResponseWriter, r *http.Request) {
 	var req simulateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -325,6 +353,14 @@ func (h *handlers) simulate(w http.ResponseWriter, r *http.Request) {
 	dst, err := netip.ParseAddr(req.Dst)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid dst IP: %w", err))
+		return
+	}
+	if err := validatePortList(req.SrcPorts); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if err := validatePortList(req.DstPorts); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
 

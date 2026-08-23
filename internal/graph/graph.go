@@ -25,8 +25,8 @@ const (
 // synthetic L2-domain bus. Switches themselves never appear as devices here
 // — each switch L2 domain is represented by one NodeDomain bus in Build.
 type Node struct {
-	Kind NodeKind
-	Name string
+	Kind NodeKind `json:"kind"`
+	Name string   `json:"name"`
 }
 
 func RouterNode(name string) Node { return Node{Kind: NodeRouter, Name: name} }

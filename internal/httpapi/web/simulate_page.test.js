@@ -151,6 +151,7 @@ test("unreachable report renders explicit message", async () => {
   await tick();
   get(`Simulate.renderReport(${JSON.stringify({ srcSubnet: "office", dstSubnet: "isolated", note: "", paths: [] })})`);
   assert.match(JSON.stringify(ids["sim-paths"]), /недостижим/i);
+  assert.doesNotMatch(String(ids["sim-summary"]._text || ""), /\. $/);
 });
 
 test("summary line reports source, destination and path count", async () => {

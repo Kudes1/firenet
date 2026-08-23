@@ -110,7 +110,10 @@ const Simulate = (() => {
 
   const BADGE = { allow: "badge-ok", deny: "badge-drop" };
   const badgeClass = (action) => BADGE[action] || "badge-default";
-  const badgeLabel = (action) => (action === "deny" ? "запрещено" : action === "allow" ? "разрешено" : action);
+  // One branching point for both badge wordings: path verdicts speak
+  // «разрешено/запрещено», per-router badges use iptables terms accept/drop.
+  const badgeLabel = (action, iptables) =>
+    action === "deny" ? (iptables ? "drop" : "запрещено") : action === "allow" ? (iptables ? "accept" : "разрешено") : action;
 
   function chip(node) {
     const span = document.createElement("span");
@@ -125,7 +128,7 @@ const Simulate = (() => {
     state.result = report;
     const summary = document.getElementById("sim-summary");
     summary.hidden = false;
-    summary.textContent = `${report.srcSubnet} → ${report.dstSubnet}: путей ${report.paths.length}. ${report.note}`;
+    summary.textContent = `${report.srcSubnet} → ${report.dstSubnet}: путей ${report.paths.length}` + (report.note ? `. ${report.note}` : "");
     if (state.topology) renderMap();
     if (!report.paths.length) {
       const p = document.createElement("p");
@@ -164,7 +167,7 @@ const Simulate = (() => {
         const sum = document.createElement("summary");
         const b = document.createElement("span");
         b.className = "badge " + badgeClass(rv.action);
-        b.textContent = rv.action === "deny" ? "drop" : rv.action === "allow" ? "accept" : rv.action;
+        b.textContent = badgeLabel(rv.action, true);
         sum.append(b, Object.assign(document.createElement("span"), { textContent: ` ${rv.router}` }));
         row.append(sum);
         const body = document.createElement("p");

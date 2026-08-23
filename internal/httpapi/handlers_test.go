@@ -668,6 +668,9 @@ func TestSimulateHandler(t *testing.T) {
 		if rep.Paths[0].Verdict != rules.ActionAllow || rep.Paths[0].Routers[0].MatchedRule != "office-to-dmz" {
 			t.Fatalf("unexpected verdict: %+v", rep.Paths[0])
 		}
+		if !strings.Contains(rec.Body.String(), `"kind":1,"name":"office"`) {
+			t.Fatalf("path nodes must serialize with lowercase keys, got %s", rec.Body.String())
+		}
 	})
 
 	t.Run("invalid IP is unprocessable", func(t *testing.T) {
@@ -694,6 +697,33 @@ func TestSimulateHandler(t *testing.T) {
 		rec := doJSON(t, h, http.MethodPost, "/api/simulate", map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "sctp"})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", rec.Code)
+		}
+	})
+
+	t.Run("invalid port string is unprocessable", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, "/api/simulate",
+			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"abc"}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		if msg := errorBody(t, rec); !strings.Contains(msg, `"abc"`) {
+			t.Fatalf("error should mention the bad port, got %q", msg)
+		}
+	})
+
+	t.Run("inverted port range is unprocessable", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, "/api/simulate",
+			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "srcPorts": []string{"2000:1000"}})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("valid port range passes validation", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, "/api/simulate",
+			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"443", "1024:65535"}})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 		}
 	})
 }
