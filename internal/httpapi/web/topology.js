@@ -131,33 +131,15 @@ const Topology = (() => {
   }
 
   // setupCamera wires wheel zoom (anchored at the cursor) and pan by
-  // middle-button drag; both persist through the debounced layout save.
+  // middle-button drag via the shared CameraControls; both persist through
+  // the debounced layout save. Left button stays free for selection and
+  // node dragging.
   function setupCamera() {
-    const svg = canvas();
-    svg.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      const p = screenPoint(e);
-      State.camera = Camera.zoomAt(State.camera, p.x, p.y, Math.exp(-e.deltaY * 0.002));
-      applyCamera();
-      scheduleLayoutSave();
-    });
-    svg.addEventListener("mousedown", (e) => {
-      if (e.button !== 1) return;
-      e.preventDefault();
-      let last = screenPoint(e);
-      function onMove(ev) {
-        const p = screenPoint(ev);
-        State.camera = { ...State.camera, x: State.camera.x + p.x - last.x, y: State.camera.y + p.y - last.y };
-        last = p;
-        applyCamera();
-      }
-      function onUp() {
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-        scheduleLayoutSave();
-      }
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
+    CameraControls.wire(canvas(), {
+      getCam: () => State.camera,
+      setCam: (c) => { State.camera = c; applyCamera(); },
+      buttons: [1],
+      onChange: scheduleLayoutSave,
     });
   }
 

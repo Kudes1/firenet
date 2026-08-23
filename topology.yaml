@@ -47,7 +47,7 @@ links:
         a-exports:
             - MARKET
         b-exports:
-            - main
+            - MAIN
     - a:
         device: test1
       b:

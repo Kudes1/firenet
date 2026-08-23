@@ -76,6 +76,10 @@ function bootSimulate(responses) {
     // stable registry: production code resolves widgets by id repeatedly
     getElementById: (id) => (id === "sim-canvas" ? canvas : (ids[id] ||= makeEl("div"))),
     addEventListener(t, fn) { (doc.listeners[t] ||= []).push(fn); },
+    removeEventListener(t, fn) {
+      const list = doc.listeners[t];
+      if (list) doc.listeners[t] = list.filter((f) => f !== fn);
+    },
   };
   const sandbox = {
     document: doc,
@@ -101,12 +105,12 @@ function bootSimulate(responses) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  for (const f of ["common.js", "camera.js", "netmap.js", "simulate.js"]) {
+  for (const f of ["common.js", "camera.js", "camera_input.js", "netmap.js", "simulate.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
   const get = (expr) => vm.runInContext(expr, sandbox);
-  return { canvas, ids, calls, get, sandbox };
+  return { canvas, ids, calls, get, sandbox, doc };
 }
 
 const responses = {
@@ -134,6 +138,47 @@ const sampleReport = {
 };
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+const viewport = (canvas) => canvas.children.find((c) => c.attrs.class === "viewport");
+
+test("wheel zooms around the cursor", async () => {
+  const { canvas } = bootSimulate({
+    ...responses,
+    "/api/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
+  });
+  await tick();
+  const before = viewport(canvas).attrs.transform;
+  fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
+  const after = viewport(canvas).attrs.transform;
+  assert.notEqual(after, before, "zoom changed the viewport transform");
+  // the world point under the cursor stays under the cursor
+  const parse = (t) => { const [, x, y] = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(t); return { x: +x, y: +y }; };
+  const worldAt = (tr, z) => ({ x: (300 - parse(tr).x) / z, y: (200 - parse(tr).y) / z });
+  const w0 = worldAt(before, 2);
+  const z1 = /scale\(([\d.]+)\)/.exec(after)[1];
+  const w1 = worldAt(after, +z1);
+  assert.ok(Math.abs(w1.x - w0.x) < 0.01 && Math.abs(w1.y - w0.y) < 0.01, "cursor-anchored zoom");
+});
+
+test("left-button drag pans the read-only map", async () => {
+  const { canvas, doc } = bootSimulate(responses);
+  await tick();
+  fire(canvas, "mousedown", { button: 0, clientX: 100, clientY: 100 });
+  fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  fire(doc, "mouseup", {});
+  assert.equal(viewport(canvas).attrs.transform, "translate(60 30) scale(1)");
+});
+
+test("camera changes are not persisted to /api/layout", async () => {
+  const { canvas, doc, calls } = bootSimulate(responses);
+  await tick();
+  fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
+  fire(canvas, "mousedown", { button: 0, clientX: 100, clientY: 100 });
+  fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  fire(doc, "mouseup", {});
+  await tick();
+  assert.ok(!calls.some((c) => c.path === "/api/layout" && c.method === "PUT"), "read-only page never writes layout");
+});
 
 test("renderReport builds one card per path with verdict badges", async () => {
   const { ids, get } = bootSimulate(responses);

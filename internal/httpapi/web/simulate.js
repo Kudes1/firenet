@@ -8,6 +8,7 @@ const Simulate = (() => {
   const state = { topology: null, subnets: [], layout: null, camera: Camera.create(), result: null };
 
   const svgEl = () => document.getElementById("sim-canvas");
+  let viewportG = null;
 
   function ensureLayout() {
     state.topology.devices.forEach((d, i) => {
@@ -57,8 +58,8 @@ const Simulate = (() => {
     ensureLayout();
     const svg = svgEl();
     svg.innerHTML = "";
-    const viewport = el("g", { class: "viewport", transform: Camera.transform(state.camera) });
-    svg.append(viewport);
+    viewportG = el("g", { class: "viewport", transform: Camera.transform(state.camera) });
+    svg.append(viewportG);
     const hl = highlightSet(state.result);
     const dim = (name) => (hl ? (hl.has(name) ? "" : " sim-dim") : "");
     const devC = (name) => center(state.layout.devices, name, DEVICE_W, DEVICE_H);
@@ -69,7 +70,7 @@ const Simulate = (() => {
       const pa = devC(l.a.device), pb = devC(l.b.device);
       if (!pa || !pb) return;
       const mid = pointAt(pa, pb, 0.5, spreadOffset(offsets[i]));
-      viewport.append(el("path", {
+      viewportG.append(el("path", {
         class: "wire" + (l.filter ? " wire-filtered" : "") + ((hl && !(hl.has(l.a.device) && hl.has(l.b.device))) ? " sim-dim" : ""),
         d: `M ${pa.x} ${pa.y} Q ${mid.x} ${mid.y} ${pb.x} ${pb.y}`, fill: "none",
       }));
@@ -79,7 +80,7 @@ const Simulate = (() => {
       (n.attach || []).forEach((a) => {
         const pa = devC(a.device), c = netC(n.name);
         if (!pa || !c) return;
-        viewport.append(el("line", {
+        viewportG.append(el("line", {
           class: "wire" + ((hl && !(hl.has(n.name) && hl.has(a.device))) ? " sim-dim" : ""),
           x1: pa.x, y1: pa.y, x2: c.x, y2: c.y,
         }));
@@ -89,22 +90,22 @@ const Simulate = (() => {
     state.topology.devices.forEach((d) => {
       const pos = state.layout.devices[d.name];
       const kind = KINDS[d.kind] || { rx: 6 };
-      viewport.append(el("rect", { class: "node-rect " + d.kind + dim(d.name), x: pos.x, y: pos.y, width: DEVICE_W, height: DEVICE_H, rx: kind.rx }));
+      viewportG.append(el("rect", { class: "node-rect " + d.kind + dim(d.name), x: pos.x, y: pos.y, width: DEVICE_W, height: DEVICE_H, rx: kind.rx }));
       if (kind.glyph) {
-        viewport.append(el("path", { class: "node-glyph " + d.kind + dim(d.name), d: kind.glyph, transform: `translate(${pos.x + 8} ${pos.y + 8})` }));
-        viewport.append(el("text", { class: "node-label" + dim(d.name), x: pos.x + 24, y: pos.y + 18 }, `${d.name} (${d.kind})`));
+        viewportG.append(el("path", { class: "node-glyph " + d.kind + dim(d.name), d: kind.glyph, transform: `translate(${pos.x + 8} ${pos.y + 8})` }));
+        viewportG.append(el("text", { class: "node-label" + dim(d.name), x: pos.x + 24, y: pos.y + 18 }, `${d.name} (${d.kind})`));
       } else {
-        viewport.append(el("text", { class: "node-label" + dim(d.name), x: pos.x + 8, y: pos.y + 18 }, `${d.name} (${d.kind})`));
+        viewportG.append(el("text", { class: "node-label" + dim(d.name), x: pos.x + 8, y: pos.y + 18 }, `${d.name} (${d.kind})`));
       }
     });
 
     state.topology.networks.forEach((n) => {
       const pos = state.layout.networks[n.name];
-      viewport.append(el("path", { class: "subnet-rect" + dim(n.name), d: cloudPathFor(pos) }));
-      viewport.append(el("text", { class: "subnet-label" + dim(n.name), x: pos.x + 8, y: pos.y + 18 }, n.name));
+      viewportG.append(el("path", { class: "subnet-rect" + dim(n.name), d: cloudPathFor(pos) }));
+      viewportG.append(el("text", { class: "subnet-label" + dim(n.name), x: pos.x + 8, y: pos.y + 18 }, n.name));
       const members = (n.subnets || []).map((s) => state.subnets.find((x) => x.name === s)).filter(Boolean);
       const subtitle = members.length ? members.map((s) => s.cidr).join(", ") : "(нет подсетей)";
-      viewport.append(el("text", { class: "link-label-text" + dim(n.name), x: pos.x + 8, y: pos.y + 36 }, subtitle));
+      viewportG.append(el("text", { class: "link-label-text" + dim(n.name), x: pos.x + 8, y: pos.y + 36 }, subtitle));
     });
   }
 
@@ -195,6 +196,18 @@ const Simulate = (() => {
     }
   }
 
+  function setupCamera() {
+    // Карта read-only: камера служит только осмотру пути и не сохраняется
+    // в /api/layout, чтобы не перезаписывать раскладку редактора топологии.
+    CameraControls.wire(svgEl(), {
+      getCam: () => state.camera,
+      setCam: (c) => {
+        state.camera = c;
+        if (viewportG) viewportG.setAttribute("transform", Camera.transform(c));
+      },
+    });
+  }
+
   async function boot() {
     try {
       const [topo, subnetsDoc, layout] = await Promise.all([
@@ -207,6 +220,7 @@ const Simulate = (() => {
         ? { ...Camera.create(), ...layout.camera }
         : Camera.create();
       renderMap();
+      setupCamera();
     } catch (e) {
       showBanner("Не удалось загрузить топологию: " + e.message);
     }
