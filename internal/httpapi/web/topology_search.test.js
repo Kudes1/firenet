@@ -75,7 +75,7 @@ function bootTopology(responses) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  for (const f of ["common.js", "camera.js", "topology.js"]) {
+  for (const f of ["common.js", "camera.js", "netmap.js", "topology.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
