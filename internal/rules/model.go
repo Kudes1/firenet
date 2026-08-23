@@ -6,8 +6,9 @@ package rules
 type Action string
 
 const (
-	ActionAllow Action = "allow"
-	ActionDeny  Action = "deny"
+	ActionAllow  Action = "allow"
+	ActionDeny   Action = "deny"
+	ActionReturn Action = "return"
 )
 
 // Proto is the transport protocol a rule matches.

@@ -123,6 +123,23 @@ func TestRenderRules_ChainPositionBottom(t *testing.T) {
 	}
 }
 
+func TestRenderRules_ReturnAction(t *testing.T) {
+	ds := compiler.DeviceRuleset{
+		Device:        "r1",
+		Rules:         []compiler.CompiledRule{{Comment: "bypass", Action: rules.ActionReturn}},
+		DefaultAction: rules.ActionReturn,
+		ChainName:     "FIRENET-FWD",
+		ChainPosition: rules.ChainTop,
+	}
+	out := string(RenderRules(ds))
+	if !strings.Contains(out, "iptables -A FIRENET-FWD -j RETURN\n") {
+		t.Fatalf("expected rule with return action to render as RETURN:\n%s", out)
+	}
+	if strings.Count(out, "-j RETURN") != 2 {
+		t.Fatalf("expected exactly 2 RETURN targets (rule + default):\n%s", out)
+	}
+}
+
 func TestRenderRules_CustomChainName(t *testing.T) {
 	ds := compiler.DeviceRuleset{
 		Device:        "r1",

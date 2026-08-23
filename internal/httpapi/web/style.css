@@ -114,6 +114,30 @@ nav.side-nav a,
 .brand-short { display: none; width: var(--icon); text-align: center; }
 
 nav.side-nav { display: flex; flex-direction: column; gap: var(--space-1); }
+/* Collapsible section: header button + indented links. .closed hides the body. */
+.nav-group { display: flex; flex-direction: column; gap: var(--space-1); }
+nav.side-nav > * + * { border-top: 1px solid var(--border); padding-top: var(--space-2); }
+.nav-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: var(--panel-bg);
+  color: color-mix(in srgb, var(--fg) 78%, transparent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.nav-group-header:hover { background: var(--panel-bg-hover); color: var(--fg); }
+.nav-group-header .chevron svg { transition: transform .15s ease; }
+.nav-group.closed .nav-group-header .chevron svg { transform: rotate(90deg); }
+.nav-group-links { display: flex; flex-direction: column; gap: var(--space-1); }
+.nav-group.closed .nav-group-links { display: none; }
 nav.side-nav a {
   white-space: nowrap;
   color: var(--muted);
@@ -146,6 +170,8 @@ nav.side-nav .icon svg { width: 100%; height: 100%; }
 .sidebar.collapsed .brand-full { display: none; }
 .sidebar.collapsed .brand-short { display: inline-block; }
 .sidebar.collapsed .label { display: none; }
+/* Collapsed rail: hide group headers, keep the links as an icon list. */
+.sidebar.collapsed .nav-group-header { display: none; }
 
 .theme-toggle {
   justify-content: flex-start;
@@ -826,7 +852,10 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .member-suggestion.literal-add { color: var(--accent); }
 
 /* — симуляция трафика — */
-.sim-layout { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: var(--space-3); flex: 1; min-height: 0; }
+.sim-layout { display: grid; grid-template-columns: clamp(320px, var(--sim-form-w, 420px), calc(100% - 336px)) auto 1fr; flex: 1; min-height: 0; }
+.sim-splitter { width: 1rem; cursor: col-resize; position: relative; z-index: 1; }
+.sim-splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0.4375rem; right: 0.4375rem; background: transparent; }
+.sim-splitter:hover::after, .sim-splitter.dragging::after { background: var(--accent); opacity: 0.5; }
 #sim-canvas { display: block; width: 100%; height: 100%; }
 .sim-form-panel form { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
 .sim-path { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-2); margin-bottom: var(--space-2); }
@@ -838,6 +867,7 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .badge { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 0.8em; }
 .badge-ok { background: rgba(16, 185, 129, 0.18); color: #10b981; }
 .badge-drop { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
+.badge-return { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
 .badge-default { background: rgba(148, 163, 184, 0.2); color: inherit; }
 .sim-dim { opacity: 0.25; }
 .sim-unreachable { color: #ef4444; }

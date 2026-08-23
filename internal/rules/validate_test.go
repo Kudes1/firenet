@@ -163,6 +163,15 @@ func TestValidate_DuplicateRuleName(t *testing.T) {
 	}
 }
 
+func TestValidate_ReturnActionOK(t *testing.T) {
+	r := baseRule()
+	r.Action = ActionReturn
+	pol := &Policy{DefaultAction: ActionReturn, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	if err := pol.Validate(testTopology(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidate_InvalidDefaultAction(t *testing.T) {
 	pol := &Policy{DefaultAction: "maybe"}
 	if err := pol.Validate(testTopology(t)); err == nil {

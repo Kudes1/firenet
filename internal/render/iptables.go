@@ -100,8 +100,12 @@ func multiportList(ports []string) string {
 }
 
 func actionTarget(a rules.Action) string {
-	if a == rules.ActionAllow {
+	switch a {
+	case rules.ActionAllow:
 		return "ACCEPT"
+	case rules.ActionReturn:
+		return "RETURN"
+	default:
+		return "DROP"
 	}
-	return "DROP"
 }

@@ -90,12 +90,61 @@ const Simulate = (() => {
     TopoScene.render(viewportG, state, { dim: pathDim(expandHighlight(state.result, state.topology)) });
   }
 
-  const BADGE = { allow: "badge-ok", deny: "badge-drop" };
+  // — перетаскиваемый разделитель «форма ↔ карта» —
+  const FORM_MIN = 320, MAP_MIN = 320, SPLIT_W = 16, FORM_DEFAULT = 420;
+  const SIM_SPLIT_KEY = "firenet-sim-split-v1";
+
+  function clampFormWidth(px, total) {
+    return Math.min(Math.max(Math.round(px), FORM_MIN), Math.max(FORM_MIN, total - MAP_MIN - SPLIT_W));
+  }
+
+  function applyFormWidth(w) {
+    document.getElementById("sim-layout").style.setProperty("--sim-form-w", `${w}px`);
+  }
+
+  function wireSplitter() {
+    const layout = document.getElementById("sim-layout");
+    const handle = document.getElementById("sim-splitter");
+    const apply = (w) => {
+      state.formWidth = clampFormWidth(w, layout.getBoundingClientRect().width);
+      applyFormWidth(state.formWidth);
+    };
+    handle.addEventListener("mousedown", (ev) => {
+      ev.preventDefault();
+      handle.classList.add("dragging");
+      const startX = ev.clientX;
+      const start = state.formWidth ?? FORM_DEFAULT;
+      const onMove = (e) => apply(start + e.clientX - startX);
+      const onUp = () => {
+        handle.classList.remove("dragging");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        localStorage.setItem(SIM_SPLIT_KEY, JSON.stringify(state.formWidth));
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+    handle.addEventListener("dblclick", () => {
+      localStorage.removeItem(SIM_SPLIT_KEY);
+      state.formWidth = FORM_DEFAULT;
+      applyFormWidth(FORM_DEFAULT);
+    });
+    try {
+      const saved = JSON.parse(localStorage.getItem(SIM_SPLIT_KEY));
+      if (Number.isFinite(saved)) apply(saved);
+    } catch {}
+  }
+
+  const BADGE = { allow: "badge-ok", deny: "badge-drop", return: "badge-return" };
   const badgeClass = (action) => BADGE[action] || "badge-default";
   // One branching point for both badge wordings: path verdicts speak
-  // «разрешено/запрещено», per-router badges use iptables terms accept/drop.
+  // «разрешено/запрещено/возврат в FORWARD», per-router badges use iptables
+  // terms accept/drop/return.
   const badgeLabel = (action, iptables) =>
-    action === "deny" ? (iptables ? "drop" : "запрещено") : action === "allow" ? (iptables ? "accept" : "разрешено") : action;
+    action === "deny" ? (iptables ? "drop" : "запрещено")
+      : action === "allow" ? (iptables ? "accept" : "разрешено")
+        : action === "return" ? (iptables ? "return" : "возврат в FORWARD")
+          : action;
 
   function chip(node) {
     const span = document.createElement("span");
@@ -205,10 +254,11 @@ const Simulate = (() => {
     } catch (e) {
       showBanner("Не удалось загрузить топологию: " + e.message);
     }
+    wireSplitter();
     document.getElementById("sim-form").addEventListener("submit", run);
   }
 
-  return { boot, renderReport, run, state, expandHighlight };
+  return { boot, renderReport, run, state, expandHighlight, clampFormWidth };
 })();
 
 if (document.readyState === "loading") {

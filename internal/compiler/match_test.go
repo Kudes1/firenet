@@ -40,8 +40,8 @@ func TestMatchFlow(t *testing.T) {
 		{"exact match", officeIP, dmzIP, rules.ProtoTCP, nil, []string{"443"}, "office-to-dmz"},
 		{"wrong port falls through to unconditional", officeIP, dmzIP, rules.ProtoTCP, nil, []string{"80"}, "catch-all-deny"},
 		{"proto mismatch falls through", officeIP, dmzIP, rules.ProtoUDP, nil, []string{"443"}, "catch-all-deny"},
-		{"empty flow proto matches any rule proto", officeIP, dmzIP, "", nil, nil, "office-to-dmz"},
-		{"empty flow ports match port rule", officeIP, dmzIP, rules.ProtoTCP, nil, nil, "office-to-dmz"},
+		{"unspecified flow proto falls through", officeIP, dmzIP, "", nil, nil, "catch-all-deny"},
+		{"unspecified flow ports fall through", officeIP, dmzIP, rules.ProtoTCP, nil, nil, "catch-all-deny"},
 		{"src outside ipset skips set rule", netip.MustParseAddr("192.168.5.5"), dmzIP, rules.ProtoTCP, nil, []string{"443"}, "catch-all-deny"},
 	}
 	for _, tt := range tests {
@@ -62,7 +62,7 @@ func TestMatchFlow(t *testing.T) {
 
 func TestMatchFlow_FirstMatchOrder(t *testing.T) {
 	rs := matchFixture()
-	got := MatchFlow(rs, officeIP, dmzIP, rules.ProtoAny, nil, nil)
+	got := MatchFlow(rs, officeIP, dmzIP, rules.ProtoTCP, nil, []string{"443"})
 	if got == nil || got.Comment != "office-to-dmz" {
 		t.Fatalf("first-match order broken: %+v", got)
 	}

@@ -15,6 +15,17 @@ function makeEl(tag) {
     attrs: {},
     listeners: {},
     style: {},
+    className: "",
+    classList: {
+      add(c) { if (!el.className.split(" ").includes(c)) el.className += (el.className ? " " : "") + c; },
+      remove(c) { el.className = el.className.split(" ").filter((x) => x !== c).join(" "); },
+      contains(c) { return el.className.split(" ").includes(c); },
+      toggle(c, force) {
+        const has = this.contains(c);
+        if (force === undefined ? !has : force) this.add(c);
+        else this.remove(c);
+      },
+    },
     setAttribute(k, v) { this.attrs[k] = v; },
     append(...cs) { cs.forEach((c) => { c.parent = this; this.children.push(c); }); },
     prepend(...cs) { cs.reverse().forEach((c) => { c.parent = this; this.children.unshift(c); }); },
@@ -22,7 +33,7 @@ function makeEl(tag) {
     closest(selector) {
       let n = this;
       while (n) {
-        if (selector === "nav.side-nav a" && n.tag === "a" && n.parent && n.parent.tag === "nav") return n;
+        if (selector === "nav.side-nav a" && n.tag === "a") return n;
         n = n.parent;
       }
       return null;
@@ -74,12 +85,15 @@ function fire(target, type, ev) {
 }
 
 // clickNavLink builds the shared sidebar and simulates a click on its first
-// nav link, returning whether the default navigation was prevented.
+// nav link (inside the first group), returning whether the default was prevented.
 function clickNavLink(ctx, doc) {
   ctx.sandbox.buildNav("topology");
   const aside = doc.body.children[0];
   const nav = aside.children.find((n) => n.tag === "nav");
-  const ev = { target: nav.children[0] };
+  let link = null;
+  const walk = (n) => n.children.forEach((c) => (c.tag === "a" ? (link ||= c) : walk(c)));
+  walk(nav);
+  const ev = { target: link };
   fire(doc.body, "click", ev);
   return !!ev.defaultPrevented;
 }

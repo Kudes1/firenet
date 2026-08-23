@@ -201,15 +201,33 @@ function matchSubnetMembers(subnets, cidrOf, q) {
   return matchPrefixQuery([...names, ...names.map((s) => cidrOf(s))], q);
 }
 
-const NAV_LINKS = [
-  { id: "topology", href: "/ui/topology", label: "Топология" },
-  { id: "subnets", href: "/ui/subnets", label: "Подсети" },
-  { id: "networks", href: "/ui/networks", label: "Сети" },
-  { id: "sets", href: "/ui/sets", label: "Наборы" },
-  { id: "unions", href: "/ui/unions", label: "Объединения" },
-  { id: "links", href: "/ui/links", label: "Связи" },
-  { id: "rules", href: "/ui/rules", label: "Правила" },
-  { id: "compile", href: "/ui/compile", label: "Компиляция" },
+// NAV_GROUPS defines the sidebar layout: collapsible sections with links
+// plus standalone entries appended after the groups. Group ids double as
+// localStorage keys ("firenet-nav-<id>"), link ids match <body data-nav>.
+const NAV_GROUPS = [
+  {
+    id: "topology",
+    label: "Топология",
+    links: [
+      { id: "topology", href: "/ui/topology", label: "Схема" },
+      { id: "networks", href: "/ui/networks", label: "Сети" },
+      { id: "unions", href: "/ui/unions", label: "Объединения" },
+      { id: "links", href: "/ui/links", label: "Связи" },
+    ],
+  },
+  {
+    id: "firewall",
+    label: "Firewall",
+    links: [
+      { id: "subnets", href: "/ui/subnets", label: "Подсети" },
+      { id: "sets", href: "/ui/sets", label: "Наборы" },
+      { id: "rules", href: "/ui/rules", label: "Правила" },
+      { id: "compile", href: "/ui/compile", label: "Компиляция" },
+    ],
+  },
+];
+
+const NAV_STANDALONE = [
   { id: "simulate", href: "/ui/simulate", label: "Симуляция" },
 ];
 
@@ -250,7 +268,7 @@ function buildNav(active) {
 
   const nav = document.createElement("nav");
   nav.className = "side-nav";
-  NAV_LINKS.forEach((l) => {
+  const makeLink = (l) => {
     const a = document.createElement("a");
     a.href = l.href;
     a.title = l.label;
@@ -262,8 +280,44 @@ function buildNav(active) {
     lb.className = "label";
     lb.textContent = l.label;
     a.append(ic, lb);
-    nav.append(a);
+    return a;
+  };
+  NAV_GROUPS.forEach((g) => {
+    const wrap = document.createElement("div");
+    wrap.className = "nav-group";
+    // The active page forces its group open; otherwise a group is open only
+    // if it was explicitly expanded before.
+    const open = g.links.some((l) => l.id === active)
+      ? true
+      : localStorage.getItem("firenet-nav-" + g.id) === "open";
+    wrap.classList.toggle("closed", !open);
+
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "nav-group-header";
+    header.title = g.label;
+    header.setAttribute("aria-label", "Свернуть/развернуть раздел «" + g.label + "»");
+    const chev = document.createElement("span");
+    chev.className = "icon chevron";
+    chev.innerHTML = svgOpen + '<polyline points="9 18 15 12 9 6"/></svg>';
+    const lb = document.createElement("span");
+    lb.className = "label";
+    lb.textContent = g.label;
+    header.append(chev, lb);
+    header.addEventListener("click", () => {
+      const closed = !wrap.classList.contains("closed");
+      wrap.classList.toggle("closed", closed);
+      localStorage.setItem("firenet-nav-" + g.id, closed ? "closed" : "open");
+    });
+    wrap.append(header);
+
+    const body = document.createElement("div");
+    body.className = "nav-group-links";
+    g.links.forEach((l) => body.append(makeLink(l)));
+    wrap.append(body);
+    nav.append(wrap);
   });
+  NAV_STANDALONE.forEach((l) => nav.append(makeLink(l)));
   aside.append(nav);
 
   const toggle = document.createElement("button");

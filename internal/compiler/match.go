@@ -12,17 +12,17 @@ import (
 // to dst — the same first-match order the rendered iptables script evaluates
 // in. nil means no rule matches and traffic falls to rs.DefaultAction.
 // Semantics mirror render exactly: empty set/literal side is unconditional;
-// an ipset matches when any of its CIDRs contains the address; ProtoAny
-// matches every protocol and an empty or "any" flow proto matches every rule; a rule
-// without ports or without flow ports matches any port, otherwise some rule
-// entry must intersect the flow ports ("a:b" ranges overlap numerically).
+// an ipset matches when any of its CIDRs contains the address; a rule with
+// ProtoAny matches every protocol, otherwise the flow proto must be set and
+// equal to the rule proto; a rule without ports matches any port, otherwise
+// some flow port must intersect a rule entry ("a:b" ranges overlap numerically).
 func MatchFlow(rs DeviceRuleset, src, dst netip.Addr, proto rules.Proto, srcPorts, dstPorts []string) *CompiledRule {
 	for i := range rs.Rules {
 		r := &rs.Rules[i]
 		if !sideMatches(rs, r.SrcSet, r.SrcAddr, src) || !sideMatches(rs, r.DstSet, r.DstAddr, dst) {
 			continue
 		}
-		if proto != "" && proto != rules.ProtoAny && r.Proto != rules.ProtoAny && r.Proto != proto {
+		if r.Proto != rules.ProtoAny && r.Proto != proto {
 			continue
 		}
 		if !portsMatch(r.SrcPorts, srcPorts) || !portsMatch(r.DstPorts, dstPorts) {
@@ -61,8 +61,11 @@ func setContains(rs DeviceRuleset, name string, addr netip.Addr) bool {
 }
 
 func portsMatch(rulePorts, flowPorts []string) bool {
-	if len(rulePorts) == 0 || len(flowPorts) == 0 {
+	if len(rulePorts) == 0 {
 		return true
+	}
+	if len(flowPorts) == 0 {
+		return false
 	}
 	for _, rp := range rulePorts {
 		for _, fp := range flowPorts {

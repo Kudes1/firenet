@@ -1,4 +1,4 @@
-defaultAction: deny
+defaultAction: return
 chainPosition: top
 rules:
     - name: test

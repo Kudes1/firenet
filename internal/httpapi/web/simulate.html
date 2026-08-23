@@ -15,7 +15,7 @@
 <body data-nav="simulate" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
 
 <main>
-  <div class="sim-layout">
+  <div class="sim-layout" id="sim-layout">
     <section class="sim-form-panel">
       <h1>Симуляция трафика</h1>
       <form id="sim-form">
@@ -41,6 +41,7 @@
       <section id="sim-summary" hidden></section>
       <section id="sim-paths"></section>
     </section>
+    <div class="sim-splitter" id="sim-splitter" title="Перетащите, чтобы изменить ширину; двойной клик — сброс"></div>
     <div class="canvas-wrap">
       <svg id="sim-canvas"></svg>
     </div>

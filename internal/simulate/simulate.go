@@ -112,17 +112,23 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 	}
 	for _, p := range paths {
 		pr := PathResult{Nodes: p.Nodes, Routers: []RouterVerdict{}}
-		denied := false
+		denied, returned := false, false
 		for _, r := range p.Routers() {
 			v := verdict(byDevice[r], defaultAction, flow, r)
-			if v.Action == rules.ActionDeny {
+			switch v.Action {
+			case rules.ActionDeny:
 				denied = true
+			case rules.ActionReturn:
+				returned = true
 			}
 			pr.Routers = append(pr.Routers, v)
 		}
-		if denied {
+		switch {
+		case denied:
 			pr.Verdict = rules.ActionDeny
-		} else {
+		case returned:
+			pr.Verdict = rules.ActionReturn
+		default:
 			pr.Verdict = rules.ActionAllow
 		}
 		rep.Paths = append(rep.Paths, pr)
@@ -133,21 +139,25 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 func verdict(rs compiler.DeviceRuleset, def rules.Action, flow Flow, router string) RouterVerdict {
 	matched := compiler.MatchFlow(rs, flow.Src, flow.Dst, flow.Proto, flow.SrcPorts, flow.DstPorts)
 	if matched == nil {
-		return RouterVerdict{
-			Router: router,
-			Action: def,
-			Reason: fmt.Sprintf("нет подходящих правил — применяется действие по умолчанию %q", def),
+		reason := fmt.Sprintf("нет подходящих правил — применяется действие по умолчанию %q", def)
+		if def == rules.ActionReturn {
+			reason = fmt.Sprintf("нет подходящих правил — цепочка %s возвращает трафик в FORWARD", rs.ChainName)
 		}
+		return RouterVerdict{Router: router, Action: def, Reason: reason}
+	}
+	reason := fmt.Sprintf("сработало правило %q (%s): src %s, dst %s, proto %s, порты src %s / dst %s",
+		matched.Comment, matched.Action,
+		sideDesc(rs, matched.SrcSet, matched.SrcAddr, true),
+		sideDesc(rs, matched.DstSet, matched.DstAddr, false),
+		matched.Proto, portsDesc(matched.SrcPorts), portsDesc(matched.DstPorts))
+	if matched.Action == rules.ActionReturn {
+		reason += fmt.Sprintf(" — цепочка %s возвращает трафик в FORWARD", rs.ChainName)
 	}
 	return RouterVerdict{
 		Router:      router,
 		Action:      matched.Action,
 		MatchedRule: matched.Comment,
-		Reason: fmt.Sprintf("сработало правило %q (%s): src %s, dst %s, proto %s, порты src %s / dst %s",
-			matched.Comment, matched.Action,
-			sideDesc(rs, matched.SrcSet, matched.SrcAddr, true),
-			sideDesc(rs, matched.DstSet, matched.DstAddr, false),
-			matched.Proto, portsDesc(matched.SrcPorts), portsDesc(matched.DstPorts)),
+		Reason:      reason,
 	}
 }
 

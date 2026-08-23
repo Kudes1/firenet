@@ -15,7 +15,10 @@ function makeEl(tag) {
     attrs: {},
     listeners: {},
     dataset: {},
-    style: {},
+    style: {
+      setProperty(k, v) { this[k] = v; },
+      getPropertyValue(k) { return this[k] ?? null; },
+    },
     classList: { add() {}, remove() {} },
     setAttribute(k, v) { this.attrs[k] = v; },
     getAttribute(k) { return this.attrs[k]; },
@@ -62,10 +65,11 @@ const topoFixture = {
   networks: [{ name: "office", subnets: ["a"], attach: [{ device: "r1" }] }],
 };
 
-function bootSimulate(responses) {
+function bootSimulate(responses, savedStore) {
   const canvas = makeEl("svg");
   const ids = {};
   const calls = [];
+  const store = { ...savedStore };
   const doc = {
     readyState: "loading",
     listeners: {},
@@ -87,7 +91,11 @@ function bootSimulate(responses) {
       addEventListener(t, fn) { (doc.listeners["win-" + t] ||= []).push(fn); },
       dispatchEvent() {},
     },
-    localStorage: { getItem: () => null, setItem() {} },
+    localStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+    },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     dispatchEvent() {},
@@ -110,7 +118,7 @@ function bootSimulate(responses) {
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
   const get = (expr) => vm.runInContext(expr, sandbox);
-  return { canvas, ids, calls, get, sandbox, doc };
+  return { canvas, ids, calls, get, sandbox, doc, store };
 }
 
 const responses = {
@@ -209,6 +217,19 @@ test("renderReport builds one card per path with verdict badges", async () => {
   assert.match(html, /office-to-dmz/);
 });
 
+test("return verdict renders a neutral badge with FORWARD wording", async () => {
+  const { ids, get } = bootSimulate(responses);
+  await tick();
+  const rep = JSON.parse(JSON.stringify(sampleReport));
+  rep.paths[0].verdict = "return";
+  rep.paths[0].routers[0].action = "return";
+  rep.paths[0].routers[0].matchedRule = "bypass";
+  get(`Simulate.renderReport(${JSON.stringify(rep)})`);
+  const html = JSON.stringify(ids["sim-paths"]);
+  assert.match(html, /badge-return/);
+  assert.match(html, /возврат в FORWARD/);
+});
+
 test("unreachable report renders explicit message", async () => {
   const { ids, get } = bootSimulate(responses);
   await tick();
@@ -293,4 +314,39 @@ test("form submit posts to /api/simulate and renders the report", async () => {
   assert.deepEqual(post.body, { src: "10.0.0.5", dst: "10.0.1.7", proto: "tcp", dstPorts: ["443", "8080"] });
   const cards = ids["sim-paths"].children.filter((c) => c.className === "sim-path");
   assert.equal(cards.length, 1, "report rendered after submit");
+});
+
+// — разделитель «форма ↔ карта» —
+
+test("clampFormWidth keeps the panel between its bounds", async () => {
+  const { get } = bootSimulate(responses);
+  await tick();
+  const clamp = (w, total) => get(`Simulate.clampFormWidth(${w}, ${total})`);
+  assert.equal(clamp(100, 1200), 320);
+  assert.equal(clamp(5000, 1200), 864);
+  assert.equal(clamp(420.6, 1200), 421);
+});
+
+test("splitter drag resizes the form panel and persists the width", async () => {
+  const { ids, doc, store } = bootSimulate(responses);
+  await tick();
+  fire(ids["sim-splitter"], "mousedown", { button: 0, clientX: 600 });
+  fire(doc, "mousemove", { clientX: 700 });
+  fire(doc, "mouseup", {});
+  assert.equal(ids["sim-layout"].style["--sim-form-w"], "520px");
+  assert.equal(JSON.parse(store["firenet-sim-split-v1"]), 520);
+});
+
+test("saved panel width is restored on boot", async () => {
+  const { ids } = bootSimulate(responses, { "firenet-sim-split-v1": JSON.stringify(600) });
+  await tick();
+  assert.equal(ids["sim-layout"].style["--sim-form-w"], "600px");
+});
+
+test("double click resets the splitter to the default width", async () => {
+  const { ids, store } = bootSimulate(responses, { "firenet-sim-split-v1": JSON.stringify(600) });
+  await tick();
+  fire(ids["sim-splitter"], "dblclick", {});
+  assert.equal(ids["sim-layout"].style["--sim-form-w"], "420px");
+  assert.ok(!("firenet-sim-split-v1" in store));
 });

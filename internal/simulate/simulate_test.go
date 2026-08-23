@@ -47,6 +47,22 @@ rules:
   - {name: block-dmz, src: [office], dst: [dmz], action: deny}
 `
 
+const simRulesReturnRule = `
+defaultAction: deny
+chainName: MY-CHAIN
+chainPosition: top
+rules:
+  - {name: bypass-office-dmz, src: [office], dst: [dmz], action: return}
+`
+
+const simRulesDefaultReturn = `
+defaultAction: return
+chainName: MY-CHAIN
+chainPosition: top
+rules:
+  - {name: unrelated, src: [dmz], dst: [office], proto: udp, action: allow}
+`
+
 func loadTopo(t *testing.T) (*topology.Topology, *graph.Graph) {
 	t.Helper()
 	topo, err := topology.Load(strings.NewReader(simTopology))
@@ -146,6 +162,17 @@ func TestRun_DeniedPathOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestRun_UnspecifiedPortFallsToDefault(t *testing.T) {
+	rep := runSim(t, simRulesAllow, "10.0.0.5", "10.0.1.7", "")
+	if len(rep.Paths) != 1 || rep.Paths[0].Verdict != rules.ActionDeny {
+		t.Fatalf("unspecified ports must fall to default deny, got %+v", rep.Paths)
+	}
+	v := rep.Paths[0].Routers[0]
+	if v.MatchedRule != "" || v.Reason == "" {
+		t.Fatalf("want default-action explanation, got %+v", v)
+	}
+}
+
 func TestRun_NoMatchingRuleFallsToDefault(t *testing.T) {
 	rep := runSim(t, simRulesAllow, "10.0.0.5", "10.0.1.7", rules.ProtoUDP)
 	if len(rep.Paths) != 1 || rep.Paths[0].Verdict != rules.ActionDeny {
@@ -154,6 +181,48 @@ func TestRun_NoMatchingRuleFallsToDefault(t *testing.T) {
 	v := rep.Paths[0].Routers[0]
 	if v.MatchedRule != "" || v.Reason == "" {
 		t.Fatalf("want default-action explanation, got %+v", v)
+	}
+}
+
+func TestRun_ReturnRuleYieldsReturnVerdict(t *testing.T) {
+	rep := runSim(t, simRulesReturnRule, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
+	if len(rep.Paths) != 1 {
+		t.Fatalf("want 1 path, got %d", len(rep.Paths))
+	}
+	p := rep.Paths[0]
+	if p.Verdict != rules.ActionReturn {
+		t.Fatalf("want return path verdict, got %q (routers %+v)", p.Verdict, p.Routers)
+	}
+	for _, v := range p.Routers {
+		if v.MatchedRule != "bypass-office-dmz" || v.Action != rules.ActionReturn || v.Reason == "" {
+			t.Fatalf("bad verdict on %s: %+v", v.Router, v)
+		}
+		if !strings.Contains(v.Reason, "MY-CHAIN") || !strings.Contains(v.Reason, "FORWARD") {
+			t.Fatalf("reason must name the chain and FORWARD, got: %s", v.Reason)
+		}
+	}
+}
+
+func TestRun_DefaultReturnWhenNoMatch(t *testing.T) {
+	rep := runSim(t, simRulesDefaultReturn, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
+	p := rep.Paths[0]
+	if p.Verdict != rules.ActionReturn {
+		t.Fatalf("want return path verdict, got %q (routers %+v)", p.Verdict, p.Routers)
+	}
+	for _, v := range p.Routers {
+		if v.MatchedRule != "" || v.Action != rules.ActionReturn {
+			t.Fatalf("router %s: want default-return verdict, got %+v", v.Router, v)
+		}
+		if !strings.Contains(v.Reason, "MY-CHAIN") || !strings.Contains(v.Reason, "FORWARD") {
+			t.Fatalf("reason must name the chain and FORWARD, got: %s", v.Reason)
+		}
+	}
+}
+
+func TestRun_DenyOverridesReturnOnPath(t *testing.T) {
+	rep := runSim(t, simRulesDeny, "10.0.0.5", "10.0.1.7", "")
+	if rep.Paths[0].Verdict != rules.ActionDeny {
+		t.Fatalf("deny must override return on path verdict, got %+v", rep.Paths[0])
 	}
 }
 

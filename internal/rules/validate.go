@@ -16,7 +16,9 @@ var chainNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,28}$`)
 // Validate checks that every rule references a real subnet/network (or Any),
 // uses a valid proto/action, and only carries ports for tcp/udp.
 func (p *Policy) Validate(topo *topology.Topology) error {
-	if p.DefaultAction != ActionAllow && p.DefaultAction != ActionDeny {
+	switch p.DefaultAction {
+	case ActionAllow, ActionDeny, ActionReturn:
+	default:
 		return fmt.Errorf("invalid defaultAction %q", p.DefaultAction)
 	}
 	if !chainNameRE.MatchString(p.ChainName) {
@@ -66,7 +68,9 @@ func (p *Policy) Validate(topo *topology.Topology) error {
 			return fmt.Errorf("rule %q: %w", r.Name, err)
 		}
 
-		if r.Action != ActionAllow && r.Action != ActionDeny {
+		switch r.Action {
+		case ActionAllow, ActionDeny, ActionReturn:
+		default:
 			return fmt.Errorf("rule %q: invalid action %q", r.Name, r.Action)
 		}
 	}
