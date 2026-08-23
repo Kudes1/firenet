@@ -4,7 +4,7 @@ rules:
     - name: test
       comment: AI-55432
       src:
-        - 10.10.10.2/32
+        - main
       dst:
         - mr-1
       proto: tcp

@@ -9,78 +9,126 @@
     if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
   } catch (e) {}
 </script>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body data-nav="links" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
-<div id="site-header"></div>
 
 <main x-data="linksPage">
   <div class="table-toolbar">
     <div class="toolbar-text">
       <h3>Связи</h3>
-      <p class="hint">Обычная связь даёт полную связность между устройствами. Фильтрованная связь пропускает только трафик между объявленными сетями: каждая сторона перечисляет, что она «анонсирует» через связь. Создание связей — на холсте топологии инструментом «связать».</p>
+      <p class="hint">Обычная связь даёт полную связность между устройствами. Фильтрованная связь работает как маршрутизация с фильтрами: каждая сторона имеет свой экспорт (что анонсирует соседу) и импорт (что принимает от соседа — зеркало его экспорта). Пакет проходит по связи, только если его источник в экспорте отправителя, а получатель в экспорте получателя. Создание связей — на холсте топологии инструментом «связать».</p>
+    </div>
+    <div class="toolbar-actions">
+      <button type="button" class="secondary btn-sm" @click="searchOpen = !searchOpen" title="Поиск по связям">&#128269;</button>
     </div>
   </div>
   <div class="table-wrap" x-show="loaded" x-cloak>
     <table class="data-table">
       <thead>
-        <tr><th>Устройства</th><th>Режим</th><th>Экспорт стороны A</th><th>Экспорт стороны B</th><th></th></tr>
+        <tr><th>Устройства</th><th>Режим</th><th title="Сети, которые устройство слева анонсирует вправо">Экспорт →</th><th title="Сети, которые устройство справа анонсирует влево">← Экспорт</th><th></th></tr>
+        <tr class="search-row" x-show="searchOpen" x-cloak>
+          <th><input x-model.trim="filters.devices" placeholder="устройство..." title="Имя любого из двух устройств связи"></th>
+          <th><input x-model.trim="filters.mode" placeholder="режим..." title="обычная или фильтрованная"></th>
+          <th><input x-model.trim="filters.aExports" placeholder="имя или IP" title="Имя сети или подсети, IP или CIDR (можно частично: 10.0.)"></th>
+          <th><input x-model.trim="filters.bExports" placeholder="имя или IP" title="Имя сети или подсети, IP или CIDR (можно частично: 10.0.)"></th>
+          <th><button type="button" class="icon-btn reset-search" title="Сбросить фильтры" @click="resetFilters()">&#10005;</button></th>
+        </tr>
       </thead>
       <tbody>
-        <template x-for="(l, i) in links" :key="i">
+        <template x-for="row in filteredLinks" :key="row.index">
           <tr>
-            <td x-text="pairLabel(i)"></td>
+            <td x-text="pairLabel(row.index)"></td>
             <td>
-              <span class="owner-badge" x-show="l.filter">фильтрованная</span>
-              <span class="hint" x-show="!l.filter">обычная</span>
+              <span class="owner-badge" x-show="row.link.filter">фильтрованная</span>
+              <span class="hint" x-show="!row.link.filter">обычная</span>
             </td>
             <td>
-              <template x-for="e in (l.filter?.aExports || [])" :key="e"><span class="owner-badge" x-text="e"></span></template>
-              <span class="hint" x-show="l.filter && !(l.filter.aExports || []).length">ничего</span>
-              <span class="hint" x-show="!l.filter">—</span>
+              <template x-for="e in (row.link.filter?.aExports || [])" :key="e"><span class="owner-badge" x-text="e"></span></template>
+              <span class="hint" x-show="row.link.filter && !(row.link.filter.aExports || []).length">ничего</span>
+              <span class="hint" x-show="!row.link.filter">—</span>
             </td>
             <td>
-              <template x-for="e in (l.filter?.bExports || [])" :key="e"><span class="owner-badge" x-text="e"></span></template>
-              <span class="hint" x-show="l.filter && !(l.filter.bExports || []).length">ничего</span>
-              <span class="hint" x-show="!l.filter">—</span>
+              <template x-for="e in (row.link.filter?.bExports || [])" :key="e"><span class="owner-badge" x-text="e"></span></template>
+              <span class="hint" x-show="row.link.filter && !(row.link.filter.bExports || []).length">ничего</span>
+              <span class="hint" x-show="!row.link.filter">—</span>
             </td>
             <td>
-              <button type="button" class="icon-btn edit" x-show="l.filter" title="Изменить фильтры" @click="openEdit(i)">✎</button>
-              <button type="button" class="secondary btn-sm" x-show="!l.filter" @click="makeFiltered(i)">Сделать фильтрованной</button>
-              <button type="button" class="secondary btn-sm" x-show="l.filter" @click="makePlain(i)">Вернуть обычную</button>
+              <button type="button" class="icon-btn edit" x-show="row.link.filter" title="Изменить фильтры" @click="openEdit(row.index)">✎</button>
+              <button type="button" class="secondary btn-sm" x-show="!row.link.filter" @click="makeFiltered(row.index)">Сделать фильтрованной</button>
+              <button type="button" class="secondary btn-sm" x-show="row.link.filter" @click="makePlain(row.index)">Вернуть обычную</button>
             </td>
           </tr>
         </template>
         <tr x-show="loaded && !links.length"><td colspan="5" class="empty-cell">Связей нет — создайте их на холсте топологии</td></tr>
+        <tr x-show="loaded && links.length && !filteredLinks.length"><td colspan="5" class="empty-cell">Ничего не найдено</td></tr>
       </tbody>
     </table>
   </div>
 
-  <dialog x-ref="dialog" class="modal">
+  <dialog x-ref="dialog" class="modal modal-lg">
     <h3>Фильтры связи <span x-text="draft.index >= 0 ? pairLabel(draft.index) : ''"></span></h3>
-    <p class="cell-hint">Трафик между сетью X и сетью Y пройдёт через связь, только если X выбран в экспорте стороны, откуда пакет выходит, а Y — в экспорте стороны, куда он входит.</p>
-    <fieldset>
-      <legend>Сторона A (<span x-text="draft.index >= 0 ? links[draft.index]?.a.device : ''"></span>)</legend>
-      <template x-for="g in entityGroups()" :key="'a-' + g.label">
-        <div>
-          <p class="cell-hint" x-text="g.label"></p>
-          <template x-for="name in g.names" :key="'a-' + name">
-            <label class="check-row"><input type="checkbox" :value="name" x-model="draft.aExports"> <span x-text="name"></span></label>
-          </template>
+    <p class="hint">Как в BIRD: <b>экспорт</b> — сети, которые устройство анонсирует соседу через связь; <b>импорт</b> — сети, которые оно принимает от соседа (зеркало его экспорта, правится в блоке соседа). Пакет пройдёт по связи, только если его источник есть в экспорте отправителя, а получатель — в экспорте получателя.</p>
+    <template x-for="side in ['a', 'b']" :key="side">
+      <fieldset>
+        <legend><span x-text="draftDevice(side)"></span> <span class="hint" x-text="'(сосед: ' + draftPeer(side) + ')'"></span></legend>
+        <div class="filter-dirs">
+          <div>
+            <h4 class="filter-dir-title">Экспорт <span class="hint" x-text="draftDevice(side) + ' → ' + draftPeer(side)"></span></h4>
+            <div class="member-list">
+              <template x-for="e in draft[side + 'Exports']" :key="side + '-' + e">
+                <div class="member-row">
+                  <span class="owner-badge" x-text="e"></span>
+                  <span class="hint" x-text="cidrOf(e)"></span>
+                  <button type="button" class="icon-btn delete" :title="'Убрать из экспорта ' + draftDevice(side)" @click="removeExport(side, e)">✕</button>
+                </div>
+              </template>
+              <p class="hint member-empty" x-show="!draft[side + 'Exports'].length">Экспорт не выбран</p>
+            </div>
+            <div class="member-add">
+              <div class="member-combo" @click.outside="closeOther(side)">
+                <input x-model.trim="combo.search"
+                       placeholder="сети и подсети — начните вводить для поиска"
+                       title="Список всех сетей и подсетей; ввод фильтрует его по имени или CIDR"
+                       @focus="openCombo(side)"
+                       @click="openCombo(side)"
+                       @input="openCombo(side)"
+                       @keydown.arrow-down.prevent="moveCursor(1)"
+                       @keydown.arrow-up.prevent="moveCursor(-1)"
+                       @keydown.enter.prevent="pickEntity()"
+                       @keydown.escape="closeCombo()">
+                <button type="button" class="member-combo-toggle" :class="{ open: combo.side === side }" @click="combo.side === side ? closeCombo() : openCombo(side)" title="Показать или скрыть список">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+                </button>
+                <div class="member-suggestions" x-show="combo.side === side" x-cloak>
+                  <template x-for="(e, i) in availableEntities(side)" :key="e.name">
+                    <button type="button" class="member-suggestion" :class="{ active: i === combo.cursor }"
+                            @mousedown.prevent="addExport(side, e.name)"
+                            @mouseenter="combo.cursor = i"
+                            x-text="e.cidr ? e.name + ' (' + e.cidr + ')' : e.name"></button>
+                  </template>
+                  <p class="hint member-empty" x-show="!availableEntities(side).length">Ничего не найдено</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <h4 class="filter-dir-title">Импорт <span class="hint" x-text="'из ' + draftPeer(side)"></span></h4>
+            <div class="member-list import-list">
+              <template x-for="e in importOf(side)" :key="'imp-' + side + '-' + e">
+                <div class="member-row">
+                  <span class="owner-badge" x-text="e"></span>
+                  <span class="hint" x-text="cidrOf(e)"></span>
+                </div>
+              </template>
+              <p class="hint member-empty" x-show="!importOf(side).length">Сосед ничего не экспортирует</p>
+            </div>
+            <p class="hint">Только чтение — совпадает с экспортом соседа</p>
+          </div>
         </div>
-      </template>
-    </fieldset>
-    <fieldset>
-      <legend>Сторона B (<span x-text="draft.index >= 0 ? links[draft.index]?.b.device : ''"></span>)</legend>
-      <template x-for="g in entityGroups()" :key="'b-' + g.label">
-        <div>
-          <p class="cell-hint" x-text="g.label"></p>
-          <template x-for="name in g.names" :key="'b-' + name">
-            <label class="check-row"><input type="checkbox" :value="name" x-model="draft.bExports"> <span x-text="name"></span></label>
-          </template>
-        </div>
-      </template>
-    </fieldset>
+      </fieldset>
+    </template>
     <div class="modal-actions">
       <button type="button" @click="closeModal()">Отмена</button>
       <button type="button" class="primary" :disabled="saving" @click="saveDraft()">Сохранить</button>

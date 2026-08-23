@@ -1,6 +1,6 @@
 "use strict";
 
-// Shared page plumbing: Alpine app state, API helpers and the site header
+// Shared page plumbing: Alpine app state, API helpers and the sidebar shell
 // injected into every standalone UI page.
 
 function appData() {
@@ -49,7 +49,7 @@ const DirtyGuard = (() => {
   const isDirty = () => !!getData && clean !== null && JSON.stringify(getData()) !== clean;
 
   document.addEventListener("click", (e) => {
-    const a = e.target.closest && e.target.closest("nav.tabs a");
+    const a = e.target.closest && e.target.closest("nav.side-nav a");
     if (!a || !isDirty()) return;
     e.preventDefault();
     if (confirm(MESSAGE)) window.location.href = a.href;
@@ -203,27 +203,71 @@ const NAV_LINKS = [
   { id: "compile", href: "/ui/compile", label: "Компиляция" },
 ];
 
-// buildNav renders the shared header (brand, nav links, theme toggle,
-// banner host) into #site-header. Call after DOM is parsed; Alpine binds
-// via the body's x-data.
+const svgOpen = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
+const NAV_ICONS = {
+  topology: svgOpen + '<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7 7l3.5 9M17 7l-3.5 9M7 6h10"/></svg>',
+  subnets: svgOpen + '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>',
+  networks: svgOpen + '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9z"/></svg>',
+  sets: svgOpen + '<path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+  unions: svgOpen + '<rect x="3" y="3" width="12" height="12" rx="1"/><rect x="9" y="9" width="12" height="12" rx="1"/></svg>',
+  links: svgOpen + '<path d="M10 14a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L11 5.93"/><path d="M14 10a5 5 0 0 0-7.07 0l-2.12 2.12a5 5 0 0 0 7.07 7.07L13 18.07"/></svg>',
+  rules: svgOpen + '<path d="M12 3l8 3v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3z"/></svg>',
+  compile: svgOpen + '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+};
+
+// buildNav renders the shared sidebar shell (brand, collapsible nav with
+// icons, theme toggle, banner host). The collapsed state is kept in
+// localStorage so it survives reloads and page switches.
 function buildNav(active) {
   document.documentElement.dataset.theme =
     localStorage.getItem("firenet-theme") ||
     (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 
-  const header = document.createElement("header");
-  header.innerHTML = "<strong>firenet</strong>";
+  const aside = document.createElement("aside");
+  aside.className = "sidebar";
+  if (localStorage.getItem("firenet-sidebar") === "collapsed") aside.classList.add("collapsed");
+
+  const brand = document.createElement("strong");
+  const full = document.createElement("span");
+  full.className = "brand-full";
+  full.textContent = "firenet";
+  const short = document.createElement("span");
+  short.className = "brand-short";
+  short.textContent = "F";
+  brand.append(full, short);
+  aside.append(brand);
 
   const nav = document.createElement("nav");
-  nav.className = "tabs";
+  nav.className = "side-nav";
   NAV_LINKS.forEach((l) => {
     const a = document.createElement("a");
     a.href = l.href;
-    a.textContent = l.label;
+    a.title = l.label;
     if (l.id === active) a.className = "active";
+    const ic = document.createElement("span");
+    ic.className = "icon";
+    ic.innerHTML = NAV_ICONS[l.id] || "";
+    const lb = document.createElement("span");
+    lb.className = "label";
+    lb.textContent = l.label;
+    a.append(ic, lb);
     nav.append(a);
   });
-  header.append(nav);
+  aside.append(nav);
+
+  const toggle = document.createElement("button");
+  toggle.className = "sidebar-toggle";
+  toggle.type = "button";
+  toggle.title = "Свернуть/развернуть меню";
+  toggle.setAttribute("aria-label", "Свернуть/развернуть меню");
+  toggle.innerHTML =
+    svgOpen + '<polyline points="15 18 9 12 15 6"/></svg>';
+  toggle.addEventListener("click", () => {
+    const collapsed = !aside.classList.contains("collapsed");
+    aside.classList.toggle("collapsed", collapsed);
+    localStorage.setItem("firenet-sidebar", collapsed ? "collapsed" : "open");
+  });
+  aside.append(toggle);
 
   const btn = document.createElement("button");
   btn.id = "theme-toggle";
@@ -242,7 +286,7 @@ function buildNav(active) {
     document.documentElement.dataset.theme = next;
     localStorage.setItem("firenet-theme", next);
   });
-  header.append(btn);
+  aside.append(btn);
 
   const banner = document.createElement("div");
   banner.id = "error-banner";
@@ -252,11 +296,11 @@ function buildNav(active) {
   banner.setAttribute("x-text", "banner.message");
   banner.setAttribute("x-cloak", "");
   document.body.append(banner);
-  document.body.prepend(header);
+  document.body.prepend(aside);
 }
 
 // Auto-init: every page declares its active nav item via <body data-nav="...">,
-// so no page-specific script needs to remember to build the header.
+// so no page-specific script needs to remember to build the sidebar.
 document.addEventListener("DOMContentLoaded", () => {
   const active = document.body.dataset.nav;
   if (active) buildNav(active);

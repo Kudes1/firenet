@@ -9,16 +9,25 @@
     if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
   } catch (e) {}
 </script>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body data-nav="topology" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
-<div id="site-header"></div>
 
 <main>
   <div class="topology-layout">
     <div class="canvas-wrap">
       <svg id="topo-canvas"></svg>
       <div class="topo-toolbar">
+        <button id="topo-search-toggle" class="tool" title="Поиск по устройствам, сетям, подсетям (Enter — следующее совпадение)" aria-label="Поиск">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="11" cy="11" r="7"/>
+            <path d="m20 20-3.8-3.8"/>
+          </svg>
+        </button>
+        <input id="topo-search" hidden placeholder="поиск: имя / CIDR / IP" autocomplete="off" spellcheck="false"
+               title="Поиск по устройствам, сетям, подсетям (Enter — следующее совпадение)" aria-label="Поиск по топологии">
+        <span class="toolbar-sep"></span>
         <button id="topo-delete" class="tool danger" disabled title="Удалить выбранное (Del)" aria-label="Удалить выбранное">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>

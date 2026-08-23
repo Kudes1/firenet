@@ -34,22 +34,47 @@ links:
         device: market
       b:
         device: test2
+      filter:
+        a-exports:
+            - MARKET
+        b-exports:
+            - MAIN
     - a:
         device: market
       b:
         device: test1
+      filter:
+        a-exports:
+            - MARKET
+        b-exports:
+            - main
     - a:
         device: test1
       b:
         device: office1
+      filter:
+        a-exports:
+            - MAIN
+        b-exports:
+            - MARKET
     - a:
         device: test2
       b:
         device: office1
+      filter:
+        a-exports:
+            - MAIN
+        b-exports:
+            - MARKET
     - a:
         device: market
       b:
         device: office1
+      filter:
+        a-exports:
+            - MARKET
+        b-exports:
+            - OFFICE-NETWORK
 networks:
     - name: OFFICE-NETWORK
       subnets:

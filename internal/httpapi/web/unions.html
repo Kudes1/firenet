@@ -9,10 +9,10 @@
     if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
   } catch (e) {}
 </script>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body data-nav="unions" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
-<div id="site-header"></div>
 
 <main x-data="unionsPage">
   <div class="table-toolbar">

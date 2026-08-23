@@ -157,7 +157,24 @@ test("topology renders devices, links and networks without errors", async () => 
   assert.ok(rendered.includes("r1 (router)"), "device r1 rendered");
   assert.ok(rendered.includes("r2 (router)"), "device r2 rendered");
   assert.ok(rendered.includes("net1"), "network node rendered");
-  assert.ok(rendered.includes("10.0.0.0/24"), "subnet cidr shown on network node");
+  assert.ok(rendered.includes("a"), "subnet names shown on network node");
+  assert.ok(!rendered.includes("10.0.0.0/24"), "no cidr on network node");
+});
+
+test("network subtitle summarizes long subnet lists with a +N tail", async () => {
+  const topo = {
+    devices: [],
+    links: [],
+    networks: [{ name: "net1", subnets: ["office", "guests-wifi", "dmz-servers", "vpn"] }],
+  };
+  const { canvas } = bootTopology({
+    ...responses,
+    "/api/topology": topo,
+    "/api/subnets": { subnets: topo.networks[0].subnets.map((name) => ({ name, cidr: "10.0.0.0/24" })) },
+  });
+  await tick();
+  const summary = texts(canvas).find((t) => t.includes("+"));
+  assert.equal(summary, "office, guests-wifi +2");
 });
 
 test("device kinds get their distinct shape and glyph, unknown kinds fall back", async () => {

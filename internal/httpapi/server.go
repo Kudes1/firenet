@@ -1,9 +1,13 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"path"
+	"strings"
 )
 
 // NewServer builds the HTTP handler for firenet's web UI and JSON API,
@@ -45,18 +49,31 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	if err != nil {
 		panic(err) // embedded at build time; can't fail at runtime
 	}
-	mux.Handle("/", noCache(http.FileServer(http.FS(webRoot))))
+	mux.Handle("/", noCache(webRoot, http.FileServer(http.FS(webRoot))))
 
 	return withLogging(log, mux)
 }
 
-// noCache forces revalidation of embedded assets: the embed FS carries no
-// modification times, so the file server has neither Last-Modified nor
-// ETag to revalidate with, and browsers would otherwise heuristically
-// serve stale JS after a rebuild.
-func noCache(next http.Handler) http.Handler {
+// noCache lets browsers keep assets cached but forbids reuse without
+// revalidation: the embed FS carries no modification times, so the file
+// server has neither Last-Modified nor ETag, and browsers would otherwise
+// heuristically serve stale JS after a rebuild. A content-hash ETag turns
+// every revalidation into a cheap 304; a rebuild changes the hash and the
+// fresh bytes are served.
+func noCache(root fs.FS, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
+		if r.Method == http.MethodGet {
+			if b, err := fs.ReadFile(root, strings.TrimPrefix(path.Clean(r.URL.Path), "/")); err == nil {
+				sum := sha256.Sum256(b)
+				etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+				w.Header().Set("ETag", etag)
+				w.Header().Set("Cache-Control", "no-cache")
+				if r.Header.Get("If-None-Match") == etag {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }

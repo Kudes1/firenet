@@ -78,12 +78,52 @@ test("init loads links with mode flags", async () => {
   assert.equal(page.loaded, true);
 });
 
-test("entityGroups lists networks then subnets", async () => {
+test("resetFilters clears every column filter", async () => {
   const { page } = await bootLoadedPage();
-  assert.deepEqual(plain(page.entityGroups()), [
-    { label: "Сети", names: ["NA", "NC"] },
-    { label: "Подсети", names: ["a"] },
-  ]);
+  page.filters = { devices: "m", mode: "фил", aExports: "NA", bExports: "NC" };
+  page.resetFilters();
+  assert.deepEqual(plain(page.filters), { devices: "", mode: "", aExports: "", bExports: "" });
+});
+
+test("filteredLinks filters by device, mode and export columns", async () => {
+  const { page } = await bootLoadedPage();
+  const idx = () => page.filteredLinks.map((r) => r.index);
+
+  assert.deepEqual(idx(), [0, 1], "no filters shows all rows with original indices");
+
+  page.filters.devices = "o";
+  assert.deepEqual(idx(), [1], "matches either side device name");
+  page.filters.devices = "zz";
+  assert.deepEqual(idx(), []);
+  page.filters.devices = "";
+
+  page.filters.mode = "фильтр";
+  assert.deepEqual(idx(), [1]);
+  page.filters.mode = "обыч";
+  assert.deepEqual(idx(), [0]);
+  page.filters.mode = "";
+});
+
+test("filteredLinks matches exports by name and semantically by IP/CIDR", async () => {
+  const { page } = await bootLoadedPage();
+  const idx = () => page.filteredLinks.map((r) => r.index);
+
+  page.filters.aExports = "NA";
+  assert.deepEqual(idx(), [1]);
+  page.filters.aExports = "";
+
+  page.links[1].filter.bExports = ["a"]; // subnet a -> 10.0.0.0/24
+  page.filters.bExports = "10.0.";
+  assert.deepEqual(idx(), [1], "partial-IP query matches the exported subnet CIDR");
+  page.filters.bExports = "10.0.0.5";
+  assert.deepEqual(idx(), [1], "exact address inside the exported subnet matches");
+  page.filters.bExports = "10.1.";
+  assert.deepEqual(idx(), []);
+  page.filters.bExports = "";
+
+  page.filters.aExports = "10.0."; // network NA exports subnet a (10.0.0.0/24)
+  assert.deepEqual(idx(), [1], "IP query matches a network export through its subnets");
+  page.filters.aExports = "";
 });
 
 test("openEdit copies current exports into the draft", async () => {
@@ -141,4 +181,83 @@ test("makePlain removes the filter key entirely", async () => {
   const put = calls.find((c) => c.method === "PUT");
   assert.ok(!("filter" in put.body.links[1]), "filter key dropped");
   assert.deepEqual(put.body.devices.length, 3);
+});
+
+test("availableEntities lists networks then subnets minus already exported on that side", async () => {
+  const { page } = await bootLoadedPage();
+  page.openEdit(1); // aExports: ["NA"], bExports: ["NC"]
+  assert.deepEqual(plain(page.availableEntities("a")), [
+    { name: "NC" },
+    { name: "a", cidr: "10.0.0.0/24" },
+  ]);
+  assert.deepEqual(plain(page.availableEntities("b")), [
+    { name: "NA" },
+    { name: "a", cidr: "10.0.0.0/24" },
+  ]);
+});
+
+test("availableEntities filters candidates by search over name and cidr", async () => {
+  const { page } = await bootLoadedPage();
+  page.openEdit(0);
+  page.combo.search = "10.0";
+  assert.deepEqual(plain(page.availableEntities("a")), [{ name: "a", cidr: "10.0.0.0/24" }]);
+  page.combo.search = "nc";
+  assert.deepEqual(plain(page.availableEntities("a")), [{ name: "NC" }]);
+  page.combo.search = "zzz";
+  assert.deepEqual(plain(page.availableEntities("a")), []);
+});
+
+test("addExport appends to the given side and resets the combo", async () => {
+  const { page } = await bootLoadedPage();
+  page.openEdit(0);
+  page.addExport("a", "NA");
+  page.combo.search = "10";
+  page.addExport("b", "a");
+  assert.deepEqual(plain(page.draft.aExports), ["NA"]);
+  assert.deepEqual(plain(page.draft.bExports), ["a"]);
+  assert.deepEqual(plain(page.combo), { side: "", search: "", cursor: 0 }, "combo resets after pick");
+});
+
+test("removeExport deletes from the given side", async () => {
+  const { page } = await bootLoadedPage();
+  page.openEdit(1);
+  page.removeExport("a", "NA");
+  assert.deepEqual(plain(page.draft.aExports), []);
+  assert.deepEqual(plain(page.draft.bExports), ["NC"], "other side untouched");
+});
+
+test("moveCursor and pickEntity navigate the candidate list", async () => {
+  const { page } = await bootLoadedPage();
+  page.openEdit(0);
+  page.combo.side = "a";
+  page.moveCursor(5);
+  assert.equal(page.combo.cursor, 2, "cursor clamps to last candidate");
+  page.moveCursor(-99);
+  assert.equal(page.combo.cursor, 0);
+  page.pickEntity();
+  assert.deepEqual(plain(page.draft.aExports), ["NA"], "picks the entity under the cursor");
+});
+
+test("closeOther only closes its own combo", async () => {
+  const { page } = await bootLoadedPage();
+  page.openEdit(0);
+  page.openCombo("a");
+  // sibling combo's click.outside must not close the open one
+  page.closeOther("b");
+  assert.equal(page.combo.side, "a", "sibling click.outside leaves combo a open");
+  page.closeOther("a");
+  assert.equal(page.combo.side, "", "own click.outside closes combo a");
+});
+
+test("openCombo keeps search when the same side reopens", async () => {
+  const { page } = await bootLoadedPage();
+  page.openEdit(0);
+  page.openCombo("a");
+  page.combo.search = "n";
+  page.moveCursor(1);
+  page.openCombo("a"); // refocus/click on the already-open input
+  assert.equal(page.combo.search, "n", "typed query survives refocus");
+  assert.equal(page.combo.cursor, 1, "cursor survives refocus");
+  page.openCombo("b"); // switching sides resets
+  assert.deepEqual(plain(page.combo), { side: "b", search: "", cursor: 0 });
 });

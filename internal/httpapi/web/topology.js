@@ -34,6 +34,18 @@ const Topology = (() => {
   // cloudPath outlines an L2 segment as a tldraw-style cloud filling the
   // whole w×h bbox: a rectangle perimeter whose edges bulge outward in
   // bumps (quadratic curves), so labels stay inside the shape.
+  // nameSummary joins names into "a, b" or, when the list exceeds max
+  // chars, "a, b +2" with the hidden count
+  function nameSummary(names, max = 24) {
+    let acc = "";
+    for (let i = 0; i < names.length; i++) {
+      const next = acc ? `${acc}, ${names[i]}` : names[i];
+      if (next.length <= max || i === names.length - 1) { acc = next; continue; }
+      return `${acc} +${names.length - i}`;
+    }
+    return acc;
+  }
+
   function cloudPath(x, y, w, h) {
     const depth = 6;
     const HBUMPS = 7; // bumps per horizontal edge
@@ -66,6 +78,13 @@ const Topology = (() => {
   let viewportG = null;
   let previewWire = null;
   let popoverCreate = null; // callback awaiting a name from the popover
+
+  // поиск по канвасу: подсветка совпавших узлов, приглушение остальных,
+  // камера центрируется на активном совпадении
+  let searchQ = "";
+  let searchHits = []; // device/network objects в стабильном порядке
+  let searchSet = new Set();
+  let hitIdx = 0;
   const canvas = () => document.getElementById("topo-canvas");
   const TOOLS = ["select", "connect", "device", "network"];
 
@@ -388,6 +407,7 @@ const Topology = (() => {
     svg.addEventListener("click", (e) => {
       if (e.target !== svg) return; // node/wire clicks handle themselves
       if (marqueeEnded) { marqueeEnded = false; return; } // click trailing the marquee drag
+      clearSearch(); // клик по пустому фону сбрасывает активный поиск
       if (State.tool === "device" || State.tool === "network") openNodePopover(screenPoint(e), State.tool);
       else {
         cancelPending();
@@ -425,6 +445,97 @@ const Topology = (() => {
     });
     document.getElementById("node-name-input").addEventListener("keydown", (e) => {
       if (e.key === "Escape") hidePopover();
+    });
+  }
+
+  // --- поиск ---
+
+  const parseV4 = (s) => {
+    const p = String(s).split(".").map(Number);
+    return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
+      ? (((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0) : null;
+  };
+
+  // ipInCidr true, если q — полный IPv4-адрес, попадающий в префикс cidr
+  function ipInCidr(q, cidr) {
+    const ip = parseV4(q);
+    if (ip === null) return false;
+    const [addr, bits] = String(cidr).split("/");
+    const base = parseV4(addr);
+    if (base === null || !bits || +bits < 0 || +bits > 32) return false;
+    const mask = (~0 << (32 - +bits)) >>> 0;
+    return (ip & mask) === (base & mask);
+  }
+
+  // computeSearchHits: устройства по имени; сети по имени или по имени/CIDR
+  // любой из их подсетей (совпадение подсети подсвечивает родительскую сеть)
+  function computeSearchHits(raw) {
+    const q = raw.trim().toLowerCase();
+    if (!q) return [];
+    const subMatch = (name) => {
+      const s = State.subnets.find((x) => x.name === name);
+      return !!s && (s.name.toLowerCase().includes(q)
+        || String(s.cidr).toLowerCase().includes(q)
+        || ipInCidr(q, s.cidr));
+    };
+    return [
+      ...State.topology.devices.filter((d) => d.name.toLowerCase().includes(q)),
+      ...State.topology.networks.filter((n) => n.name.toLowerCase().includes(q) || (n.subnets || []).some(subMatch)),
+    ];
+  }
+
+  // focusHit наводит камеру на bbox узла (мировые координаты -> центр канваса)
+  function focusHit(obj) {
+    const isDev = State.topology.devices.includes(obj);
+    const pos = (isDev ? State.layout.devices : State.layout.networks)[obj.name];
+    if (!pos) return;
+    const w = isDev ? DEVICE_W : NET_W;
+    const h = isDev ? DEVICE_H : NET_H;
+    const r = canvas().getBoundingClientRect();
+    State.camera = {
+      ...State.camera,
+      x: r.width / 2 - State.camera.z * (pos.x + w / 2),
+      y: r.height / 2 - State.camera.z * (pos.y + h / 2),
+    };
+  }
+
+  function updateSearch(raw) {
+    searchQ = raw.trim().toLowerCase();
+    searchHits = computeSearchHits(searchQ);
+    searchSet = new Set(searchHits);
+    hitIdx = 0;
+    if (searchHits.length) focusHit(searchHits[0]);
+    render();
+  }
+
+  function clearSearch() {
+    const input = document.getElementById("topo-search");
+    input.value = "";
+    updateSearch("");
+    if (input.blur) input.blur();
+    input.hidden = true;
+  }
+
+  function setupSearch() {
+    const input = document.getElementById("topo-search");
+    const toggle = document.getElementById("topo-search-toggle");
+    input.hidden = true;
+    toggle.addEventListener("click", () => {
+      input.hidden = false;
+      input.focus();
+    });
+    input.addEventListener("input", () => updateSearch(input.value));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") clearSearch();
+      else if (e.key === "Enter" && searchHits.length) {
+        hitIdx = (hitIdx + 1) % searchHits.length;
+        focusHit(searchHits[hitIdx]);
+        applyCamera();
+      }
+    });
+    // пустое поле, потерявшее фокус, прячем; активный запрос оставляем видимым
+    input.addEventListener("blur", () => {
+      if (!input.value) input.hidden = true;
     });
   }
 
@@ -585,6 +696,13 @@ const Topology = (() => {
   const attachSelected = (n, device) =>
     [...State.selection].some((s) => s.type === "attach" && s.net === n && s.device === device);
 
+  // mark — класс поиска для контурной формы узла: совпавшие светятся
+  // (search-hit), остальные приглушены; вне активного поиска — пусто.
+  // shade — для внутренностей узла (глиф, подписи): они сами не светятся,
+  // чтобы не засвечивать содержимое, а лишь следуют за своим узлом.
+  const mark = (matched) => (searchQ ? (matched ? " search-hit" : " search-dim") : "");
+  const shade = (matched) => (searchQ && !matched ? " search-dim" : "");
+
   function render() {
     ensureLayout();
     const svg = canvas();
@@ -599,11 +717,11 @@ const Topology = (() => {
       if (!box) return;
       const color = UNION_COLORS[i % UNION_COLORS.length];
       viewportG.append(el("rect", {
-        class: "union-frame", "data-union": s.name,
+        class: "union-frame" + shade(false), "data-union": s.name,
         x: box.x, y: box.y, width: box.w, height: box.h, rx: 14,
         fill: color, "fill-opacity": 0.07, stroke: color, "stroke-opacity": 0.5,
       }));
-      viewportG.append(el("text", { class: "union-label", x: box.x + 12, y: box.y - 8, fill: color }, s.name));
+      viewportG.append(el("text", { class: "union-label" + shade(false), x: box.x + 12, y: box.y - 8, fill: color }, s.name));
     });
 
     // device-to-device links; each visible wire gets an invisible wide
@@ -616,7 +734,7 @@ const Topology = (() => {
       const mid = pointAt(pa, pb, 0.5, spreadOffset(offsets[i]));
       const d = `M ${pa.x} ${pa.y} Q ${mid.x} ${mid.y} ${pb.x} ${pb.y}`;
       const wire = el("path", {
-        class: "wire" + (l.filter ? " wire-filtered" : "") + (State.selection.has(l) ? " selected" : ""), d, fill: "none",
+        class: "wire" + (l.filter ? " wire-filtered" : "") + (State.selection.has(l) ? " selected" : "") + shade(false), d, fill: "none",
       });
       viewportG.append(wire);
       if (l.filter) {
@@ -638,7 +756,7 @@ const Topology = (() => {
         if (!pa || !c) return;
         const coords = { x1: pa.x, y1: pa.y, x2: c.x, y2: c.y };
         const line = el("line", {
-          class: "wire" + (attachSelected(n, a.device) ? " selected" : ""), ...coords,
+          class: "wire" + (attachSelected(n, a.device) ? " selected" : "") + shade(false), ...coords,
         });
         viewportG.append(line);
         const hit = el("line", { class: "wire-hit", ...coords });
@@ -654,7 +772,8 @@ const Topology = (() => {
       const kind = KINDS[d.kind] || { rx: 6 };
       const isPending = pending && pending.device === d.name;
       const rect = el("rect", {
-        class: "node-rect " + d.kind + (isPending ? " pending" : "") + (State.selection.has(d) ? " selected" : ""),
+        class: "node-rect " + d.kind + (isPending ? " pending" : "") + (State.selection.has(d) ? " selected" : "")
+          + mark(searchSet.has(d)),
         x: pos.x, y: pos.y, width: DEVICE_W, height: DEVICE_H, rx: kind.rx,
       });
       makeDraggable(rect, "device", d, (ev) => {
@@ -665,13 +784,13 @@ const Topology = (() => {
       viewportG.append(rect);
       if (kind.glyph) {
         viewportG.append(el("path", {
-          class: "node-glyph " + d.kind,
+          class: "node-glyph " + d.kind + shade(searchSet.has(d)),
           d: kind.glyph,
           transform: `translate(${pos.x + 8} ${pos.y + 8})`,
         }));
-        viewportG.append(el("text", { class: "node-label", x: pos.x + 24, y: pos.y + 18 }, `${d.name} (${d.kind})`));
+        viewportG.append(el("text", { class: "node-label" + shade(searchSet.has(d)), x: pos.x + 24, y: pos.y + 18 }, `${d.name} (${d.kind})`));
       } else {
-        viewportG.append(el("text", { class: "node-label", x: pos.x + 8, y: pos.y + 18 }, `${d.name} (${d.kind})`));
+        viewportG.append(el("text", { class: "node-label" + shade(searchSet.has(d)), x: pos.x + 8, y: pos.y + 18 }, `${d.name} (${d.kind})`));
       }
     });
 
@@ -680,7 +799,7 @@ const Topology = (() => {
       const pos = State.layout.networks[n.name];
 
       const shape = el("path", {
-        class: "subnet-rect" + (State.selection.has(n) ? " selected" : ""),
+        class: "subnet-rect" + (State.selection.has(n) ? " selected" : "") + mark(searchSet.has(n)),
         d: cloudPath(pos.x, pos.y, NET_W, NET_H),
       });
       makeDraggable(shape, "network", n, (ev) => {
@@ -689,11 +808,11 @@ const Topology = (() => {
       });
       contextDelete(shape, n, "сеть " + n.name, "network");
       viewportG.append(shape);
-      viewportG.append(el("text", { class: "subnet-label", x: pos.x + 8, y: pos.y + 18 }, n.name));
+      viewportG.append(el("text", { class: "subnet-label" + shade(searchSet.has(n)), x: pos.x + 8, y: pos.y + 18 }, n.name));
 
       const members = (n.subnets || []).map((s) => State.subnets.find((x) => x.name === s)).filter(Boolean);
-      const subtitle = members.length ? members.map((s) => s.cidr).join(", ") : "(нет подсетей)";
-      viewportG.append(el("text", { class: "link-label-text", x: pos.x + 8, y: pos.y + 36 }, subtitle.slice(0, 24)));
+      const subtitle = members.length ? nameSummary(members.map((s) => s.name)) : "(нет подсетей)";
+      viewportG.append(el("text", { class: "link-label-text" + shade(searchSet.has(n)), x: pos.x + 8, y: pos.y + 36 }, subtitle));
     });
 
     // trash button mirrors the selection state
@@ -749,6 +868,7 @@ const Topology = (() => {
     setupDeleteButton();
     setupConnectPreview();
     setupPopover();
+    setupSearch();
     document.addEventListener("click", hideContextMenu);
     setTool("select");
     Topology.render();

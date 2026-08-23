@@ -22,7 +22,7 @@ function makeEl(tag) {
     closest(selector) {
       let n = this;
       while (n) {
-        if (selector === "nav.tabs a" && n.tag === "a" && n.parent && n.parent.tag === "nav") return n;
+        if (selector === "nav.side-nav a" && n.tag === "a" && n.parent && n.parent.tag === "nav") return n;
         n = n.parent;
       }
       return null;
@@ -73,12 +73,12 @@ function fire(target, type, ev) {
   (target.listeners[type] || []).forEach((fn) => fn(ev));
 }
 
-// clickNavLink builds the shared header and simulates a click on its first
+// clickNavLink builds the shared sidebar and simulates a click on its first
 // nav link, returning whether the default navigation was prevented.
 function clickNavLink(ctx, doc) {
   ctx.sandbox.buildNav("topology");
-  const header = doc.body.children[0];
-  const nav = header.children.find((n) => n.tag === "nav");
+  const aside = doc.body.children[0];
+  const nav = aside.children.find((n) => n.tag === "nav");
   const ev = { target: nav.children[0] };
   fire(doc.body, "click", ev);
   return !!ev.defaultPrevented;
