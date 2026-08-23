@@ -12,3 +12,11 @@ rules:
         - "443"
       action: allow
       mirror: true
+    - name: main-to-office
+      src:
+        - main
+      dst:
+        - office-net
+      proto: any
+      action: allow
+      mirror: true

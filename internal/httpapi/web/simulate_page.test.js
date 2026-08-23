@@ -105,7 +105,7 @@ function bootSimulate(responses) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  for (const f of ["common.js", "camera.js", "camera_input.js", "netmap.js", "simulate.js"]) {
+  for (const f of ["common.js", "camera.js", "camera_input.js", "netmap.js", "topo_scene.js", "simulate.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
@@ -180,6 +180,24 @@ test("camera changes are not persisted to /api/layout", async () => {
   assert.ok(!calls.some((c) => c.path === "/api/layout" && c.method === "PUT"), "read-only page never writes layout");
 });
 
+test("map matches the topology editor: subnet names and union frames", async () => {
+  const { canvas } = bootSimulate({
+    ...responses,
+    "/api/topology": {
+      devices: topoFixture.devices,
+      links: topoFixture.links,
+      networks: topoFixture.networks,
+      unions: [{ name: "hq", devices: ["r1"], networks: ["office"] }],
+    },
+  });
+  await tick();
+  const html = JSON.stringify(canvas);
+  assert.doesNotMatch(html, /10\.0\.0\.0\/24/, "subnet names, not CIDRs");
+  assert.match(html, /union-frame/);
+  assert.match(html, /"data-union":"hq"/);
+  assert.match(html, /office/, "network label rendered");
+});
+
 test("renderReport builds one card per path with verdict badges", async () => {
   const { ids, get } = bootSimulate(responses);
   await tick();
@@ -205,6 +223,58 @@ test("summary line reports source, destination and path count", async () => {
   get(`Simulate.renderReport(${JSON.stringify(sampleReport)})`);
   assert.ok(!ids["sim-summary"].hidden);
   assert.match(String(ids["sim-summary"]._text || ""), /office.*dmz.*путей 1/s);
+});
+
+// Topology where networks reach routers only through switches — the report
+// path then contains synthetic l2 bus nodes instead of device names.
+const switchedTopo = {
+  devices: [
+    { name: "r1", kind: "router" }, { name: "r2", kind: "router" },
+    { name: "sw1", kind: "switch" }, { name: "sw2", kind: "switch" },
+    { name: "lone", kind: "switch" },
+  ],
+  links: [
+    { a: { device: "sw1" }, b: { device: "r1" } },
+    { a: { device: "r1" }, b: { device: "r2" } },
+    { a: { device: "r2" }, b: { device: "sw2" } },
+    { a: { device: "lone" }, b: { device: "r1" } },
+  ],
+  networks: [
+    { name: "MAIN", subnets: ["main"], attach: [{ device: "sw1" }] },
+    { name: "OFFICE", subnets: ["office-net"], attach: [{ device: "sw2" }] },
+  ],
+};
+
+const switchedReport = {
+  srcSubnet: "main",
+  dstSubnet: "office-net",
+  note: "",
+  paths: [{
+    nodes: [
+      { kind: 1, name: "main" }, { kind: 2, name: "l2-0" }, { kind: 0, name: "r1" },
+      { kind: 0, name: "r2" }, { kind: 2, name: "l2-1" }, { kind: 1, name: "office-net" },
+    ],
+    routers: [],
+    verdict: "allow",
+  }],
+};
+
+test("highlight covers the full path: networks, switches, links and attaches", async () => {
+  const { canvas, ids, get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(switchedReport)})`);
+  const hl = get("Simulate.expandHighlight(Simulate.state.result, Simulate.state.topology)");
+  for (const name of ["MAIN", "OFFICE", "sw1", "sw2", "r1", "r2"]) {
+    assert.ok(hl.has(name), `${name} belongs to the highlighted path`);
+  }
+  assert.ok(!hl.has("lone"), "devices off the path stay unhighlighted");
+  // DOM: only the lone switch, its wire and its labels remain dimmed
+  const kids = viewport(canvas).children;
+  const dimmed = kids.filter((c) => String(c.attrs.class || "").includes("sim-dim"));
+  assert.equal(dimmed.filter((c) => c.tag === "line").length, 0, "attaches are lit");
+  assert.equal(dimmed.filter((c) => String(c.attrs.class).startsWith("subnet-rect")).length, 0, "end networks are lit");
+  assert.equal(dimmed.filter((c) => String(c.attrs.class).startsWith("wire")).length, 1, "only the off-path link is dimmed");
+  assert.equal(dimmed.filter((c) => String(c.attrs.class).startsWith("node-rect")).length, 1, "only the off-path device is dimmed");
 });
 
 test("form submit posts to /api/simulate and renders the report", async () => {

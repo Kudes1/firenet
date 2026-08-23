@@ -14,50 +14,7 @@ const State = {
 // then a network node, to attach the segment to that device. Subnet
 // membership of networks is edited on /ui/subnets and /ui/networks.
 const Topology = (() => {
-  const { SVG_NS, DEVICE_W, DEVICE_H, NET_W, NET_H, UNION_COLORS, KINDS, el, center, linkOffsets, spreadOffset, pointAt } = NetMap;
-  const UNION_PAD = 30;
-
-  // cloudPath outlines an L2 segment as a tldraw-style cloud filling the
-  // whole w×h bbox: a rectangle perimeter whose edges bulge outward in
-  // bumps (quadratic curves), so labels stay inside the shape.
-  // nameSummary joins names into "a, b" or, when the list exceeds max
-  // chars, "a, b +2" with the hidden count
-  function nameSummary(names, max = 24) {
-    let acc = "";
-    for (let i = 0; i < names.length; i++) {
-      const next = acc ? `${acc}, ${names[i]}` : names[i];
-      if (next.length <= max || i === names.length - 1) { acc = next; continue; }
-      return `${acc} +${names.length - i}`;
-    }
-    return acc;
-  }
-
-  function cloudPath(x, y, w, h) {
-    const depth = 6;
-    const HBUMPS = 7; // bumps per horizontal edge
-    const VBUMPS = 3; // bumps per vertical edge
-    const pts = [[x, y]];
-    // edge appends n interior points plus the segment end (clockwise)
-    const edge = (x1, y1, x2, y2, n) => {
-      for (let i = 1; i <= n + 1; i++) pts.push([x1 + ((x2 - x1) * i) / (n + 1), y1 + ((y2 - y1) * i) / (n + 1)]);
-    };
-    edge(x, y, x + w, y, HBUMPS);
-    edge(x + w, y, x + w, y + h, VBUMPS);
-    edge(x + w, y + h, x, y + h, HBUMPS);
-    // left side: only its bump midpoints, walked bottom-up to match the
-    // clockwise traversal — the curve loops back to pts[0]
-    for (let i = VBUMPS; i >= 1; i--) pts.push([x, y + (h * i) / (VBUMPS + 1)]);
-    let d = `M ${pts[0][0]} ${pts[0][1]}`;
-    for (let i = 0; i < pts.length; i++) {
-      const [ax, ay] = pts[i];
-      const [bx, by] = pts[(i + 1) % pts.length];
-      const dx = bx - ax;
-      const dy = by - ay;
-      const len = Math.hypot(dx, dy);
-      d += ` Q ${ax + dx / 2 + (dy / len) * depth} ${ay + dy / 2 + (-dx / len) * depth} ${bx} ${by}`;
-    }
-    return d + " Z";
-  }
+  const { el, DEVICE_W, DEVICE_H, NET_W, NET_H } = NetMap;
 
   let pending = null; // {device} awaiting a network to attach to
   let saveLayoutTimer = null;
@@ -86,40 +43,13 @@ const Topology = (() => {
   }
 
   function ensureLayout() {
-    State.topology.devices.forEach((d, i) => {
-      if (!State.layout.devices[d.name]) {
-        State.layout.devices[d.name] = { x: 40 + (i % 5) * 200, y: 40 + Math.floor(i / 5) * 160 };
-      }
-    });
-    State.topology.networks.forEach((n, i) => {
-      if (!State.layout.networks[n.name]) {
-        State.layout.networks[n.name] = { x: 40 + (i % 5) * 200, y: 300 + Math.floor(i / 5) * 160 };
-      }
-    });
+    TopoScene.ensureLayout(State.topology, State.layout);
   }
 
-  const deviceCenter = (name) => center(State.layout.devices, name, DEVICE_W, DEVICE_H);
-  const netCenter = (name) => center(State.layout.networks, name, NET_W, NET_H);
-
-  // unionBox вычисляет bbox членов объединения в мировых координатах или null,
-  // если ни один член не имеет позиции в layout.
-  function unionBox(s) {
-    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-    (s.devices || []).forEach((n) => {
-      const p = State.layout.devices[n];
-      if (!p) return;
-      x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y);
-      x2 = Math.max(x2, p.x + DEVICE_W); y2 = Math.max(y2, p.y + DEVICE_H);
-    });
-    (s.networks || []).forEach((n) => {
-      const p = State.layout.networks[n];
-      if (!p) return;
-      x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y);
-      x2 = Math.max(x2, p.x + NET_W); y2 = Math.max(y2, p.y + NET_H);
-    });
-    if (x1 === Infinity) return null;
-    return { x: x1 - UNION_PAD, y: y1 - UNION_PAD, w: x2 - x1 + 2 * UNION_PAD, h: y2 - y1 + 2 * UNION_PAD };
-  }
+  const deviceCenter = (name) => {
+    const pos = State.layout.devices[name];
+    return pos ? { x: pos.x + DEVICE_W / 2, y: pos.y + DEVICE_H / 2 } : null;
+  };
 
   function scheduleLayoutSave() {
     clearTimeout(saveLayoutTimer);
@@ -624,7 +554,6 @@ const Topology = (() => {
     contextDelete(wire, obj, label);
   }
 
-  const attachSel = (net, device) => ({ type: "attach", net, device });
   const attachSelected = (n, device) =>
     [...State.selection].some((s) => s.type === "attach" && s.net === n && s.device === device);
 
@@ -635,6 +564,42 @@ const Topology = (() => {
   const mark = (matched) => (searchQ ? (matched ? " search-hit" : " search-dim") : "");
   const shade = (matched) => (searchQ && !matched ? " search-dim" : "");
 
+  // nodeClasses адаптирует TopoScene к состоянию редактора: контур узла
+  // получает выделение/pending/подсветку поиска, внутренности — только
+  // затемнение при поиске; привязки сравниваются по полям, не по ссылке.
+  const nodeClasses = (obj, part) => {
+    if (obj && obj.type === "attach") {
+      return (part === "shape" ? (attachSelected(obj.net, obj.device) ? " selected" : "") : "") + mark(false);
+    }
+    if (part === "shape") {
+      return (State.selection.has(obj) ? " selected" : "")
+        + (pending && pending.device === obj.name ? " pending" : "")
+        + mark(searchSet.has(obj));
+    }
+    return shade(searchSet.has(obj));
+  };
+
+  // nodeHook подключает интерактив редактора к элементам сцены.
+  const nodeHook = (kind, elem, obj) => {
+    if (kind === "device") {
+      makeDraggable(elem, "device", obj, (ev) => {
+        if (State.tool === "connect") onDeviceConnect(obj.name);
+        else if (State.tool === "select") selectNode(obj, ev.shiftKey);
+      });
+      contextDelete(elem, obj, "устройство " + obj.name, "device");
+    } else if (kind === "network") {
+      makeDraggable(elem, "network", obj, (ev) => {
+        if (State.tool === "connect") onNetworkClick(obj.name);
+        else if (State.tool === "select") selectNode(obj, ev.shiftKey);
+      });
+      contextDelete(elem, obj, "сеть " + obj.name, "network");
+    } else if (kind === "wire") {
+      selectWire(elem, obj, (obj.filter ? "фильтрованная связь " : "связь ") + obj.a.device + "–" + obj.b.device);
+    } else if (kind === "attach") {
+      selectWire(elem, obj, `привязка ${obj.net.name}–${obj.device}`);
+    }
+  };
+
   function render() {
     ensureLayout();
     const svg = canvas();
@@ -642,111 +607,7 @@ const Topology = (() => {
     previewWire = null;
     viewportG = el("g", { class: "viewport", transform: Camera.transform(State.camera) });
     svg.append(viewportG);
-
-    // union frames sit at the very back, behind wires and nodes
-    (State.topology.unions || []).forEach((s, i) => {
-      const box = unionBox(s);
-      if (!box) return;
-      const color = UNION_COLORS[i % UNION_COLORS.length];
-      viewportG.append(el("rect", {
-        class: "union-frame" + shade(false), "data-union": s.name,
-        x: box.x, y: box.y, width: box.w, height: box.h, rx: 14,
-        fill: color, "fill-opacity": 0.07, stroke: color, "stroke-opacity": 0.5,
-      }));
-      viewportG.append(el("text", { class: "union-label" + shade(false), x: box.x + 12, y: box.y - 8, fill: color }, s.name));
-    });
-
-    // device-to-device links; each visible wire gets an invisible wide
-    // "wire-hit" twin so the capture zone is much larger than the 1.5px line
-    const offsets = linkOffsets(State.topology.links);
-    State.topology.links.forEach((l, i) => {
-      const pa = deviceCenter(l.a.device);
-      const pb = deviceCenter(l.b.device);
-      if (!pa || !pb) return;
-      const mid = pointAt(pa, pb, 0.5, spreadOffset(offsets[i]));
-      const d = `M ${pa.x} ${pa.y} Q ${mid.x} ${mid.y} ${pb.x} ${pb.y}`;
-      const wire = el("path", {
-        class: "wire" + (l.filter ? " wire-filtered" : "") + (State.selection.has(l) ? " selected" : "") + shade(false), d, fill: "none",
-      });
-      viewportG.append(wire);
-      if (l.filter) {
-        const t = document.createElementNS("http://www.w3.org/2000/svg", "title");
-        const side = (xs) => (xs || []).join(", ") || "ничего";
-        t.textContent = `${side(l.filter.aExports)} → ${side(l.filter.bExports)}`;
-        wire.append(t);
-      }
-      const hit = el("path", { class: "wire-hit", d, fill: "none" });
-      selectWire(hit, l, (l.filter ? "фильтрованная связь " : "связь ") + l.a.device + "–" + l.b.device);
-      viewportG.append(hit);
-    });
-
-    // network attachments (device -> network segment)
-    State.topology.networks.forEach((n) => {
-      (n.attach || []).forEach((a) => {
-        const pa = deviceCenter(a.device);
-        const c = netCenter(n.name);
-        if (!pa || !c) return;
-        const coords = { x1: pa.x, y1: pa.y, x2: c.x, y2: c.y };
-        const line = el("line", {
-          class: "wire" + (attachSelected(n, a.device) ? " selected" : "") + shade(false), ...coords,
-        });
-        viewportG.append(line);
-        const hit = el("line", { class: "wire-hit", ...coords });
-        selectWire(hit, attachSel(n, a.device), `привязка ${n.name}–${a.device}`);
-        viewportG.append(hit);
-      });
-    });
-
-    // devices
-    State.topology.devices.forEach((d) => {
-      const pos = State.layout.devices[d.name];
-
-      const kind = KINDS[d.kind] || { rx: 6 };
-      const isPending = pending && pending.device === d.name;
-      const rect = el("rect", {
-        class: "node-rect " + d.kind + (isPending ? " pending" : "") + (State.selection.has(d) ? " selected" : "")
-          + mark(searchSet.has(d)),
-        x: pos.x, y: pos.y, width: DEVICE_W, height: DEVICE_H, rx: kind.rx,
-      });
-      makeDraggable(rect, "device", d, (ev) => {
-        if (State.tool === "connect") onDeviceConnect(d.name);
-        else if (State.tool === "select") selectNode(d, ev.shiftKey);
-      });
-      contextDelete(rect, d, "устройство " + d.name, "device");
-      viewportG.append(rect);
-      if (kind.glyph) {
-        viewportG.append(el("path", {
-          class: "node-glyph " + d.kind + shade(searchSet.has(d)),
-          d: kind.glyph,
-          transform: `translate(${pos.x + 8} ${pos.y + 8})`,
-        }));
-        viewportG.append(el("text", { class: "node-label" + shade(searchSet.has(d)), x: pos.x + 24, y: pos.y + 18 }, `${d.name} (${d.kind})`));
-      } else {
-        viewportG.append(el("text", { class: "node-label" + shade(searchSet.has(d)), x: pos.x + 8, y: pos.y + 18 }, `${d.name} (${d.kind})`));
-      }
-    });
-
-    // networks
-    State.topology.networks.forEach((n) => {
-      const pos = State.layout.networks[n.name];
-
-      const shape = el("path", {
-        class: "subnet-rect" + (State.selection.has(n) ? " selected" : "") + mark(searchSet.has(n)),
-        d: cloudPath(pos.x, pos.y, NET_W, NET_H),
-      });
-      makeDraggable(shape, "network", n, (ev) => {
-        if (State.tool === "connect") onNetworkClick(n.name);
-        else if (State.tool === "select") selectNode(n, ev.shiftKey);
-      });
-      contextDelete(shape, n, "сеть " + n.name, "network");
-      viewportG.append(shape);
-      viewportG.append(el("text", { class: "subnet-label" + shade(searchSet.has(n)), x: pos.x + 8, y: pos.y + 18 }, n.name));
-
-      const members = (n.subnets || []).map((s) => State.subnets.find((x) => x.name === s)).filter(Boolean);
-      const subtitle = members.length ? nameSummary(members.map((s) => s.name)) : "(нет подсетей)";
-      viewportG.append(el("text", { class: "link-label-text" + shade(searchSet.has(n)), x: pos.x + 8, y: pos.y + 36 }, subtitle));
-    });
-
+    TopoScene.render(viewportG, State, { classes: nodeClasses, hook: nodeHook });
     // trash button mirrors the selection state
     document.getElementById("topo-delete").disabled = !State.selection.size;
   }

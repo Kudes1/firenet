@@ -1,6 +1,7 @@
 package simulate_test
 
 import (
+	"encoding/json"
 	"net/netip"
 	"strings"
 	"testing"
@@ -160,6 +161,29 @@ func TestRun_UnreachableIsEmptyNotError(t *testing.T) {
 	rep := runSim(t, simRulesAllow, "10.0.0.5", "10.0.2.7", "")
 	if len(rep.Paths) != 0 {
 		t.Fatalf("isolated subnet must yield zero paths, got %+v", rep.Paths)
+	}
+}
+
+// Пустые списки обязаны маршалиться в [] а не null: фронтенд вызывает
+// .length/.forEach прямо на paths и routers.
+func TestRun_JSONNeverNullArrays(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rep  *simulate.Report
+	}{
+		{"unreachable", runSim(t, simRulesAllow, "10.0.0.5", "10.0.2.7", "")},
+		{"same-subnet", runSim(t, simRulesAllow, "10.0.0.1", "10.0.0.200", "")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := json.Marshal(tc.rep)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			s := string(b)
+			if strings.Contains(s, ":null") {
+				t.Fatalf("JSON contains null array: %s", s)
+			}
+		})
 	}
 }
 

@@ -4,109 +4,90 @@
 // симуляции трафика (POST /api/simulate). Карта только для чтения:
 // перетаскивание узлов и правка — на /ui/topology.
 const Simulate = (() => {
-  const { DEVICE_W, DEVICE_H, NET_W, NET_H, KINDS, el, center, linkOffsets, spreadOffset, pointAt } = NetMap;
+  const { el } = NetMap;
   const state = { topology: null, subnets: [], layout: null, camera: Camera.create(), result: null };
 
   const svgEl = () => document.getElementById("sim-canvas");
   let viewportG = null;
 
-  function ensureLayout() {
-    state.topology.devices.forEach((d, i) => {
-      if (!state.layout.devices[d.name]) state.layout.devices[d.name] = { x: 40 + (i % 5) * 200, y: 40 + Math.floor(i / 5) * 160 };
-    });
-    state.topology.networks.forEach((n, i) => {
-      if (!state.layout.networks[n.name]) state.layout.networks[n.name] = { x: 40 + (i % 5) * 200, y: 300 + Math.floor(i / 5) * 160 };
-    });
-  }
-
-  // cloudPathFor outlines an L2 segment as a cloud filling the whole bbox;
-  // local copy of topology.js cloudPath (pure function of the bbox), so this
-  // page doesn't depend on topology.js internals.
-  function cloudPathFor(pos) {
-    const x = pos.x, y = pos.y, w = NET_W, h = NET_H;
-    const depth = 6;
-    const HBUMPS = 7; // bumps per horizontal edge
-    const VBUMPS = 3; // bumps per vertical edge
-    const pts = [[x, y]];
-    const edge = (x1, y1, x2, y2, n) => {
-      for (let i = 1; i <= n + 1; i++) pts.push([x1 + ((x2 - x1) * i) / (n + 1), y1 + ((y2 - y1) * i) / (n + 1)]);
+  // buildAdj: симметричная смежность устройств и сетей — линки устройство–
+  // устройство плюс привязки «сеть ↔ устройство».
+  function buildAdj(topology) {
+    const adj = new Map();
+    const link = (a, b) => {
+      if (!adj.has(a)) adj.set(a, []);
+      adj.get(a).push(b);
     };
-    edge(x, y, x + w, y, HBUMPS);
-    edge(x + w, y, x + w, y + h, VBUMPS);
-    edge(x + w, y + h, x, y + h, HBUMPS);
-    for (let i = VBUMPS; i >= 1; i--) pts.push([x, y + (h * i) / (VBUMPS + 1)]);
-    let d = `M ${pts[0][0]} ${pts[0][1]}`;
-    for (let i = 0; i < pts.length; i++) {
-      const [ax, ay] = pts[i];
-      const [bx, by] = pts[(i + 1) % pts.length];
-      const dx = bx - ax;
-      const dy = by - ay;
-      const len = Math.hypot(dx, dy);
-      d += ` Q ${ax + dx / 2 + (dy / len) * depth} ${ay + dy / 2 + (-dx / len) * depth} ${bx} ${by}`;
-    }
-    return d + " Z";
+    topology.links.forEach((l) => { link(l.a.device, l.b.device); link(l.b.device, l.a.device); });
+    topology.networks.forEach((n) => (n.attach || []).forEach((a) => { link(n.name, a.device); link(a.device, n.name); }));
+    return adj;
   }
 
-  function highlightSet(report) {
-    if (!report || !report.paths.length) return null;
-    const names = new Set();
-    report.paths.forEach((p) => p.nodes.forEach((n) => names.add(n.name)));
-    return names;
+  // shortestPath: BFS-цепочка имён от якоря from до to; null, если связи нет.
+  function shortestPath(adj, from, to) {
+    if (from === to) return [from];
+    const prev = new Map([[from, null]]);
+    const queue = [from];
+    for (let i = 0; i < queue.length; i++) {
+      const cur = queue[i];
+      for (const next of adj.get(cur) || []) {
+        if (prev.has(next)) continue;
+        prev.set(next, cur);
+        if (next === to) {
+          const path = [];
+          for (let n = to; n !== null; n = prev.get(n)) path.unshift(n);
+          return path;
+        }
+        queue.push(next);
+      }
+    }
+    return null;
   }
+
+  // expandHighlight переводит путь отчёта в имена элементов карты. Узлы
+  // отчёта — подсети, роутеры и синтетические l2-bus, поэтому каждая пара
+  // соседей приводится к якорю карты (роутер или сеть по членству подсети),
+  // а стыки соединяются кратчайшей физической цепочкой устройств через
+  // свитчи; всё это попадает в результирующий набор.
+  const queue = [];
+  function expandHighlight(report, topology) {
+    if (!report || !report.paths.length) return null;
+    const adj = buildAdj(topology);
+    // узел без близнеца на карте (l2-bus) даёт null и просто пропускается
+    const anchor = (n) => n.kind === 0 ? n.name
+      : (topology.networks.find((w) => (w.subnets || []).includes(n.name)) || {}).name || null;
+    const hl = new Set();
+    report.paths.forEach((p) => {
+      // l2-bus не имеет близнеца на карте; стыки ищем по соседним якорям
+      const anchors = p.nodes.map(anchor).filter(Boolean);
+      anchors.forEach((a) => hl.add(a));
+      for (let i = 0; i + 1 < anchors.length; i++) {
+        if (anchors[i] === anchors[i + 1]) continue;
+        const chain = shortestPath(adj, anchors[i], anchors[i + 1]);
+        if (chain) chain.forEach((x) => hl.add(x));
+      }
+    });
+    return hl;
+  }
+
+  // pathDim приглушает всё, что не принадлежит подсвеченному пути:
+  // узлы и сети — по имени, связи — по паре устройств, привязки — по
+  // паре «сеть–устройство».
+  const pathDim = (hl) => (obj) => {
+    if (!hl) return false;
+    const names = obj.type === "attach" ? [obj.net.name, obj.device]
+      : obj.a ? [obj.a.device, obj.b.device]
+      : [obj.name];
+    return !names.every((n) => hl.has(n));
+  };
 
   function renderMap() {
-    ensureLayout();
+    TopoScene.ensureLayout(state.topology, state.layout);
     const svg = svgEl();
     svg.innerHTML = "";
     viewportG = el("g", { class: "viewport", transform: Camera.transform(state.camera) });
     svg.append(viewportG);
-    const hl = highlightSet(state.result);
-    const dim = (name) => (hl ? (hl.has(name) ? "" : " sim-dim") : "");
-    const devC = (name) => center(state.layout.devices, name, DEVICE_W, DEVICE_H);
-    const netC = (name) => center(state.layout.networks, name, NET_W, NET_H);
-
-    const offsets = linkOffsets(state.topology.links);
-    state.topology.links.forEach((l, i) => {
-      const pa = devC(l.a.device), pb = devC(l.b.device);
-      if (!pa || !pb) return;
-      const mid = pointAt(pa, pb, 0.5, spreadOffset(offsets[i]));
-      viewportG.append(el("path", {
-        class: "wire" + (l.filter ? " wire-filtered" : "") + ((hl && !(hl.has(l.a.device) && hl.has(l.b.device))) ? " sim-dim" : ""),
-        d: `M ${pa.x} ${pa.y} Q ${mid.x} ${mid.y} ${pb.x} ${pb.y}`, fill: "none",
-      }));
-    });
-
-    state.topology.networks.forEach((n) => {
-      (n.attach || []).forEach((a) => {
-        const pa = devC(a.device), c = netC(n.name);
-        if (!pa || !c) return;
-        viewportG.append(el("line", {
-          class: "wire" + ((hl && !(hl.has(n.name) && hl.has(a.device))) ? " sim-dim" : ""),
-          x1: pa.x, y1: pa.y, x2: c.x, y2: c.y,
-        }));
-      });
-    });
-
-    state.topology.devices.forEach((d) => {
-      const pos = state.layout.devices[d.name];
-      const kind = KINDS[d.kind] || { rx: 6 };
-      viewportG.append(el("rect", { class: "node-rect " + d.kind + dim(d.name), x: pos.x, y: pos.y, width: DEVICE_W, height: DEVICE_H, rx: kind.rx }));
-      if (kind.glyph) {
-        viewportG.append(el("path", { class: "node-glyph " + d.kind + dim(d.name), d: kind.glyph, transform: `translate(${pos.x + 8} ${pos.y + 8})` }));
-        viewportG.append(el("text", { class: "node-label" + dim(d.name), x: pos.x + 24, y: pos.y + 18 }, `${d.name} (${d.kind})`));
-      } else {
-        viewportG.append(el("text", { class: "node-label" + dim(d.name), x: pos.x + 8, y: pos.y + 18 }, `${d.name} (${d.kind})`));
-      }
-    });
-
-    state.topology.networks.forEach((n) => {
-      const pos = state.layout.networks[n.name];
-      viewportG.append(el("path", { class: "subnet-rect" + dim(n.name), d: cloudPathFor(pos) }));
-      viewportG.append(el("text", { class: "subnet-label" + dim(n.name), x: pos.x + 8, y: pos.y + 18 }, n.name));
-      const members = (n.subnets || []).map((s) => state.subnets.find((x) => x.name === s)).filter(Boolean);
-      const subtitle = members.length ? members.map((s) => s.cidr).join(", ") : "(нет подсетей)";
-      viewportG.append(el("text", { class: "link-label-text" + dim(n.name), x: pos.x + 8, y: pos.y + 36 }, subtitle));
-    });
+    TopoScene.render(viewportG, state, { dim: pathDim(expandHighlight(state.result, state.topology)) });
   }
 
   const BADGE = { allow: "badge-ok", deny: "badge-drop" };
@@ -227,7 +208,7 @@ const Simulate = (() => {
     document.getElementById("sim-form").addEventListener("submit", run);
   }
 
-  return { boot, renderReport, run, state };
+  return { boot, renderReport, run, state, expandHighlight };
 })();
 
 if (document.readyState === "loading") {

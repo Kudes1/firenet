@@ -56,7 +56,7 @@ links:
         a-exports:
             - MAIN
         b-exports:
-            - MARKET
+            - OFFICE-NETWORK
     - a:
         device: test2
       b:
@@ -65,7 +65,7 @@ links:
         a-exports:
             - MAIN
         b-exports:
-            - MARKET
+            - OFFICE-NETWORK
     - a:
         device: market
       b:

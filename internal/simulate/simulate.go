@@ -90,10 +90,12 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 	if err != nil {
 		return nil, fmt.Errorf("dst: %w", err)
 	}
-	rep := &Report{SrcSubnet: srcName, DstSubnet: dstName, Note: StatelessNote}
+	// Пустые слайсы, а не nil: JSON null ломает фронтенд (.length/.forEach).
+	rep := &Report{SrcSubnet: srcName, DstSubnet: dstName, Note: StatelessNote, Paths: []PathResult{}}
 	if srcName == dstName {
 		rep.Paths = []PathResult{{
 			Nodes:   []graph.Node{graph.SubnetNode(srcName)},
+			Routers: []RouterVerdict{},
 			Verdict: rules.ActionAllow,
 			Note:    "трафик не пересекает управляемые роутеры (L2-сегмент)",
 		}}
@@ -109,7 +111,7 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 		return nil, err
 	}
 	for _, p := range paths {
-		pr := PathResult{Nodes: p.Nodes}
+		pr := PathResult{Nodes: p.Nodes, Routers: []RouterVerdict{}}
 		denied := false
 		for _, r := range p.Routers() {
 			v := verdict(byDevice[r], defaultAction, flow, r)
