@@ -2,6 +2,7 @@ package rules
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/kudes1/firenet/internal/topology"
@@ -18,7 +19,9 @@ func testTopology(t *testing.T) *topology.Topology {
 			"r1": {Name: "r1", Kind: topology.DeviceRouter},
 		},
 		Subnets: map[string]topology.Subnet{
-			"office": {Name: "office", CIDR: prefix},
+			"office":    {Name: "office", CIDR: prefix},
+			"dangerous": {Name: "dangerous", CIDR: netip.MustParsePrefix("10.0.1.0/24")},
+			"dns":       {Name: "dns", CIDR: netip.MustParsePrefix("10.0.2.0/24")},
 		},
 		Networks: map[string]topology.Network{
 			"internal": {Name: "internal", Subnets: []string{"office"}, Attach: []topology.Endpoint{{Device: "r1"}}},
@@ -31,7 +34,7 @@ func baseRule() Rule {
 }
 
 func TestValidate_OK(t *testing.T) {
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{baseRule()}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{baseRule()}}}}
 	if err := pol.Validate(testTopology(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,7 +43,7 @@ func TestValidate_OK(t *testing.T) {
 func TestValidate_NetworkEndpointOK(t *testing.T) {
 	r := baseRule()
 	r.Src = []string{"internal"}
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 	if err := pol.Validate(testTopology(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +57,7 @@ func TestValidate_SetEndpointOK(t *testing.T) {
 	}
 	r := baseRule()
 	r.Src = []string{"blocked"}
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,7 +67,7 @@ func TestValidate_LiteralEndpointOK(t *testing.T) {
 	for _, ep := range []string{"10.0.0.5", "10.0.0.0/24", "10.0.0.9/32"} {
 		r := baseRule()
 		r.Src = []string{ep}
-		pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+		pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 		if err := pol.Validate(testTopology(t)); err != nil {
 			t.Errorf("literal endpoint %q: unexpected error: %v", ep, err)
 		}
@@ -75,7 +78,7 @@ func TestValidate_InvalidLiteralEndpoint(t *testing.T) {
 	for _, ep := range []string{"10.0.0", "300.1.1.1", "10.0.0.5/33", "10.0.0.5/24/x", "::1", "fe80::/64"} {
 		r := baseRule()
 		r.Src = []string{ep}
-		pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+		pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 		if err := pol.Validate(testTopology(t)); err == nil {
 			t.Errorf("literal endpoint %q: expected error", ep)
 		}
@@ -85,7 +88,7 @@ func TestValidate_InvalidLiteralEndpoint(t *testing.T) {
 func TestValidate_UnknownSrc(t *testing.T) {
 	r := baseRule()
 	r.Src = []string{"nope"}
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 	if err := pol.Validate(testTopology(t)); err == nil {
 		t.Fatal("expected error for unknown src")
 	}
@@ -94,7 +97,7 @@ func TestValidate_UnknownSrc(t *testing.T) {
 func TestValidate_InvalidProto(t *testing.T) {
 	r := baseRule()
 	r.Proto = "gre"
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 	if err := pol.Validate(testTopology(t)); err == nil {
 		t.Fatal("expected error for invalid proto")
 	}
@@ -104,7 +107,7 @@ func TestValidate_PortsOnlyForTCPUDP(t *testing.T) {
 	r := baseRule()
 	r.Proto = ProtoICMP
 	r.DstPorts = []string{"80"}
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 	if err := pol.Validate(testTopology(t)); err == nil {
 		t.Fatal("expected error for ports on icmp rule")
 	}
@@ -114,7 +117,7 @@ func TestValidate_SrcPortsOnlyForTCPUDP(t *testing.T) {
 	r := baseRule()
 	r.Proto = ProtoICMP
 	r.SrcPorts = []string{"80"}
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 	if err := pol.Validate(testTopology(t)); err == nil {
 		t.Fatal("expected error for src ports on icmp rule")
 	}
@@ -125,7 +128,7 @@ func TestValidate_SrcPortSpecs(t *testing.T) {
 	r.Proto = ProtoTCP
 	r.SrcPorts = []string{"1024-65535"}
 	r.DstPorts = []string{"443"}
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 	if err := pol.Validate(testTopology(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -148,7 +151,7 @@ func TestValidate_PortSpecs(t *testing.T) {
 		r := baseRule()
 		r.Proto = ProtoTCP
 		r.DstPorts = []string{c.spec}
-		pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+		pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 		err := pol.Validate(testTopology(t))
 		if (err != nil) != c.wantErr {
 			t.Errorf("port %q: err=%v, wantErr=%v", c.spec, err, c.wantErr)
@@ -157,7 +160,7 @@ func TestValidate_PortSpecs(t *testing.T) {
 }
 
 func TestValidate_DuplicateRuleName(t *testing.T) {
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{baseRule(), baseRule()}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{baseRule(), baseRule()}}}}
 	if err := pol.Validate(testTopology(t)); err == nil {
 		t.Fatal("expected error for duplicate rule name")
 	}
@@ -166,14 +169,14 @@ func TestValidate_DuplicateRuleName(t *testing.T) {
 func TestValidate_ReturnActionOK(t *testing.T) {
 	r := baseRule()
 	r.Action = ActionReturn
-	pol := &Policy{DefaultAction: ActionReturn, ChainName: "FIRENET-FWD", ChainPosition: ChainTop, Rules: []Rule{r}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionReturn, ChainPosition: ChainTop, Rules: []Rule{r}}}}
 	if err := pol.Validate(testTopology(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func TestValidate_InvalidDefaultAction(t *testing.T) {
-	pol := &Policy{DefaultAction: "maybe"}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: "maybe"}}}
 	if err := pol.Validate(testTopology(t)); err == nil {
 		t.Fatal("expected error for invalid defaultAction")
 	}
@@ -182,7 +185,7 @@ func TestValidate_InvalidDefaultAction(t *testing.T) {
 func TestValidate_InvalidChainName(t *testing.T) {
 	cases := []string{"", "bad name", "toolongtoolongtoolongtoolong1"}
 	for _, name := range cases {
-		pol := &Policy{DefaultAction: ActionDeny, ChainName: name, ChainPosition: ChainTop, Rules: []Rule{baseRule()}}
+		pol := &Policy{Chains: []Chain{{Name: name, DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{baseRule()}}}}
 		if err := pol.Validate(testTopology(t)); err == nil {
 			t.Errorf("chainName %q: expected error", name)
 		}
@@ -190,8 +193,50 @@ func TestValidate_InvalidChainName(t *testing.T) {
 }
 
 func TestValidate_InvalidChainPosition(t *testing.T) {
-	pol := &Policy{DefaultAction: ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: "middle", Rules: []Rule{baseRule()}}
+	pol := &Policy{Chains: []Chain{{Name: "FIRENET-FWD", DefaultAction: ActionDeny, ChainPosition: "middle", Rules: []Rule{baseRule()}}}}
 	if err := pol.Validate(testTopology(t)); err == nil {
 		t.Fatal("expected error for invalid chainPosition")
+	}
+}
+
+func TestValidateJumpErrors(t *testing.T) {
+	topo := testTopology(t)
+	cases := []struct {
+		name, yaml string
+	}{
+		{"jump without target", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n"},
+		{"jumpTo without jump", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: allow\n        jumpTo: B\n"},
+		{"unknown target", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: NOPE\n"},
+		{"self jump", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: A\n"},
+		{"cycle", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: B\n  - name: B\n    rules:\n      - name: q\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: A\n"},
+		{"position on secondary", "chains:\n  - name: A\n    rules: []\n  - name: B\n    chainPosition: top\n    rules: []\n"},
+		{"dup chain names", "chains:\n  - name: A\n    rules: []\n  - name: A\n    rules: []\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pol, err := Load(strings.NewReader(tc.yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := pol.Validate(topo); err == nil {
+				t.Fatalf("expected validation error for %s", tc.name)
+			}
+		})
+	}
+	t.Run("no chains", func(t *testing.T) {
+		if err := (&Policy{}).Validate(topo); err == nil {
+			t.Fatal("expected validation error for no chains")
+		}
+	})
+}
+
+func TestValidateValidJumpChain(t *testing.T) {
+	in := "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: B\n  - name: B\n    defaultAction: deny\n    rules:\n      - name: dns-ok\n        src: [dangerous]\n        dst: [dns]\n        proto: udp\n        dstPorts: [\"53\"]\n        action: allow\n"
+	pol, err := Load(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pol.Validate(testTopology(t)); err != nil {
+		t.Fatal(err)
 	}
 }

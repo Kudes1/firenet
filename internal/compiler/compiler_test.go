@@ -45,15 +45,15 @@ func TestCompile_SanitizationCollisionsGetDistinctNames(t *testing.T) {
 	topo.Subnets["a b"] = topology.Subnet{Name: "a b", CIDR: prefix(t, "10.0.6.0/24")}
 	topo.Networks["nAB1"] = topology.Network{Name: "nAB1", Subnets: []string{"a/b"}, Attach: []topology.Endpoint{{Device: "r1"}}}
 	topo.Networks["nAB2"] = topology.Network{Name: "nAB2", Subnets: []string{"a b"}, Attach: []topology.Endpoint{{Device: "r1"}}}
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "to-a-slash-b", Src: []string{"A"}, Dst: []string{"a/b"}, Proto: rules.ProtoAny, Action: rules.ActionAllow},
 			{Name: "to-a-space-b", Src: []string{"A"}, Dst: []string{"a b"}, Proto: rules.ProtoAny, Action: rules.ActionAllow},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -146,14 +146,14 @@ func requireNoDevice(t *testing.T, ds []DeviceRuleset, name string) {
 
 func TestCompile_PlacesOnBothRedundantRouters(t *testing.T) {
 	topo := redundantTopology(t)
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "a-to-b-https", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -182,14 +182,14 @@ func TestCompile_PlacesOnBothRedundantRouters(t *testing.T) {
 
 func TestCompile_NetworkExpandsToMembers(t *testing.T) {
 	topo := redundantTopology(t)
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "c-to-ab", Src: []string{"C"}, Dst: []string{"ab"}, Proto: rules.ProtoAny, Action: rules.ActionDeny},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -211,14 +211,14 @@ func TestCompile_NetworkExpandsToMembers(t *testing.T) {
 
 func TestCompile_AnyAnyPlacesOnAllRouters(t *testing.T) {
 	topo := redundantTopology(t)
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "allow-icmp", Src: []string{rules.Any}, Dst: []string{rules.Any}, Proto: rules.ProtoICMP, Action: rules.ActionAllow},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -247,14 +247,14 @@ func TestCompile_SetIpsetContainsSubnetsAndAddresses(t *testing.T) {
 	topo.Sets = map[string]topology.Set{
 		"blocked": {Name: "blocked", Subnets: []string{"B"}, Addresses: []netip.Prefix{netip.PrefixFrom(host, host.BitLen())}},
 	}
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "a-to-blocked", Src: []string{"A"}, Dst: []string{"blocked"}, Proto: rules.ProtoAny, Action: rules.ActionDeny},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -289,15 +289,15 @@ func TestCompile_SetIpsetContainsSubnetsAndAddresses(t *testing.T) {
 
 func TestCompile_DedupIdenticalRules(t *testing.T) {
 	topo := redundantTopology(t)
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "rule-one", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 			{Name: "rule-two", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -317,15 +317,15 @@ func TestCompile_DedupIdenticalRules(t *testing.T) {
 
 func TestCompile_CommentPrefersCommentOverName(t *testing.T) {
 	topo := redundantTopology(t)
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "named", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoAny, Action: rules.ActionAllow},
 			{Name: "described", Comment: "доступ к БД", Src: []string{"B"}, Dst: []string{"A"}, Proto: rules.ProtoTCP, DstPorts: []string{"5432"}, Action: rules.ActionDeny},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -357,14 +357,14 @@ func TestCompile_CommentPrefersCommentOverName(t *testing.T) {
 
 func TestCompile_LiteralEndpointInsideSubnet(t *testing.T) {
 	topo := redundantTopology(t)
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "host-to-b", Src: []string{"10.0.0.5"}, Dst: []string{"B"}, Proto: rules.ProtoAny, Action: rules.ActionAllow},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -395,14 +395,14 @@ func TestCompile_LiteralEndpointInsideSubnet(t *testing.T) {
 
 func TestCompile_LiteralCIDRMatchesByAddress(t *testing.T) {
 	topo := redundantTopology(t)
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "range-to-b", Src: []string{"10.0.0.77/24"}, Dst: []string{"B"}, Proto: rules.ProtoAny, Action: rules.ActionDeny},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -425,14 +425,14 @@ func TestCompile_LiteralCIDRMatchesByAddress(t *testing.T) {
 
 func TestCompile_LiteralEndpointOutsideSubnetsPlacesEverywhere(t *testing.T) {
 	topo := redundantTopology(t)
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "wan-host-to-a", Src: []string{"192.168.9.9"}, Dst: []string{"A"}, Proto: rules.ProtoTCP, DstPorts: []string{"22"}, Action: rules.ActionAllow},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -453,14 +453,14 @@ func TestCompile_LiteralEndpointOutsideSubnetsPlacesEverywhere(t *testing.T) {
 
 func TestCompile_MirrorExpandsReverseDirection(t *testing.T) {
 	topo := redundantTopology(t)
-	pol := &rules.Policy{
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
 		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
 		ChainPosition: rules.ChainTop,
 		Rules: []rules.Rule{
 			{Name: "ab-tcp", Src: []string{"A"}, Dst: []string{"B"}, Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow, Mirror: true},
 		},
-	}
+	}}}
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("invalid rules: %v", err)
 	}
@@ -489,7 +489,7 @@ func TestCompile_MirrorExpandsReverseDirection(t *testing.T) {
 	if len(reverse.DstPorts) != 0 || len(reverse.SrcPorts) != 1 || reverse.SrcPorts[0] != "443" {
 		t.Fatalf("mirrored rule must swap ports (dst port becomes src port on reverse), got: %+v", reverse)
 	}
-	if len(pol.Rules) != 1 {
-		t.Fatalf("mirroring must not mutate the source policy, got %d rules", len(pol.Rules))
+	if len(pol.Primary().Rules) != 1 {
+		t.Fatalf("mirroring must not mutate the source policy, got %d rules", len(pol.Primary().Rules))
 	}
 }

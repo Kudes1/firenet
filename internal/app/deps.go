@@ -85,9 +85,11 @@ func ruleDeps(pol *rules.Policy, name string) []string {
 		return nil
 	}
 	var out []string
-	for _, r := range pol.Rules {
-		if slices.Contains(r.Src, name) || slices.Contains(r.Dst, name) {
-			out = append(out, fmt.Sprintf("rule %q", r.Name))
+	for _, c := range pol.Chains {
+		for _, r := range c.Rules {
+			if slices.Contains(r.Src, name) || slices.Contains(r.Dst, name) {
+				out = append(out, fmt.Sprintf("rule %q", r.Name))
+			}
 		}
 	}
 	return out

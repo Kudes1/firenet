@@ -174,7 +174,8 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 	pairCache := make(map[pairKey][]string)
 	names := newIPSetNamer()
 
-	for _, rule := range pol.Rules {
+	primary := pol.Primary()
+	for _, rule := range primary.Rules {
 		for _, ar := range expandAtomic(rule) {
 			srcAny := ar.Src == rules.Any
 			dstAny := ar.Dst == rules.Any
@@ -292,9 +293,9 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 			Device:        name,
 			IPSets:        a.ipsetList(topo),
 			Rules:         a.rules,
-			DefaultAction: pol.DefaultAction,
-			ChainName:     pol.ChainName,
-			ChainPosition: pol.ChainPosition,
+			DefaultAction: primary.DefaultAction,
+			ChainName:     primary.Name,
+			ChainPosition: primary.ChainPosition,
 		})
 	}
 	return result, nil

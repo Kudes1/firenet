@@ -97,7 +97,7 @@ func compilePolicy(t *testing.T, topo *topology.Topology, g *graph.Graph, policy
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	return sets, pol.DefaultAction
+	return sets, pol.Primary().DefaultAction
 }
 
 func runSim(t *testing.T, policyYAML string, src, dst string, proto rules.Proto, dstPorts ...string) *simulate.Report {

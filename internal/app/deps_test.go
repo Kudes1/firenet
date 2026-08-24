@@ -29,7 +29,7 @@ func TestDeletionErrors_SubnetUsedByNetworkSetAndRule(t *testing.T) {
 		Networks: map[string]topology.Network{"n-dmz": {Name: "n-dmz", Subnets: []string{"dmz"}}},
 		Sets:     map[string]topology.Set{"s-web": {Name: "s-web", Subnets: []string{"dmz"}}},
 	}
-	pol := &rules.Policy{Rules: []rules.Rule{rule("office-to-dmz", []string{"office"}, []string{"dmz"})}}
+	pol := &rules.Policy{Chains: []rules.Chain{{Rules: []rules.Rule{rule("office-to-dmz", []string{"office"}, []string{"dmz"})}}}}
 
 	errs := DeletionErrors(prev, next, pol)
 	want := `subnet "dmz" is still used by network "n-dmz", set "s-web", rule "office-to-dmz"`
@@ -61,7 +61,7 @@ func TestDeletionErrors_NetworkAndSetUsedByRule(t *testing.T) {
 		Sets:     map[string]topology.Set{"s-web": {Name: "s-web"}},
 	}
 	next := &topology.Topology{}
-	pol := &rules.Policy{Rules: []rules.Rule{rule("web-allow", []string{"n-office"}, []string{"s-web"})}}
+	pol := &rules.Policy{Chains: []rules.Chain{{Rules: []rules.Rule{rule("web-allow", []string{"n-office"}, []string{"s-web"})}}}}
 
 	errs := DeletionErrors(prev, next, pol)
 	slices.Sort(errs)

@@ -56,5 +56,5 @@ func Simulate(_ context.Context, log *slog.Logger, opts SimulateOptions) (*simul
 	}
 
 	log.Debug("simulated flow", "src", opts.Flow.Src, "dst", opts.Flow.Dst)
-	return simulate.Run(topo, devices, g, limits, pol.DefaultAction, opts.Flow)
+	return simulate.Run(topo, devices, g, limits, pol.Primary().DefaultAction, opts.Flow)
 }
