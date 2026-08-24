@@ -106,11 +106,11 @@ const TopoScene = (() => {
       if (!box) return;
       const color = UNION_COLORS[i % UNION_COLORS.length];
       viewportG.append(el("rect", {
-        class: "union-frame" + classes(s, "inner") + dimmed(s), "data-union": s.name,
+        class: "union-frame" + classes(s, "inner") + marked(s) + dimmed(s), "data-union": s.name,
         x: box.x, y: box.y, width: box.w, height: box.h, rx: 14,
         fill: color, "fill-opacity": 0.07, stroke: color, "stroke-opacity": 0.5,
       }));
-      viewportG.append(el("text", { class: "union-label" + classes(s, "inner") + dimmed(s), x: box.x + 12, y: box.y - 8, fill: color }, s.name));
+      viewportG.append(el("text", { class: "union-label" + classes(s, "inner") + marked(s) + dimmed(s), x: box.x + 12, y: box.y - 8, fill: color }, s.name));
     });
 
     // device-to-device links; each interactive wire gets an invisible wide

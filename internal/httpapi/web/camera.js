@@ -24,5 +24,12 @@ const Camera = (() => {
   const worldToScreen = (cam, wx, wy) => ({ x: wx * cam.z + cam.x, y: wy * cam.z + cam.y });
   const transform = (cam) => `translate(${cam.x} ${cam.y}) scale(${cam.z})`;
 
-  return { MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, transform };
+  // Стейдж-модель: svg с запасом m по каждой стороне сдвинут на (-m,-m)
+  // относительно контейнера, сцена внутри нарисована в координатах мира со
+  // смещением o; камера применена CSS-трансформой и выполняется композитором
+  // без перерисовки сцены. Инвариант тот же: контейнерная точка = world*z+cam.
+  const stageTransform = (cam, o, m) =>
+    `translate(${cam.x + m - o.x * cam.z}px, ${cam.y + m - o.y * cam.z}px) scale(${cam.z})`;
+
+  return { MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, transform, stageTransform };
 })();

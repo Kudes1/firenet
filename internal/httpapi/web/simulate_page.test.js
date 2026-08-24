@@ -9,17 +9,17 @@ const vm = require("node:vm");
 // Minimal DOM stub sufficient to boot simulate.js outside a browser and
 // exercise the report rendering against a stubbed fetch.
 function makeEl(tag) {
-  return {
+  const el = {
     tag,
     children: [],
     attrs: {},
     listeners: {},
     dataset: {},
+    _classes: new Set(),
     style: {
       setProperty(k, v) { this[k] = v; },
       getPropertyValue(k) { return this[k] ?? null; },
     },
-    classList: { add() {}, remove() {} },
     setAttribute(k, v) { this.attrs[k] = v; },
     getAttribute(k) { return this.attrs[k]; },
     append(...cs) { this.children.push(...cs); },
@@ -39,6 +39,17 @@ function makeEl(tag) {
     get textContent() { return this._text || ""; },
     reset() {},
   };
+  el.classList = {
+    add: (...cs) => cs.forEach((c) => el._classes.add(c)),
+    remove: (...cs) => cs.forEach((c) => el._classes.delete(c)),
+    contains: (c) => el._classes.has(c),
+  };
+  Object.defineProperty(el, "className", {
+    get: () => [...el._classes].join(" "),
+    set: (v) => { el._classes = new Set(String(v).split(/\s+/).filter(Boolean)); },
+    enumerable: true,
+  });
+  return el;
 }
 
 // fire dispatches a DOM event to listeners registered via addEventListener
@@ -103,6 +114,8 @@ function bootSimulate(responses, savedStore) {
     dispatchEvent() {},
     confirm: () => false,
     FormData: class { get() { return ""; } },
+    // rAF через макротаск: как в браузере, колбэк исполняется «в следующем кадре»
+    requestAnimationFrame: (fn) => setTimeout(fn, 0),
     setTimeout,
     clearTimeout,
     Promise,
@@ -139,7 +152,10 @@ const sampleReport = {
         { kind: 1, name: "office" }, { kind: 0, name: "r1" }, { kind: 0, name: "r2" }, { kind: 1, name: "dmz" },
       ],
       routers: [
-        { router: "r1", action: "allow", matchedRule: "office-to-dmz", reason: "правило разрешило" },
+        {
+          router: "r1", action: "allow", matchedRule: "office-to-dmz", reason: "правило разрешило",
+          steps: ["прыжок в цепочку FWD-TO-DMZ", "сработало правило \"office-to-dmz\""],
+        },
         { router: "r2", action: "allow", matchedRule: "office-to-dmz", reason: "правило разрешило" },
       ],
       verdict: "allow",
@@ -151,39 +167,104 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 const viewport = (canvas) => canvas.children.find((c) => c.attrs.class === "viewport");
 
+// парсер CSS-трансформы камеры на стейдже: translate(Xpx, Ypx) scale(Z)
+const parseStage = (t) => {
+  const [, x, y, z] = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(t);
+  return { x: +x, y: +y, z: +z };
+};
+
+test("boot builds an overscanned stage driven by a CSS camera transform", async () => {
+  const { canvas } = bootSimulate(responses);
+  await tick();
+  // контейнер 1200x800 → запас m = 1200, стейдж 3600x3200 со сдвигом (-m,-m)
+  assert.equal(canvas.style.position, "absolute");
+  assert.equal(canvas.style.left, "-1200px");
+  assert.equal(canvas.style.top, "-1200px");
+  assert.equal(canvas.style.width, "3600px");
+  assert.equal(canvas.style.height, "3200px");
+  // камера живёт в CSS-трансформе стейджа, группа сцены несёт только origin
+  // (мир дефолтной раскладки начинается с (40,40), паддинг 100 → origin 60)
+  const t = parseStage(canvas.style.transform);
+  assert.deepEqual({ x: t.x, y: t.y, z: t.z }, { x: 1140, y: 1140, z: 1 });
+  assert.equal(viewport(canvas).attrs.transform, "translate(60 60)");
+});
+
+// Мир с отрицательными координатами обязан целиком попадать на стейдж:
+// origin подбирается так, что bbox мира + паддинг лежит в пределах канвы.
+test("stage origin covers the whole world, including negative coordinates", async () => {
+  const topo = { devices: [{ name: "r0", kind: "router" }], links: [], networks: [] };
+  const { canvas } = bootSimulate({
+    ...responses,
+    "/api/topology": topo,
+    "/api/layout": { devices: { r0: { x: -60, y: -40 } }, networks: {} },
+  });
+  await tick();
+  // мир: x∈[-60,80], y∈[-40,20]; паддинг 100 → origin зажимается в (160,140)
+  assert.equal(viewport(canvas).attrs.transform, "translate(160 140)");
+});
+
 test("wheel zooms around the cursor", async () => {
   const { canvas } = bootSimulate({
     ...responses,
     "/api/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
   });
   await tick();
-  const before = viewport(canvas).attrs.transform;
+  const before = canvas.style.transform;
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
-  const after = viewport(canvas).attrs.transform;
-  assert.notEqual(after, before, "zoom changed the viewport transform");
-  // the world point under the cursor stays under the cursor
-  const parse = (t) => { const [, x, y] = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(t); return { x: +x, y: +y }; };
-  const worldAt = (tr, z) => ({ x: (300 - parse(tr).x) / z, y: (200 - parse(tr).y) / z });
-  const w0 = worldAt(before, 2);
-  const z1 = /scale\(([\d.]+)\)/.exec(after)[1];
-  const w1 = worldAt(after, +z1);
+  await tick();
+  const after = canvas.style.transform;
+  assert.notEqual(after, before, "zoom changed the stage transform");
+  // the world point under the cursor stays under the cursor:
+  // container = world*z + cam ⇔ cam = translate - m
+  const parse = (t) => {
+    const s = parseStage(t);
+    return { x: s.x - 1200, y: s.y - 1200, z: s.z };
+  };
+  const worldAt = (cam) => ({ x: (300 - cam.x) / cam.z, y: (200 - cam.y) / cam.z });
+  const w0 = worldAt(parse(before));
+  const w1 = worldAt(parse(after));
   assert.ok(Math.abs(w1.x - w0.x) < 0.01 && Math.abs(w1.y - w0.y) < 0.01, "cursor-anchored zoom");
 });
 
-test("left-button drag pans the read-only map", async () => {
+// same pan buttons as the topology editor: middle + right, left stays free
+test("middle- and right-button drags pan the read-only map", async () => {
+  const { canvas, doc } = bootSimulate(responses);
+  await tick();
+  fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
+  fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  fire(doc, "mouseup", {});
+  await tick();
+  assert.equal(canvas.style.transform, "translate(1200px, 1170px) scale(1)");
+  fire(canvas, "mousedown", { button: 2, clientX: 100, clientY: 100 });
+  fire(doc, "mousemove", { clientX: 40, clientY: 80 });
+  fire(doc, "mouseup", { button: 2 });
+  await tick();
+  assert.equal(canvas.style.transform, "translate(1140px, 1150px) scale(1)");
+});
+
+test("left button stays free: dragging it does not pan the map", async () => {
   const { canvas, doc } = bootSimulate(responses);
   await tick();
   fire(canvas, "mousedown", { button: 0, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
   fire(doc, "mouseup", {});
-  assert.equal(viewport(canvas).attrs.transform, "translate(60 30) scale(1)");
+  await tick();
+  assert.equal(canvas.style.transform, "translate(1140px, 1140px) scale(1)");
+});
+
+test("right-click on the canvas suppresses the native menu", async () => {
+  const { canvas } = bootSimulate(responses);
+  await tick();
+  let prevented = false;
+  fire(canvas, "contextmenu", { button: 2, preventDefault: () => { prevented = true; } });
+  assert.ok(prevented, "contextmenu is prevented on the sim canvas");
 });
 
 test("camera changes are not persisted to /api/layout", async () => {
   const { canvas, doc, calls } = bootSimulate(responses);
   await tick();
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
-  fire(canvas, "mousedown", { button: 0, clientX: 100, clientY: 100 });
+  fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
   fire(doc, "mouseup", {});
   await tick();
@@ -229,6 +310,39 @@ test("clicking a network on the read-only map shows its subnets", async () => {
   assert.match(html, /10\.0\.0\.0\/24/, "member CIDR listed");
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
   assert.ok(info.hidden, "zooming hides the window");
+});
+
+test("pan drag toggles the panning class that sheds expensive path styling", async () => {
+  const { canvas, doc } = bootSimulate(responses);
+  await tick();
+  assert.ok(!canvas.classList.contains("panning"), "no pan — no class");
+  fire(canvas, "mousedown", { button: 2, clientX: 10, clientY: 10 });
+  assert.ok(canvas.classList.contains("panning"), "right-button drag marks panning");
+  fire(canvas, "mousedown", { button: 1, clientX: 10, clientY: 10 });
+  fire(doc, "mouseup", { button: 1 });
+  assert.ok(!canvas.classList.contains("panning"), "release clears panning");
+});
+
+// mousemove приходит чаще кадров дисплея, поэтому камера обязана применяться
+// не чаще одного раза на requestAnimationFrame, даже если событий было десять
+test("rapid pan moves coalesce into one camera update per frame", async () => {
+  const { canvas, doc } = bootSimulate(responses);
+  await tick();
+  const vp = viewport(canvas);
+  assert.equal(vp.attrs.transform, "translate(60 60)", "camera lives on the stage, not the scene group");
+  let writes = 0;
+  Object.defineProperty(canvas.style, "transform", {
+    get() { return this._t || ""; },
+    set(v) { if (v) writes++; this._t = v; },
+    configurable: true,
+  });
+  fire(canvas, "mousedown", { button: 2, clientX: 100, clientY: 100 });
+  for (let i = 1; i <= 10; i++) fire(doc, "mousemove", { clientX: 100 + i * 10, clientY: 100 });
+  assert.equal(writes, 0, "moves wait for the frame");
+  await tick();
+  assert.equal(writes, 1, "exactly one transform write per frame");
+  assert.equal(canvas.style.transform, "translate(1240px, 1140px) scale(1)", "all deltas applied in the single write");
+  fire(doc, "mouseup", {});
 });
 
 test("renderReport builds one card per path with verdict badges", async () => {
@@ -341,6 +455,52 @@ test("form submit posts to /api/simulate and renders the report", async () => {
   assert.equal(cards.length, 1, "report rendered after submit");
 });
 
+test("router verdict renders each rule-walk step as a numbered list item", async () => {
+  const { ids, get } = bootSimulate(responses);
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(sampleReport)})`);
+  const lists = (function collect(n) {
+    const out = String(n.className || "").split(/\s+/).includes("sim-steps") ? [n] : [];
+    (n.children || []).forEach((c) => out.push(...collect(c)));
+    return out;
+  })(ids["sim-paths"]);
+  assert.equal(lists.length, 1, "only the verdict with steps becomes a list");
+  const items = (lists[0].children || []).filter((c) => c.tag === "li");
+  assert.equal(items.length, 2);
+  assert.match(String(items[0]._text), /прыжок в цепочку/);
+  assert.match(String(items[1]._text), /office-to-dmz/);
+});
+
+test("verdict without steps falls back to the plain reason text", async () => {
+  const { ids, get } = bootSimulate(responses);
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(sampleReport)})`);
+  const paras = ids["sim-paths"].children
+    .flatMap((c) => c.children)
+    .filter((c) => c.tag === "details")
+    .flatMap((d) => d.children)
+    .filter((c) => c.tag === "p");
+  assert.ok(paras.some((p) => String(p._text).includes("правило разрешило")),
+    "reason paragraph kept for legacy reports without steps");
+});
+
+test("verdict rows look expandable: button-like summary with chevron", async () => {
+  const { ids, get } = bootSimulate(responses);
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(sampleReport)})`);
+  const details = ids["sim-paths"].children
+    .flatMap((c) => c.children)
+    .filter((c) => c.tag === "details");
+  assert.ok(details.length >= 2, "both router verdicts rendered");
+  for (const d of details) {
+    assert.match(String(d.className || ""), /sim-verdict/, "verdict row is marked as expandable");
+    const sum = (d.children || []).find((c) => c.tag === "summary");
+    assert.ok(sum, "summary present");
+    assert.ok((sum.children || []).some((ch) => String(ch.className || "").includes("sim-chevron")),
+      "summary carries a disclosure chevron");
+  }
+});
+
 // — разметка движения трафика (expandFlow + mark на карте) —
 
 const denyReport = {
@@ -402,6 +562,35 @@ test("a denying router never turns green, even via another allowed path", async 
   const f = get("Simulate.expandFlow(Simulate.state.result, Simulate.state.topology)");
   assert.ok(f.deny.has("r2"), "deny verdict wins on the shared route");
   assert.ok(!f.ok.has("r2") && !f.ok.has("OFFICE"), "denied elements are not green");
+});
+
+// The drop happens ON the denying router, so the hop leading into it has
+// been fully traversed and stays green; only segments past it turn red.
+test("hop into the denying router stays green, segments beyond it turn red", async () => {
+  const { get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
+  const mark = get("Simulate.flowMark(Simulate.expandFlow(Simulate.state.result, Simulate.state.topology))");
+  assert.equal(mark({ a: { device: "sw1" }, b: { device: "r1" } }), "sim-flow-ok", "wire before the deny point");
+  assert.equal(mark({ a: { device: "r1" }, b: { device: "r2" } }), "sim-flow-ok", "wire into the deny router is traversed");
+  assert.equal(mark({ type: "attach", net: { name: "MAIN" }, device: "sw1" }), "sim-flow-ok", "attach before the deny point");
+  assert.equal(mark({ a: { device: "r2" }, b: { device: "sw2" } }), "sim-flow-deny", "wire beyond the deny point");
+  assert.equal(mark({ type: "attach", net: { name: "OFFICE" }, device: "sw2" }), "sim-flow-deny", "attach beyond the deny point");
+});
+
+// Unions crossed by the traffic are highlighted just a little.
+test("unions crossed by the route get a subtle mark", async () => {
+  const topo = { ...switchedTopo, unions: [
+    { name: "side", devices: ["lone"] },
+    { name: "src", devices: ["sw1", "r1"], networks: ["MAIN"] },
+    { name: "dst", devices: ["r2", "sw2"], networks: ["OFFICE"] },
+  ] };
+  const { canvas, get } = bootSimulate({ ...responses, "/api/topology": topo });
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
+  const marked = allByClass(canvas, "sim-flow-union").filter((n) => n.tag === "rect");
+  assert.deepEqual(marked.map((n) => n.attrs["data-union"]).sort(), ["dst", "src"],
+    "only unions with route members are marked");
 });
 
 test("map paints flow segments and marks the deny point with a tooltip", async () => {

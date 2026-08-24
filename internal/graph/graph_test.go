@@ -220,6 +220,90 @@ func TestAllSimplePaths_CycleDoesNotHang(t *testing.T) {
 	}
 }
 
+func TestBuild_DomainNodeNamedAfterSwitch(t *testing.T) {
+	topo := &topology.Topology{
+		Devices: map[string]topology.Device{
+			"r1":  {Name: "r1", Kind: topology.DeviceRouter},
+			"sw9": {Name: "sw9", Kind: topology.DeviceSwitch},
+		},
+		Links: []topology.Link{
+			{A: topology.Endpoint{Device: "r1"}, B: topology.Endpoint{Device: "sw9"}},
+		},
+		Subnets: map[string]topology.Subnet{
+			"X": {Name: "X", CIDR: prefix(t, "10.0.0.0/24")},
+			"A": {Name: "A", CIDR: prefix(t, "10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nX": netWithSubnets("nX", []string{"X"}, topology.Endpoint{Device: "r1"}),
+			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "sw9"}),
+		},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("invalid fixture: %v", err)
+	}
+	g, err := Build(topo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	paths, err := g.AllSimplePaths(SubnetNode("X"), SubnetNode("A"), DefaultLimits())
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("pathfind: %d paths (%v)", len(paths), err)
+	}
+	want := Node{Kind: NodeDomain, Name: "sw9"}
+	found := false
+	for _, n := range paths[0].Nodes {
+		if n == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("path %v misses domain node %+v", paths[0].Nodes, want)
+	}
+}
+
+func TestBuild_MultiSwitchDomainJoinedName(t *testing.T) {
+	topo := &topology.Topology{
+		Devices: map[string]topology.Device{
+			"r1":  {Name: "r1", Kind: topology.DeviceRouter},
+			"sw2": {Name: "sw2", Kind: topology.DeviceSwitch},
+			"sw1": {Name: "sw1", Kind: topology.DeviceSwitch},
+		},
+		Links: []topology.Link{
+			{A: topology.Endpoint{Device: "r1"}, B: topology.Endpoint{Device: "sw2"}},
+			{A: topology.Endpoint{Device: "sw2"}, B: topology.Endpoint{Device: "sw1"}},
+		},
+		Subnets: map[string]topology.Subnet{
+			"X": {Name: "X", CIDR: prefix(t, "10.0.0.0/24")},
+			"A": {Name: "A", CIDR: prefix(t, "10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nX": netWithSubnets("nX", []string{"X"}, topology.Endpoint{Device: "r1"}),
+			"nA": netWithSubnets("nA", []string{"A"}, topology.Endpoint{Device: "sw1"}),
+		},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("invalid fixture: %v", err)
+	}
+	g, err := Build(topo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	paths, err := g.AllSimplePaths(SubnetNode("X"), SubnetNode("A"), DefaultLimits())
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("pathfind: %d paths (%v)", len(paths), err)
+	}
+	want := Node{Kind: NodeDomain, Name: "sw1+sw2"}
+	found := false
+	for _, n := range paths[0].Nodes {
+		if n == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("path %v misses domain node %+v", paths[0].Nodes, want)
+	}
+}
+
 func filteredTopo() *topology.Topology {
 	return &topology.Topology{
 		Devices: map[string]topology.Device{

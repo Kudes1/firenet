@@ -4,11 +4,17 @@
 // симуляции трафика (POST /api/simulate). Карта только для чтения:
 // перетаскивание узлов и правка — на /ui/topology.
 const Simulate = (() => {
-  const { el, NET_W } = NetMap;
-  const state = { topology: null, subnets: [], layout: null, camera: Camera.create(), result: null };
+  const { el, NET_W, NET_H, DEVICE_W, DEVICE_H } = NetMap;
+  // WORLD_PAD — запас вокруг bbox мира при подборе origin стейджа
+  const WORLD_PAD = 100;
+  const state = {
+    topology: null, subnets: [], layout: null, camera: Camera.create(), result: null,
+    origin: { x: 0, y: 0 }, // смещение сцены на стейдже (мировые координаты)
+    stageM: 0, // запас (overscan) стейджа вокруг вьюпорта
+  };
 
   const svgEl = () => document.getElementById("sim-canvas");
-  let viewportG = null;
+  const wrapEl = () => document.getElementById("sim-wrap");
 
   // buildAdj: симметричная смежность устройств и сетей — линки устройство–
   // устройство плюс привязки «сеть ↔ устройство».
@@ -71,10 +77,15 @@ const Simulate = (() => {
     return hl;
   }
 
+  // edgeKey канонизирует пару имён концов связи/привязки в ключ ребра карты.
+  const edgeKey = (a, b) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`);
+
   // expandFlow делит маршрут на пройденную и непройденную части по вердиктам
-  // роутеров: ok — элементы карты до точки срабатывания запрета (включая
-  // сети-концы разрешённых маршрутов), deny — карта «роутер → {rule, reason}»
-  // для точек запрета, hl — весь путь целиком (для приглушения остального).
+  // роутеров: ok — узлы карты до точки срабатывания запрета, okE — рёбра,
+  // которые трафик прошёл целиком (включая последний хоп к точке запрета:
+  // дроп случается на самом роутере, а не на подходе к нему), denyE — рёбра
+  // за точкой запрета, deny — карта «роутер → {rule, reason}» для точек
+  // запрета, hl — весь путь целиком (для приглушения остального).
   // Запрет сильнее разрешения: элемент с deny-вердиктом и всё за ним на
   // запрещённом маршруте никогда не попадают в ok.
   function expandFlow(report, topology) {
@@ -85,6 +96,7 @@ const Simulate = (() => {
     const ok = new Set();
     const deny = new Map();
     const blocked = new Set();
+    const okE = new Set(), denyE = new Set();
     report.paths.forEach((p) => {
       const anchors = p.nodes.map(anchor).filter(Boolean);
       const di = p.routers.findIndex((rv) => rv.action === "deny");
@@ -95,28 +107,39 @@ const Simulate = (() => {
         if (anchors[i] === anchors[i + 1]) continue;
         const seg = shortestPath(adj, anchors[i], anchors[i + 1]);
         if (!seg) continue;
-        if (rv && i + 1 > cut) { seg.forEach((x) => blocked.add(x)); continue; }
+        const edges = seg.slice(1).map((x, j) => edgeKey(seg[j], x));
+        if (rv && i + 1 > cut) {
+          seg.forEach((x) => blocked.add(x));
+          edges.forEach((k) => denyE.add(k));
+          continue;
+        }
         const stopped = rv && i + 1 === cut;
         seg.slice(0, stopped ? -1 : seg.length).forEach((x) => ok.add(x));
+        edges.forEach((k) => okE.add(k));
         if (stopped) deny.set(seg[seg.length - 1], { rule: rv.matchedRule || "", reason: rv.reason || "" });
       }
     });
     deny.forEach((_, n) => ok.delete(n)); // запрет сильнее разрешения
     blocked.forEach((n) => ok.delete(n));
-    return { hl, ok, deny };
+    return { hl, ok, deny, okE, denyE };
   }
 
   // flowMark возвращает mark(obj) для TopoScene: класс движения трафика
-  // элемента карты — deny-точка краснее пройденного зелёного, непройденные
-  // элементы без метки (остаются приглушёнными).
+  // элемента карты. Узлы — по ok/deny; рёбра (связи и привязки) — по
+  // собственным множествам okE/denyE: цвет ребра не выводится из концов,
+  // иначе хоп к запрещающему роутеру красился бы по его вердикту.
+  // Объединения с членами на маршруте получают лишь лёгкую метку.
+  // Непомеченные элементы остаются приглушёнными.
   const flowMark = (flow) => (obj) => {
     if (!flow) return "";
-    const names = obj.type === "attach" ? [obj.net.name, obj.device]
-      : obj.a ? [obj.a.device, obj.b.device]
-      : [obj.name];
-    if (names.some((n) => flow.deny.has(n))) return "sim-flow-deny";
-    if (names.every((n) => flow.ok.has(n))) return "sim-flow-ok";
-    return "";
+    if (obj.devices)
+      return obj.devices.some((d) => flow.hl.has(d)) || (obj.networks || []).some((n) => flow.hl.has(n))
+        ? "sim-flow-union" : "";
+    if (!obj.a && obj.type !== "attach")
+      return flow.deny.has(obj.name) ? "sim-flow-deny" : flow.ok.has(obj.name) ? "sim-flow-ok" : "";
+    const names = obj.type === "attach" ? [obj.net.name, obj.device] : [obj.a.device, obj.b.device];
+    const k = edgeKey(names[0], names[1]);
+    return flow.denyE.has(k) ? "sim-flow-deny" : flow.okE.has(k) ? "sim-flow-ok" : "";
   };
 
   // pathDim приглушает всё, что не принадлежит подсвеченному пути:
@@ -134,16 +157,86 @@ const Simulate = (() => {
   function showNetInfo(n) {
     const pos = state.layout.networks[n.name];
     if (!pos) return;
-    const r = svgEl().getBoundingClientRect();
+    const r = wrapEl().getBoundingClientRect();
     NetInfo.show(n, state.subnets, Camera.worldToScreen(state.camera, pos.x + NET_W, pos.y), { w: r.width, h: r.height });
   }
+
+  // sizeStage превращает канвас в «стейдж» с запасом вокруг вьюпорта: камера
+  // применяется CSS-трансформой и выполняется композитором GPU, сцена не
+  // перерисовывается при пане. Запас m = большая сторона контейнера.
+  function sizeStage(svg) {
+    const r = wrapEl().getBoundingClientRect();
+    state.stageM = Math.ceil(Math.max(r.width, r.height));
+    const s = svg.style;
+    s.position = "absolute";
+    s.left = `${-state.stageM}px`;
+    s.top = `${-state.stageM}px`;
+    s.width = `${Math.round(r.width) + 2 * state.stageM}px`;
+    s.height = `${Math.round(r.height) + 2 * state.stageM}px`;
+    s.transformOrigin = "0 0";
+  }
+
+  // applyCamera выносит камеру в CSS-трансформу стейджа (композиторский слой)
+  function applyCamera() {
+    svgEl().style.transform = Camera.stageTransform(state.camera, state.origin, state.stageM);
+  }
+
+  // worldBounds — bbox всей сцены в мировых координатах; null без раскладки
+  function worldBounds() {
+    const b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    const grow = (p, w, h) => {
+      if (!p) return;
+      b.minX = Math.min(b.minX, p.x); b.minY = Math.min(b.minY, p.y);
+      b.maxX = Math.max(b.maxX, p.x + w); b.maxY = Math.max(b.maxY, p.y + h);
+    };
+    state.topology.devices.forEach((d) => grow(state.layout.devices[d.name], DEVICE_W, DEVICE_H));
+    state.topology.networks.forEach((n) => grow(state.layout.networks[n.name], NET_W, NET_H));
+    return b.minX === Infinity ? null : b;
+  }
+
+  // fitOrigin подбирает смещение сцены на стейдже так, что весь мир (с
+  // запасом WORLD_PAD) лежит в пределах канвы; точка отсчёта — вид камеры,
+  // поэтому при дрейфе камеры origin следует за ней, не обрезая мир.
+  function fitOrigin() {
+    const tx = Math.round(state.camera.x / state.camera.z);
+    const ty = Math.round(state.camera.y / state.camera.z);
+    const b = worldBounds();
+    if (!b) return { x: tx, y: ty };
+    const r = wrapEl().getBoundingClientRect();
+    const axis = (t, minV, maxV, view) => {
+      const span = Math.round(view) + 2 * state.stageM;
+      const lo = WORLD_PAD - minV;
+      const hi = span - WORLD_PAD - maxV;
+      if (lo > hi) return Math.round((lo + hi) / 2);
+      return Math.min(Math.max(t, lo), hi);
+    };
+    return {
+      x: axis(tx, b.minX, b.maxX, r.width),
+      y: axis(ty, b.minY, b.maxY, r.height),
+    };
+  }
+
+  // rebase перецентрирует сцену одной перерисовкой по окончании жеста
+  function rebase() {
+    const next = fitOrigin();
+    if (next.x === state.origin.x && next.y === state.origin.y) return;
+    renderMap();
+  }
+  let rebaseTimer = 0;
+  const scheduleRebase = () => {
+    clearTimeout(rebaseTimer);
+    rebaseTimer = setTimeout(rebase, 400);
+  };
 
   function renderMap() {
     TopoScene.ensureLayout(state.topology, state.layout);
     const svg = svgEl();
     svg.innerHTML = "";
-    viewportG = el("g", { class: "viewport", transform: Camera.transform(state.camera) });
+    if (!state.stageM) sizeStage(svg);
+    state.origin = fitOrigin();
+    const viewportG = el("g", { class: "viewport", transform: `translate(${state.origin.x} ${state.origin.y})` });
     svg.append(viewportG);
+    applyCamera();
     const flow = expandFlow(state.result, state.topology);
     TopoScene.render(viewportG, state, {
       dim: pathDim(flow && flow.hl),
@@ -266,15 +359,34 @@ const Simulate = (() => {
       card.append(chain);
       path.routers.forEach((rv) => {
         const row = document.createElement("details");
+        row.className = "sim-verdict";
         const sum = document.createElement("summary");
         const b = document.createElement("span");
         b.className = "badge " + badgeClass(rv.action);
         b.textContent = badgeLabel(rv.action, true);
         sum.append(b, Object.assign(document.createElement("span"), { textContent: ` ${rv.router}` }));
+        // шеврон вместо убранного display:flex нативного маркера summary
+        const chev = document.createElement("span");
+        chev.className = "sim-chevron";
+        chev.innerHTML =
+          '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" ' +
+          'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
+        sum.append(chev);
         row.append(sum);
-        const body = document.createElement("p");
-        body.textContent = rv.reason + (rv.matchedRule ? ` (правило: ${rv.matchedRule})` : "");
-        row.append(body);
+        if (rv.steps && rv.steps.length) {
+          const ol = document.createElement("ol");
+          ol.className = "sim-steps";
+          rv.steps.forEach((s) => {
+            const li = document.createElement("li");
+            li.textContent = s;
+            ol.append(li);
+          });
+          row.append(ol);
+        } else {
+          const body = document.createElement("p");
+          body.textContent = rv.reason + (rv.matchedRule ? ` (правило: ${rv.matchedRule})` : "");
+          row.append(body);
+        }
         card.append(row);
       });
       host.append(card);
@@ -300,12 +412,19 @@ const Simulate = (() => {
   function setupCamera() {
     // Карта read-only: камера служит только осмотру пути и не сохраняется
     // в /api/layout, чтобы не перезаписывать раскладку редактора топологии.
-    CameraControls.wire(svgEl(), {
+    // Кнопки пана — как в редакторе: средняя и правая; левая остаётся кликам
+    // (состав сети), нативное меню ПКМ гасится внутри CameraControls.
+    const svg = svgEl();
+    CameraControls.wire(svg, {
       getCam: () => state.camera,
       setCam: (c) => {
         state.camera = c;
-        if (viewportG) viewportG.setAttribute("transform", Camera.transform(c));
+        applyCamera();
       },
+      buttons: [1, 2],
+      rectEl: wrapEl(),
+      onChange: scheduleRebase,
+      onDragEnd: rebase,
     });
   }
 

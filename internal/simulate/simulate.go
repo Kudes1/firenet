@@ -46,6 +46,7 @@ type RouterVerdict struct {
 	Action      rules.Action `json:"action"`
 	MatchedRule string       `json:"matchedRule,omitempty"`
 	Reason      string       `json:"reason"`
+	Steps       []string     `json:"steps,omitempty"`
 }
 
 // ResolveIP maps an address to the declared entity it belongs to: the first
@@ -179,9 +180,8 @@ func verdict(rs compiler.DeviceRuleset, flow Flow, router string) RouterVerdict 
 			} else {
 				parts = append(parts, "нет подходящих правил")
 			}
-			reason := strings.Join(parts, "; ")
 			return RouterVerdict{Router: router, Action: rules.ActionReturn,
-				MatchedRule: matchedComment(last), Reason: reason + " — цепочка " + cur.name + " возвращает трафик в FORWARD"}
+				MatchedRule: matchedComment(last), Reason: strings.Join(parts, "; ") + " — цепочка " + cur.name + " возвращает трафик в FORWARD", Steps: parts}
 		default:
 			parts := append([]string(nil), trail...)
 			if m != nil {
@@ -189,8 +189,7 @@ func verdict(rs compiler.DeviceRuleset, flow Flow, router string) RouterVerdict 
 			} else {
 				parts = append(parts, fmt.Sprintf("нет подходящих правил — применяется действие по умолчанию %q цепочки %s", act, cur.name))
 			}
-			reason := strings.Join(parts, "; ")
-			return RouterVerdict{Router: router, Action: act, MatchedRule: matchedComment(last), Reason: reason}
+			return RouterVerdict{Router: router, Action: act, MatchedRule: matchedComment(last), Reason: strings.Join(parts, "; "), Steps: parts}
 		}
 	}
 	// недостижимо: валидация исключает циклы, терминальные действия завершают обход

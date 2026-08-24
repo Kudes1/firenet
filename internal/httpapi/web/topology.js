@@ -21,6 +21,9 @@ const Topology = (() => {
   let viewportG = null;
   let previewWire = null;
   let popoverCreate = null; // callback awaiting a name from the popover
+  let popoverWorld = null; // world point the open popover is anchored to
+  let ctxPending = null; // {items, at}: node menu awaiting a clean right-release
+  let camControls = null; // CameraControls handle (isRightDown)
 
   // поиск по канвасу: подсветка совпавших узлов, приглушение остальных,
   // камера центрируется на активном совпадении
@@ -40,6 +43,7 @@ const Topology = (() => {
 
   function applyCamera() {
     if (viewportG) viewportG.setAttribute("transform", Camera.transform(State.camera));
+    movePopover();
   }
 
   function ensureLayout() {
@@ -69,15 +73,19 @@ const Topology = (() => {
   }
 
   // setupCamera wires wheel zoom (anchored at the cursor) and pan by
-  // middle-button drag via the shared CameraControls; both persist through
-  // the debounced layout save. Left button stays free for selection and
-  // node dragging.
+  // middle/right-button drag via the shared CameraControls; both persist
+  // through the debounced layout save. Left button stays free for selection
+  // and node dragging.
   function setupCamera() {
-    CameraControls.wire(canvas(), {
+    camControls = CameraControls.wire(canvas(), {
       getCam: () => State.camera,
       setCam: (c) => { State.camera = c; applyCamera(); },
-      buttons: [1],
+      buttons: [1, 2],
       onChange: scheduleLayoutSave,
+      onDragEnd: (moved, button) => {
+        if (button === 2 && !moved && ctxPending) showContextMenu(ctxPending.at, ctxPending.items);
+        ctxPending = null;
+      },
     });
   }
 
@@ -132,7 +140,10 @@ const Topology = (() => {
   }
 
   // contextDelete wires right-click on a node element to a menu with the
-  // delete action plus union assignment items.
+  // delete action plus union assignment items. The menu opens on a clean
+  // right-click; a right-drag (camera pan) suppresses it. Platforms differ
+  // in when contextmenu fires: Linux at right-press (button still down,
+  // defer), Windows/macOS after release (open immediately).
   function contextDelete(elem, obj, label, kind) {
     elem.addEventListener("contextmenu", (e) => {
       if (State.tool !== "select") return;
@@ -159,7 +170,9 @@ const Topology = (() => {
         deleteSelection();
         scheduleLayoutSave();
       }, "danger"]);
-      showContextMenu(screenPoint(e), items);
+      const at = screenPoint(e);
+      if (camControls && camControls.isRightDown()) ctxPending = { items, at };
+      else showContextMenu(at, items);
     });
   }
 
@@ -314,20 +327,32 @@ const Topology = (() => {
 
   // openNodePopover shows the inline naming form at a screen point; the
   // node is created at the popover click's world position. The box is
-  // clamped into the canvas so it never opens out of view near the edges.
+  // clamped into the canvas so it never opens out of view near the edges,
+  // and it stays anchored to that world point while the camera moves.
   function openNodePopover(at, kind) {
     const box = document.getElementById("node-popover");
     const MARGIN = 8;
+    const clamp = (v, max) => Math.min(Math.max(v, MARGIN), Math.max(MARGIN, max));
+    box.hidden = false;
+    // measure only once visible: a hidden box has zero offsetWidth/Height
     const w = box.offsetWidth || 240;
     const h = box.offsetHeight || 48;
     const r = canvas().getBoundingClientRect();
-    const clamp = (v, max) => Math.min(Math.max(v, MARGIN), Math.max(MARGIN, max));
-    box.hidden = false;
     box.style.left = clamp(at.x, r.width - w - MARGIN) + "px";
     box.style.top = clamp(at.y, r.height - h - MARGIN) + "px";
     document.getElementById("node-kind-select").hidden = kind !== "device";
     document.getElementById("node-name-input").focus();
-    popoverCreate = (name) => createNode(kind, name, toWorld(at));
+    popoverWorld = toWorld(at);
+    popoverCreate = (name) => createNode(kind, name, popoverWorld);
+  }
+
+  // movePopover repositions the open popover to its anchored world point
+  function movePopover() {
+    if (!popoverWorld) return;
+    const p = Camera.worldToScreen(State.camera, popoverWorld.x, popoverWorld.y);
+    const box = document.getElementById("node-popover");
+    box.style.left = p.x + "px";
+    box.style.top = p.y + "px";
   }
 
   function hidePopover() {
@@ -336,6 +361,7 @@ const Topology = (() => {
     box.hidden = true;
     document.getElementById("node-name-form").reset();
     popoverCreate = null;
+    popoverWorld = null;
   }
 
   function setupPopover() {

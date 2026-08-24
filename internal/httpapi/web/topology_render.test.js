@@ -123,7 +123,7 @@ const deviceRects = (canvas) =>
 function fire(target, type, ev) {
   ev.type = type;
   ev.target = target;
-  ev.preventDefault ||= () => {};
+  ev.preventDefault ||= () => { ev.defaultPrevented = true; };
   ev.stopPropagation ||= () => {};
   (target.listeners[type] || []).forEach((fn) => fn(ev));
 }
@@ -421,12 +421,64 @@ test("context menu deletes a node", async () => {
   const { canvas, doc, ids } = bootTopology(responses);
   await tick();
   fire(deviceRects(canvas)[0], "contextmenu", { clientX: 60, clientY: 60 });
-  const menu = ids["topo-context-menu"];
+  const menu = doc.getElementById("topo-context-menu");
   assert.ok(menu && !menu.hidden, "menu shown");
   const del = menu.children.find((b) => String(b._text || "").startsWith("Удалить"));
   assert.ok(del, "delete item present");
   del.onclick({ stopPropagation() {} });
   assert.ok(!texts(canvas).includes("r1 (router)"), "r1 removed");
+});
+
+test("right-button drag pans the camera", async () => {
+  const { canvas, doc } = bootTopology({
+    ...responses,
+    "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 1 } },
+  });
+  await tick();
+  fire(canvas, "mousedown", { button: 2, clientX: 100, clientY: 100 });
+  fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  fire(doc, "mouseup", { button: 2 });
+  assert.equal(viewport(canvas).attrs.transform, "translate(60 30) scale(1)");
+});
+
+test("clean right-click on a node opens its menu after release", async () => {
+  const { canvas, doc, ids } = bootTopology(responses);
+  await tick();
+  const menu = doc.getElementById("topo-context-menu");
+  menu.hidden = true; // as shipped in topology.html
+  // press-order platforms (Linux): contextmenu fires while RMB is still held
+  fire(canvas, "mousedown", { button: 2, clientX: 60, clientY: 60 });
+  fire(deviceRects(canvas)[0], "contextmenu", { clientX: 60, clientY: 60 });
+  assert.ok(menu.hidden, "menu waits for a clean release");
+  fire(doc, "mouseup", { button: 2 });
+  assert.ok(!menu.hidden, "menu shown on clean right-click");
+  const del = menu.children.find((b) => String(b._text || "").startsWith("Удалить"));
+  assert.ok(del, "delete item present");
+});
+
+test("right-button drag does not open the node menu", async () => {
+  const { canvas, doc, ids } = bootTopology(responses);
+  await tick();
+  const menu = doc.getElementById("topo-context-menu");
+  menu.hidden = true; // as shipped in topology.html
+  fire(canvas, "mousedown", { button: 2, clientX: 60, clientY: 60 });
+  fire(deviceRects(canvas)[0], "contextmenu", { clientX: 60, clientY: 60 });
+  fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  fire(doc, "mouseup", { button: 2 });
+  assert.ok(menu.hidden, "no menu after a drag");
+});
+
+test("native context menu is suppressed on the canvas", async () => {
+  const { canvas } = bootTopology(responses);
+  await tick();
+  // right-click on the empty background: no native browser menu
+  const bg = {};
+  fire(canvas, "contextmenu", bg);
+  assert.ok(bg.defaultPrevented, "background contextmenu prevented");
+  // ...and on a node (its own menu replaces the native one)
+  const onNode = {};
+  fire(deviceRects(canvas)[0], "contextmenu", onNode);
+  assert.ok(onNode.defaultPrevented, "node contextmenu prevented");
 });
 
 test("keyboard shortcuts switch tools", async () => {
@@ -453,6 +505,39 @@ test("popover stays inside the canvas near the edges", async () => {
   fire(canvas, "click", { clientX: 300, clientY: 200 });
   assert.equal(pop.style.left, "300px");
   assert.equal(pop.style.top, "200px");
+});
+
+test("popover clamp measures real size after unhide", async () => {
+  const { canvas, ids } = bootTopology(responses);
+  await tick();
+  fire(ids["tool-device"], "click", {});
+  const pop = ids["node-popover"];
+  pop.hidden = true;
+  // like a real browser: a hidden element measures 0; the device form
+  // (input + select + OK) is wider than the old 240px fallback
+  Object.defineProperty(pop, "offsetWidth", { get() { return this.hidden ? 0 : 300; } });
+  Object.defineProperty(pop, "offsetHeight", { get() { return this.hidden ? 0 : 60; } });
+  fire(canvas, "click", { clientX: 1180, clientY: 780 });
+  assert.equal(pop.style.left, "892px", "right edge pulled inside (1200-300-8)");
+  assert.equal(pop.style.top, "732px", "bottom edge pulled inside (800-60-8)");
+});
+
+test("popover follows camera panning like the scene", async () => {
+  const { canvas, doc, ids } = bootTopology({
+    ...responses,
+    "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 1 } },
+  });
+  await tick();
+  fire(ids["tool-device"], "click", {});
+  fire(canvas, "click", { clientX: 300, clientY: 200 });
+  const pop = ids["node-popover"];
+  assert.equal(pop.style.left, "300px");
+  assert.equal(pop.style.top, "200px");
+  fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
+  fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  fire(doc, "mouseup", {});
+  assert.equal(pop.style.left, "360px", "popover shifted with the pan (+60)");
+  assert.equal(pop.style.top, "230px", "popover shifted with the pan (+30)");
 });
 
 test("popover cancels on Escape", async () => {
@@ -633,14 +718,14 @@ test("no union frames when topology has none", async () => {
 // --- union assignment via the context menu ---
 
 test("context menu assigns a node to a union and removes it back", async () => {
-  const { canvas, ids, get } = bootTopology({
+  const { canvas, doc, ids, get } = bootTopology({
     ...responses,
     "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: [] }] },
   });
   await tick();
   const rect = deviceRects(canvas)[0]; // r1
   fire(rect, "contextmenu", { clientX: 60, clientY: 60 });
-  const menu = ids["topo-context-menu"];
+  const menu = doc.getElementById("topo-context-menu");
   const assign = find(menu, (b) => String(b._text || "").includes("office"));
   assert.ok(assign, "assign item listed in the union submenu");
   assign.onclick({ stopPropagation() {} });
@@ -674,13 +759,13 @@ test("union submenu lists locations and shows a placeholder when none are availa
 });
 
 test("context menu keeps union items above the danger delete item", async () => {
-  const { canvas, ids } = bootTopology({
+  const { canvas, doc, ids } = bootTopology({
     ...responses,
     "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: [] }] },
   });
   await tick();
   fire(deviceRects(canvas)[0], "contextmenu", { clientX: 60, clientY: 60 });
-  const menu = ids["topo-context-menu"];
+  const menu = doc.getElementById("topo-context-menu");
   const buttons = menu.children.map((c) => (c.tag === "div" ? c.children[0] : c));
   assert.ok(String(buttons[0]._text).includes("Добавить в объединение"), "union submenu first");
   assert.ok(!buttons[0].disabled, "submenu button is enabled");

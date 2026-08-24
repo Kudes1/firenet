@@ -5,6 +5,8 @@ package graph
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/kudes1/firenet/internal/topology"
 )
@@ -31,7 +33,10 @@ type Node struct {
 
 func RouterNode(name string) Node { return Node{Kind: NodeRouter, Name: name} }
 func SubnetNode(name string) Node { return Node{Kind: NodeSubnet, Name: name} }
-func domainNode(id int) Node      { return Node{Kind: NodeDomain, Name: fmt.Sprintf("l2-%d", id)} }
+
+// A domain's display name is the sorted list of its member switches joined
+// by "+", so a single-switch domain is just called by its switch's name.
+func domainNode(name string) Node { return Node{Kind: NodeDomain, Name: name} }
 
 func (n Node) String() string {
 	switch n.Kind {
@@ -124,17 +129,17 @@ func Build(topo *topology.Topology) (*Graph, error) {
 
 	domainOf := assignL2Domains(topo, switchLinks)
 
-	domainPoints := make(map[int][]attachPoint)
+	domainPoints := make(map[string][]attachPoint)
 	for _, l := range topo.Links {
 		aIsSwitch := topo.Devices[l.A.Device].Kind == topology.DeviceSwitch
 		bIsSwitch := topo.Devices[l.B.Device].Kind == topology.DeviceSwitch
 		switch {
 		case aIsSwitch && !bIsSwitch:
-			id := domainOf[l.A.Device]
-			domainPoints[id] = append(domainPoints[id], attachPoint{node: RouterNode(l.B.Device)})
+			name := domainOf[l.A.Device]
+			domainPoints[name] = append(domainPoints[name], attachPoint{node: RouterNode(l.B.Device)})
 		case bIsSwitch && !aIsSwitch:
-			id := domainOf[l.B.Device]
-			domainPoints[id] = append(domainPoints[id], attachPoint{node: RouterNode(l.A.Device)})
+			name := domainOf[l.B.Device]
+			domainPoints[name] = append(domainPoints[name], attachPoint{node: RouterNode(l.A.Device)})
 		}
 	}
 
@@ -146,8 +151,8 @@ func Build(topo *topology.Topology) (*Graph, error) {
 			for _, sname := range n.Subnets {
 				switch dev.Kind {
 				case topology.DeviceSwitch:
-					id := domainOf[ref.Device]
-					domainPoints[id] = append(domainPoints[id], attachPoint{node: SubnetNode(sname)})
+					name := domainOf[ref.Device]
+					domainPoints[name] = append(domainPoints[name], attachPoint{node: SubnetNode(sname)})
 				case topology.DeviceRouter:
 					g.addUndirected(RouterNode(ref.Device), SubnetNode(sname))
 				}
@@ -155,11 +160,11 @@ func Build(topo *topology.Topology) (*Graph, error) {
 		}
 	}
 
-	for id, points := range domainPoints {
+	for name, points := range domainPoints {
 		if len(points) < 2 {
 			continue // nothing on the other side of this switch to reach
 		}
-		bus := domainNode(id)
+		bus := domainNode(name)
 		for _, p := range points {
 			g.addUndirected(p.node, bus)
 		}
@@ -171,35 +176,42 @@ func Build(topo *topology.Topology) (*Graph, error) {
 // assignL2Domains groups switch devices into connected components (L2
 // domains) via switch-to-switch links. Every switch gets a domain, even one
 // with no switch-switch links of its own (a lone switch is its own domain).
-func assignL2Domains(topo *topology.Topology, switchLinks []topology.Link) map[string]int {
+// Each domain is named after its member switches (sorted, "+"-joined), which
+// also makes the assignment deterministic.
+func assignL2Domains(topo *topology.Topology, switchLinks []topology.Link) map[string]string {
 	adj := make(map[string][]string)
 	for _, l := range switchLinks {
 		adj[l.A.Device] = append(adj[l.A.Device], l.B.Device)
 		adj[l.B.Device] = append(adj[l.B.Device], l.A.Device)
 	}
 
-	domainOf := make(map[string]int)
-	nextID := 0
+	switches := make([]string, 0, len(topo.Devices))
 	for name, d := range topo.Devices {
-		if d.Kind != topology.DeviceSwitch {
-			continue
+		if d.Kind == topology.DeviceSwitch {
+			switches = append(switches, name)
 		}
+	}
+	sort.Strings(switches)
+
+	domainOf := make(map[string]string)
+	for _, name := range switches {
 		if _, ok := domainOf[name]; ok {
 			continue
 		}
-		id := nextID
-		nextID++
-		queue := []string{name}
-		domainOf[name] = id
-		for len(queue) > 0 {
-			cur := queue[0]
-			queue = queue[1:]
-			for _, nb := range adj[cur] {
+		members := []string{name}
+		domainOf[name] = ""
+		for i := 0; i < len(members); i++ {
+			for _, nb := range adj[members[i]] {
 				if _, ok := domainOf[nb]; !ok {
-					domainOf[nb] = id
-					queue = append(queue, nb)
+					domainOf[nb] = ""
+					members = append(members, nb)
 				}
 			}
+		}
+		sort.Strings(members)
+		label := strings.Join(members, "+")
+		for _, m := range members {
+			domainOf[m] = label
 		}
 	}
 	return domainOf

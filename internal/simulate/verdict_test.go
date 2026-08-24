@@ -55,6 +55,32 @@ func TestVerdictJumpReturnsBack(t *testing.T) {
 	}
 }
 
+func TestVerdictStepsTraceChainWalk(t *testing.T) {
+	rs := compiler.DeviceRuleset{
+		Device: "r1",
+		Chains: []compiler.CompiledChain{
+			{Name: "FWD", Primary: true, Position: rules.ChainTop, Default: rules.ActionAllow},
+			{Name: "SUB", Default: rules.ActionDeny},
+		},
+		Rules: []compiler.CompiledRule{
+			{Chain: "FWD", Comment: "to-sub", Action: rules.ActionJump, JumpTo: "SUB"},
+		},
+	}
+	v := verdict(rs, Flow{Src: srcIP, Dst: dstIP}, "r1")
+	if len(v.Steps) != 2 {
+		t.Fatalf("want 2 steps (jump + terminal rule), got %d: %q", len(v.Steps), v.Steps)
+	}
+	if !strings.Contains(v.Steps[0], "to-sub") || !strings.Contains(v.Steps[0], "SUB") {
+		t.Fatalf("step 0 must describe the jump: %q", v.Steps[0])
+	}
+	if !strings.Contains(v.Steps[1], "нет подходящих правил") || !strings.Contains(v.Steps[1], "SUB") {
+		t.Fatalf("step 1 must describe the chain default: %q", v.Steps[1])
+	}
+	if v.Reason != strings.Join(v.Steps, "; ") {
+		t.Fatalf("reason must stay the joined steps: %q vs %q", v.Reason, strings.Join(v.Steps, "; "))
+	}
+}
+
 func TestVerdictNoChainsPassesThrough(t *testing.T) {
 	v := verdict(compiler.DeviceRuleset{}, Flow{Src: netip.MustParseAddr("10.0.0.5"), Dst: netip.MustParseAddr("10.0.1.7")}, "ghost")
 	if v.Action != rules.ActionAllow {
