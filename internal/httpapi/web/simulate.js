@@ -4,7 +4,7 @@
 // симуляции трафика (POST /api/simulate). Карта только для чтения:
 // перетаскивание узлов и правка — на /ui/topology.
 const Simulate = (() => {
-  const { el } = NetMap;
+  const { el, NET_W } = NetMap;
   const state = { topology: null, subnets: [], layout: null, camera: Camera.create(), result: null };
 
   const svgEl = () => document.getElementById("sim-canvas");
@@ -44,18 +44,19 @@ const Simulate = (() => {
     return null;
   }
 
+  // узел отчёта без близнеца на карте (l2-bus) даёт null и просто пропускается
+  const anchorOf = (topology) => (n) => n.kind === 0 ? n.name
+    : (topology.networks.find((w) => (w.subnets || []).includes(n.name)) || {}).name || null;
+
   // expandHighlight переводит путь отчёта в имена элементов карты. Узлы
   // отчёта — подсети, роутеры и синтетические l2-bus, поэтому каждая пара
   // соседей приводится к якорю карты (роутер или сеть по членству подсети),
   // а стыки соединяются кратчайшей физической цепочкой устройств через
   // свитчи; всё это попадает в результирующий набор.
-  const queue = [];
   function expandHighlight(report, topology) {
     if (!report || !report.paths.length) return null;
     const adj = buildAdj(topology);
-    // узел без близнеца на карте (l2-bus) даёт null и просто пропускается
-    const anchor = (n) => n.kind === 0 ? n.name
-      : (topology.networks.find((w) => (w.subnets || []).includes(n.name)) || {}).name || null;
+    const anchor = anchorOf(topology);
     const hl = new Set();
     report.paths.forEach((p) => {
       // l2-bus не имеет близнеца на карте; стыки ищем по соседним якорям
@@ -70,6 +71,54 @@ const Simulate = (() => {
     return hl;
   }
 
+  // expandFlow делит маршрут на пройденную и непройденную части по вердиктам
+  // роутеров: ok — элементы карты до точки срабатывания запрета (включая
+  // сети-концы разрешённых маршрутов), deny — карта «роутер → {rule, reason}»
+  // для точек запрета, hl — весь путь целиком (для приглушения остального).
+  // Запрет сильнее разрешения: элемент с deny-вердиктом и всё за ним на
+  // запрещённом маршруте никогда не попадают в ok.
+  function expandFlow(report, topology) {
+    const hl = expandHighlight(report, topology);
+    if (!hl) return null;
+    const adj = buildAdj(topology);
+    const anchor = anchorOf(topology);
+    const ok = new Set();
+    const deny = new Map();
+    const blocked = new Set();
+    report.paths.forEach((p) => {
+      const anchors = p.nodes.map(anchor).filter(Boolean);
+      const di = p.routers.findIndex((rv) => rv.action === "deny");
+      const cut = di >= 0 ? anchors.indexOf(p.routers[di].router) : anchors.length;
+      if (cut < 0) return; // запрет вне якорей карты — маршрут не размечаем
+      const rv = di >= 0 ? p.routers[di] : null;
+      for (let i = 0; i + 1 < anchors.length; i++) {
+        if (anchors[i] === anchors[i + 1]) continue;
+        const seg = shortestPath(adj, anchors[i], anchors[i + 1]);
+        if (!seg) continue;
+        if (rv && i + 1 > cut) { seg.forEach((x) => blocked.add(x)); continue; }
+        const stopped = rv && i + 1 === cut;
+        seg.slice(0, stopped ? -1 : seg.length).forEach((x) => ok.add(x));
+        if (stopped) deny.set(seg[seg.length - 1], { rule: rv.matchedRule || "", reason: rv.reason || "" });
+      }
+    });
+    deny.forEach((_, n) => ok.delete(n)); // запрет сильнее разрешения
+    blocked.forEach((n) => ok.delete(n));
+    return { hl, ok, deny };
+  }
+
+  // flowMark возвращает mark(obj) для TopoScene: класс движения трафика
+  // элемента карты — deny-точка краснее пройденного зелёного, непройденные
+  // элементы без метки (остаются приглушёнными).
+  const flowMark = (flow) => (obj) => {
+    if (!flow) return "";
+    const names = obj.type === "attach" ? [obj.net.name, obj.device]
+      : obj.a ? [obj.a.device, obj.b.device]
+      : [obj.name];
+    if (names.some((n) => flow.deny.has(n))) return "sim-flow-deny";
+    if (names.every((n) => flow.ok.has(n))) return "sim-flow-ok";
+    return "";
+  };
+
   // pathDim приглушает всё, что не принадлежит подсвеченному пути:
   // узлы и сети — по имени, связи — по паре устройств, привязки — по
   // паре «сеть–устройство».
@@ -81,13 +130,35 @@ const Simulate = (() => {
     return !names.every((n) => hl.has(n));
   };
 
+  // showNetInfo открывает окно состава сети у правого края её облака.
+  function showNetInfo(n) {
+    const pos = state.layout.networks[n.name];
+    if (!pos) return;
+    const r = svgEl().getBoundingClientRect();
+    NetInfo.show(n, state.subnets, Camera.worldToScreen(state.camera, pos.x + NET_W, pos.y), { w: r.width, h: r.height });
+  }
+
   function renderMap() {
     TopoScene.ensureLayout(state.topology, state.layout);
     const svg = svgEl();
     svg.innerHTML = "";
     viewportG = el("g", { class: "viewport", transform: Camera.transform(state.camera) });
     svg.append(viewportG);
-    TopoScene.render(viewportG, state, { dim: pathDim(expandHighlight(state.result, state.topology)) });
+    const flow = expandFlow(state.result, state.topology);
+    TopoScene.render(viewportG, state, {
+      dim: pathDim(flow && flow.hl),
+      mark: flowMark(flow),
+      hook: (kind, elem, obj) => {
+        if (kind === "network") elem.onclick = () => showNetInfo(obj);
+        if (kind === "device" && flow && flow.deny.has(obj.name)) {
+          // нативный SVG-тултип с точкой срабатывания запрета
+          const info = flow.deny.get(obj.name);
+          const t = document.createElementNS(NetMap.SVG_NS, "title");
+          t.textContent = (info.rule ? `правило ${info.rule}: ` : "") + info.reason;
+          elem.append(t);
+        }
+      },
+    });
   }
 
   // — перетаскиваемый разделитель «форма ↔ карта» —
@@ -251,6 +322,7 @@ const Simulate = (() => {
         : Camera.create();
       renderMap();
       setupCamera();
+      NetInfo.attach(svgEl());
     } catch (e) {
       showBanner("Не удалось загрузить топологию: " + e.message);
     }
@@ -258,7 +330,7 @@ const Simulate = (() => {
     document.getElementById("sim-form").addEventListener("submit", run);
   }
 
-  return { boot, renderReport, run, state, expandHighlight, clampFormWidth };
+  return { boot, renderReport, run, state, expandHighlight, expandFlow, flowMark, clampFormWidth };
 })();
 
 if (document.readyState === "loading") {

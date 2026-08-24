@@ -85,6 +85,81 @@ func (a *deviceAccum) addRule(r CompiledRule) {
 	a.rules = append(a.rules, r)
 }
 
+// forwardReachableChains returns the chain names a packet entering FORWARD
+// can traverse on this device: the primary chain plus everything its jump
+// rules descend into.
+func forwardReachableChains(rs []CompiledRule, primary string) map[string]bool {
+	reach := map[string]bool{primary: true}
+	for changed := true; changed; {
+		changed = false
+		for _, r := range rs {
+			if reach[r.Chain] && r.JumpTo != "" && !reach[r.JumpTo] {
+				reach[r.JumpTo] = true
+				changed = true
+			}
+		}
+	}
+	return reach
+}
+
+// keepReachable drops rules of chains FORWARD cannot reach here. A device
+// left without rules must be omitted entirely: emitting an empty primary
+// chain wired into FORWARD would blackhole traffic this device should never
+// have touched.
+func (a *deviceAccum) keepReachable(reach map[string]bool) {
+	kept := a.rules[:0]
+	for _, r := range a.rules {
+		if reach[r.Chain] {
+			kept = append(kept, r)
+		}
+	}
+	a.rules = kept
+}
+
+// pruneJumps drops jump rules whose target chain has no rules on this
+// device, repeating until stable so nested jumps unwind too. Such a jump
+// would evaluate transit traffic against an empty chain and hand it the
+// chain's default action — changing policy for flows none of the chain's
+// rules were written for.
+func (a *deviceAccum) pruneJumps() {
+	for {
+		content := make(map[string]bool)
+		for _, r := range a.rules {
+			content[r.Chain] = true
+		}
+		kept := a.rules[:0]
+		removed := false
+		for _, r := range a.rules {
+			if r.JumpTo != "" && !content[r.JumpTo] {
+				removed = true
+				continue
+			}
+			kept = append(kept, r)
+		}
+		a.rules = kept
+		if !removed {
+			return
+		}
+	}
+}
+
+// pruneIPSets drops ipset references no surviving rule uses anymore (e.g.
+// left behind by pruneJumps).
+func (a *deviceAccum) pruneIPSets() {
+	used := make(map[string]bool)
+	for _, r := range a.rules {
+		used[r.SrcSet] = true
+		used[r.DstSet] = true
+	}
+	out := a.ips[:0]
+	for _, s := range a.ips {
+		if used[s.Name] {
+			out = append(out, s)
+		}
+	}
+	a.ips = out
+}
+
 func ruleKey(r CompiledRule) string {
 	return fmt.Sprintf("%s|%s|%s|%s|%s|%s|%v|%v|%s|%s", r.Chain, r.SrcSet, r.DstSet, r.SrcAddr, r.DstAddr, r.Proto, r.SrcPorts, r.DstPorts, r.Action, r.JumpTo)
 }
@@ -174,6 +249,15 @@ func routerNames(topo *topology.Topology) []string {
 	return out
 }
 
+func subnetNames(topo *topology.Topology) []string {
+	out := make([]string, 0, len(topo.Subnets))
+	for name := range topo.Subnets {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Compile resolves every rule's src/dst to subnets, finds the routers that
 // physically need each rule, and returns one ruleset per router that ended
 // up with at least one rule. Routers no rule ever placed on are omitted —
@@ -181,6 +265,7 @@ func routerNames(topo *topology.Topology) []string {
 // conntrack/default-action baseline every device would otherwise repeat.
 func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits graph.Limits) ([]DeviceRuleset, error) {
 	allRouters := routerNames(topo)
+	allSubnets := subnetNames(topo)
 	accum := make(map[string]*deviceAccum, len(allRouters))
 	for _, r := range allRouters {
 		accum[r] = &deviceAccum{}
@@ -227,16 +312,28 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 				}
 
 				var targets []string
-				if srcAny || dstAny || (srcLit != nil && len(srcSubnets) == 0) || (dstLit != nil && len(dstSubnets) == 0) {
-					// One side is unbounded (e.g. real external traffic beyond
-					// any declared subnet) — pathfinding can't tell which
-					// routers are relevant, so place on all of them. This is
+				if (srcAny && dstAny) ||
+					(!srcAny && srcLit != nil && len(srcSubnets) == 0) ||
+					(!dstAny && dstLit != nil && len(dstSubnets) == 0) {
+					// Both sides unbounded, or a literal outside every
+					// declared subnet: pathfinding can't tell which routers
+					// are relevant, so place on all of them. This is
 					// conservative: possibly a few extra devices, never a gap.
 					targets = allRouters
 				} else {
+					// A bounded side keeps its resolved subnets; an any-side
+					// expands to every declared subnet — the rule then places
+					// exactly where some real src→dst flow transits.
+					srcs, dsts := srcSubnets, dstSubnets
+					if srcAny {
+						srcs = allSubnets
+					}
+					if dstAny {
+						dsts = allSubnets
+					}
 					routerSet := make(map[string]struct{})
-					for _, s := range srcSubnets {
-						for _, d := range dstSubnets {
+					for _, s := range srcs {
+						for _, d := range dsts {
 							if s == d {
 								continue // intra-subnet traffic never transits a managed router
 							}
@@ -307,24 +404,22 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 		c := &pol.Chains[ci]
 		defaults[c.Name] = CompiledChain{Name: c.Name, Primary: ci == 0, Position: c.ChainPosition, Default: c.DefaultAction}
 	}
-	for _, name := range allRouters {
-		a := accum[name]
-		if len(a.rules) == 0 {
-			continue
-		}
-		a.ensureChain(pol.Chains[0].Name, defaults[pol.Chains[0].Name])
-		for _, r := range a.rules {
-			if r.JumpTo != "" {
-				a.ensureChain(r.JumpTo, defaults[r.JumpTo])
-			}
-		}
-	}
 
 	result := make([]DeviceRuleset, 0, len(allRouters))
 	for _, name := range allRouters {
 		a := accum[name]
+		a.pruneJumps()
+		a.pruneIPSets()
 		if len(a.rules) == 0 {
 			continue
+		}
+		reach := forwardReachableChains(a.rules, pol.Chains[0].Name)
+		a.keepReachable(reach)
+		if len(a.rules) == 0 {
+			continue
+		}
+		for n := range reach {
+			a.ensureChain(n, defaults[n])
 		}
 		sort.SliceStable(a.chains, func(i, j int) bool {
 			if a.chains[i].Primary != a.chains[j].Primary {

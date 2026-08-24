@@ -78,7 +78,7 @@ function bootTopology(responses) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  for (const f of ["common.js", "camera.js", "camera_input.js", "netmap.js", "topo_scene.js", "topology.js"]) {
+  for (const f of ["common.js", "camera.js", "camera_input.js", "netmap.js", "net_info.js", "topo_scene.js", "topology.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
@@ -357,6 +357,23 @@ test("click selects a node, background click clears selection", async () => {
   assert.equal(selectedRects(canvas).length, 0, "selection cleared");
 });
 
+test("clicking a network opens the subnet info window", async () => {
+  const { canvas, doc, ids } = bootTopology(responses);
+  await tick();
+  selectNode(doc, withClass(canvas, "subnet-rect")[0]);
+  assert.ok(!ids["net-info"].hidden, "info window opened");
+  const html = JSON.stringify(ids["net-info"]);
+  assert.match(html, /net1/, "window titled with the network name");
+  assert.match(html, /10\.0\.0\.0\/24/, "member CIDR listed");
+  // selecting a device instead closes the window
+  selectNode(doc, deviceRects(canvas)[0]);
+  assert.ok(ids["net-info"].hidden, "device selection hides the window");
+  // background click closes it too
+  selectNode(doc, withClass(canvas, "subnet-rect")[0]);
+  fire(canvas, "click", { clientX: 900, clientY: 700 });
+  assert.ok(ids["net-info"].hidden, "background click hides the window");
+});
+
 test("marquee selects all intersecting nodes", async () => {
   const { canvas, doc } = bootTopology(responses);
   await tick();
@@ -419,6 +436,23 @@ test("keyboard shortcuts switch tools", async () => {
   assert.equal(ids["tool-connect"].attrs.class, "tool active");
   fire(doc, "keydown", { key: "v" });
   assert.equal(ids["tool-select"].attrs.class, "tool active");
+});
+
+test("popover stays inside the canvas near the edges", async () => {
+  const { canvas, ids } = bootTopology(responses);
+  await tick();
+  fire(ids["tool-device"], "click", {});
+  // measured popover size (as offsetWidth/offsetHeight in a real browser)
+  const pop = ids["node-popover"];
+  pop.offsetWidth = 240;
+  pop.offsetHeight = 48;
+  fire(canvas, "click", { clientX: 1180, clientY: 780 });
+  assert.equal(pop.style.left, "952px", "right edge pulled inside (1200-240-8)");
+  assert.equal(pop.style.top, "744px", "bottom edge pulled inside (800-48-8)");
+  // an interior click keeps the popover at the cursor
+  fire(canvas, "click", { clientX: 300, clientY: 200 });
+  assert.equal(pop.style.left, "300px");
+  assert.equal(pop.style.top, "200px");
 });
 
 test("popover cancels on Escape", async () => {

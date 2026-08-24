@@ -1,22 +1,44 @@
-defaultAction: return
-chainPosition: top
-rules:
-    - name: test
-      comment: AI-55432
-      src:
-        - main
-      dst:
-        - mr-1
-      proto: tcp
-      dstPorts:
-        - "443"
-      action: allow
-      mirror: true
-    - name: main-to-office
-      src:
-        - main
-      dst:
-        - office-net
-      proto: any
-      action: allow
-      mirror: true
+chains:
+    - name: FIRENET-FWD
+      defaultAction: return
+      chainPosition: top
+      rules:
+        - name: UNTRUSTED
+          src:
+            - office-net
+          dst:
+            - any
+          proto: any
+          action: jump
+          jumpTo: UNTRUSTED
+        - name: test
+          comment: AI-55432
+          src:
+            - main
+          dst:
+            - mr-1
+          proto: tcp
+          dstPorts:
+            - "443"
+          action: allow
+          mirror: true
+        - name: main-to-office
+          src:
+            - main
+          dst:
+            - office-net
+          proto: any
+          action: allow
+          mirror: true
+    - name: UNTRUSTED
+      defaultAction: deny
+      rules:
+        - name: untrusted to market
+          src:
+            - 192.168.1.22/32
+          dst:
+            - mr-1
+          proto: tcp
+          dstPorts:
+            - "443"
+          action: allow

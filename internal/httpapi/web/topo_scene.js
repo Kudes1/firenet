@@ -84,15 +84,18 @@ const TopoScene = (() => {
 
   // render рисует сцену scene = { topology, subnets, layout } в viewportG.
   // opts:
-  //   classes(obj, part)   — суффикс класса оформления; part: "shape" для
-  //                          контура узла, "inner" для подписей и глифов;
-  //   dim(obj)             — true, если элемент рисуется приглушённым;
+//   classes(obj, part)   — суффикс класса оформления; part: "shape" для
+//                          контура узла, "inner" для подписей и глифов;
+//   mark(obj)            — класс состояния элемента (например, разметка
+//                          движения трафика на карте симуляции);
+//   dim(obj)             — true, если элемент рисуется приглушённым;
   //   hook(kind, elem, obj)— интерактив страницы; kind: "device",
   //                          "network", "wire", "attach". Без хука элементы
   //                          не получают кликовых двойников (read-only).
   function render(viewportG, scene, opts = {}) {
     const { topology, subnets, layout } = scene;
     const classes = opts.classes || (() => "");
+    const marked = (obj) => (opts.mark ? ` ${opts.mark(obj)}` : "");
     const dimmed = (obj) => (opts.dim && opts.dim(obj) ? " sim-dim" : "");
     const deviceCenter = (name) => center(layout.devices, name, DEVICE_W, DEVICE_H);
     const netCenter = (name) => center(layout.networks, name, NET_W, NET_H);
@@ -120,7 +123,7 @@ const TopoScene = (() => {
       const mid = pointAt(pa, pb, 0.5, spreadOffset(offsets[i]));
       const d = `M ${pa.x} ${pa.y} Q ${mid.x} ${mid.y} ${pb.x} ${pb.y}`;
       const wire = el("path", {
-        class: "wire" + (l.filter ? " wire-filtered" : "") + classes(l, "shape") + dimmed(l), d, fill: "none",
+        class: "wire" + (l.filter ? " wire-filtered" : "") + classes(l, "shape") + marked(l) + dimmed(l), d, fill: "none",
       });
       viewportG.append(wire);
       if (l.filter) {
@@ -144,7 +147,7 @@ const TopoScene = (() => {
         if (!pa || !c) return;
         const coords = { x1: pa.x, y1: pa.y, x2: c.x, y2: c.y };
         const obj = { type: "attach", net: n, device: a.device };
-        viewportG.append(el("line", { class: "wire" + classes(obj, "shape") + dimmed(obj), ...coords }));
+        viewportG.append(el("line", { class: "wire" + classes(obj, "shape") + marked(obj) + dimmed(obj), ...coords }));
         if (opts.hook) {
           const hit = el("line", { class: "wire-hit", ...coords });
           opts.hook("attach", hit, obj);
@@ -158,7 +161,7 @@ const TopoScene = (() => {
       const pos = layout.devices[d.name];
       const kind = KINDS[d.kind] || { rx: 6 };
       const rect = el("rect", {
-        class: "node-rect " + d.kind + classes(d, "shape") + dimmed(d),
+        class: "node-rect " + d.kind + classes(d, "shape") + marked(d) + dimmed(d),
         x: pos.x, y: pos.y, width: DEVICE_W, height: DEVICE_H, rx: kind.rx,
       });
       if (opts.hook) opts.hook("device", rect, d);
@@ -179,7 +182,7 @@ const TopoScene = (() => {
     topology.networks.forEach((n) => {
       const pos = layout.networks[n.name];
       const shape = el("path", {
-        class: "subnet-rect" + classes(n, "shape") + dimmed(n),
+        class: "subnet-rect" + classes(n, "shape") + marked(n) + dimmed(n),
         d: cloudPath(pos.x, pos.y, NET_W, NET_H),
       });
       if (opts.hook) opts.hook("network", shape, n);

@@ -5,3 +5,5 @@ subnets:
       cidr: 192.168.1.0/24
     - name: mr-1
       cidr: 172.20.0.0/16
+    - name: server
+      cidr: 10.10.1.0/24

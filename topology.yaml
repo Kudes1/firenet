@@ -84,6 +84,7 @@ networks:
     - name: MAIN
       subnets:
         - main
+        - server
       attach:
         - device: core
     - name: MARKET

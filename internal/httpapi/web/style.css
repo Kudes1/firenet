@@ -338,7 +338,27 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 
 /* union frames (colors come as inline SVG attributes) */
 .union-frame { pointer-events: none; }
-.union-label { font-size: 12px; font-weight: 600; pointer-events: none; }
+.union-label { font-size: 12px; font-weight: 600; pointer-events: none; user-select: none; }
+
+/* floating network info window (subnet membership on network click) */
+.net-info {
+  position: absolute;
+  z-index: 10;
+  min-width: 12rem;
+  max-width: 18rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: var(--space-2);
+  pointer-events: none;
+}
+.net-info[hidden] { display: none; }
+.net-info-title { font-weight: 600; font-size: 0.88rem; margin-bottom: var(--space-1); }
+.net-info ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: 0.82rem; }
+.net-info li { display: flex; justify-content: space-between; gap: var(--space-2); }
+.net-info-cidr { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.net-info-empty { color: var(--muted); font-size: 0.82rem; }
 
 /* right-click menu */
 .context-menu {
@@ -878,5 +898,8 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .badge-return { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
 .badge-default { background: rgba(148, 163, 184, 0.2); color: inherit; }
 .sim-dim { opacity: 0.25; }
+.sim-flow-ok { stroke: #10b981; }
+.sim-flow-deny { stroke: #ef4444; }
+.sim-flow-deny.node-rect { stroke-width: 2.5; }
 .sim-unreachable { color: #ef4444; }
 .sim-note { opacity: 0.75; font-size: 0.85em; }

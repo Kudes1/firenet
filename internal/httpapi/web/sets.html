@@ -21,7 +21,7 @@
       <p class="hint">Набор — именованная смесь подсетей и одиночных адресов, из которой при компиляции получается один ipset. Одна и та же подсеть может входить в несколько наборов. Наборы можно использовать в правилах наравне с сетями и подсетями.</p>
     </div>
     <div class="toolbar-actions">
-      <button type="button" class="secondary btn-sm" @click="searchOpen = !searchOpen" title="Поиск по наборам">&#128269;</button>
+      <button type="button" class="secondary btn-search" @click="searchOpen = !searchOpen" title="Поиск по наборам"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.25"/><path d="m13.2 13.2-4.3-4.3"/></svg></button>
       <button type="button" class="primary" @click="openAdd()">+ набор</button>
     </div>
   </div>

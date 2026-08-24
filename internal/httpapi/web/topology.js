@@ -51,6 +51,14 @@ const Topology = (() => {
     return pos ? { x: pos.x + DEVICE_W / 2, y: pos.y + DEVICE_H / 2 } : null;
   };
 
+  // showNetInfo открывает окно состава сети у правого края её облака.
+  function showNetInfo(n) {
+    const pos = State.layout.networks[n.name];
+    if (!pos) return;
+    const r = canvas().getBoundingClientRect();
+    NetInfo.show(n, State.subnets, Camera.worldToScreen(State.camera, pos.x + NET_W, pos.y), { w: r.width, h: r.height });
+  }
+
   function scheduleLayoutSave() {
     clearTimeout(saveLayoutTimer);
     saveLayoutTimer = setTimeout(() => {
@@ -279,6 +287,7 @@ const Topology = (() => {
     State.tool = tool;
     cancelPending();
     hidePopover();
+    NetInfo.hide();
     TOOLS.forEach((t) => {
       const btn = document.getElementById("tool-" + t);
       btn.setAttribute("class", "tool" + (t === tool ? " active" : ""));
@@ -292,6 +301,7 @@ const Topology = (() => {
     const svg = canvas();
     svg.addEventListener("click", (e) => {
       if (e.target !== svg) return; // node/wire clicks handle themselves
+      NetInfo.hide();
       if (marqueeEnded) { marqueeEnded = false; return; } // click trailing the marquee drag
       clearSearch(); // клик по пустому фону сбрасывает активный поиск
       if (State.tool === "device" || State.tool === "network") openNodePopover(screenPoint(e), State.tool);
@@ -303,12 +313,18 @@ const Topology = (() => {
   }
 
   // openNodePopover shows the inline naming form at a screen point; the
-  // node is created at the popover click's world position.
+  // node is created at the popover click's world position. The box is
+  // clamped into the canvas so it never opens out of view near the edges.
   function openNodePopover(at, kind) {
     const box = document.getElementById("node-popover");
+    const MARGIN = 8;
+    const w = box.offsetWidth || 240;
+    const h = box.offsetHeight || 48;
+    const r = canvas().getBoundingClientRect();
+    const clamp = (v, max) => Math.min(Math.max(v, MARGIN), Math.max(MARGIN, max));
     box.hidden = false;
-    box.style.left = at.x + "px";
-    box.style.top = at.y + "px";
+    box.style.left = clamp(at.x, r.width - w - MARGIN) + "px";
+    box.style.top = clamp(at.y, r.height - h - MARGIN) + "px";
     document.getElementById("node-kind-select").hidden = kind !== "device";
     document.getElementById("node-name-input").focus();
     popoverCreate = (name) => createNode(kind, name, toWorld(at));
@@ -465,7 +481,7 @@ const Topology = (() => {
         const o = toWorld(start);
         const dx = w.x - o.x;
         const dy = w.y - o.y;
-        if (Math.abs(p.x - start.x) > 3 || Math.abs(p.y - start.y) > 3) moved = true;
+        if (Math.abs(p.x - start.x) > 3 || Math.abs(p.y - start.y) > 3) { moved = true; NetInfo.hide(); }
         group.forEach((g) => { g.map[g.name] = { x: g.pos.x + dx, y: g.pos.y + dy }; });
         render();
       }
@@ -584,13 +600,13 @@ const Topology = (() => {
     if (kind === "device") {
       makeDraggable(elem, "device", obj, (ev) => {
         if (State.tool === "connect") onDeviceConnect(obj.name);
-        else if (State.tool === "select") selectNode(obj, ev.shiftKey);
+        else if (State.tool === "select") { selectNode(obj, ev.shiftKey); NetInfo.hide(); }
       });
       contextDelete(elem, obj, "устройство " + obj.name, "device");
     } else if (kind === "network") {
       makeDraggable(elem, "network", obj, (ev) => {
         if (State.tool === "connect") onNetworkClick(obj.name);
-        else if (State.tool === "select") selectNode(obj, ev.shiftKey);
+        else if (State.tool === "select") { selectNode(obj, ev.shiftKey); showNetInfo(obj); }
       });
       contextDelete(elem, obj, "сеть " + obj.name, "network");
     } else if (kind === "wire") {
@@ -662,6 +678,7 @@ const Topology = (() => {
     setupConnectPreview();
     setupPopover();
     setupSearch();
+    NetInfo.attach(canvas());
     document.addEventListener("click", hideContextMenu);
     setTool("select");
     Topology.render();

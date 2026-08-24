@@ -42,12 +42,14 @@ function makeEl(tag) {
 }
 
 // fire dispatches a DOM event to listeners registered via addEventListener
+// or assigned as onclick
 function fire(target, type, ev) {
   ev.type = type;
-  ev.target = target;
+  if (!ev.target) ev.target = target;
   ev.preventDefault ||= () => {};
   ev.stopPropagation ||= () => {};
   (target.listeners[type] || []).forEach((fn) => fn(ev));
+  if (type === "click" && target.onclick) target.onclick(ev);
 }
 
 function texts(node) {
@@ -113,7 +115,7 @@ function bootSimulate(responses, savedStore) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  for (const f of ["common.js", "camera.js", "camera_input.js", "netmap.js", "topo_scene.js", "simulate.js"]) {
+  for (const f of ["common.js", "camera.js", "camera_input.js", "netmap.js", "net_info.js", "topo_scene.js", "simulate.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
@@ -204,6 +206,29 @@ test("map matches the topology editor: subnet names and union frames", async () 
   assert.match(html, /union-frame/);
   assert.match(html, /"data-union":"hq"/);
   assert.match(html, /office/, "network label rendered");
+});
+
+const firstByClass = (node, cls) => {
+  if (String(node.attrs.class || "").split(/\s+/).includes(cls)) return node;
+  for (const c of node.children || []) {
+    const hit = firstByClass(c, cls);
+    if (hit) return hit;
+  }
+  return null;
+};
+
+test("clicking a network on the read-only map shows its subnets", async () => {
+  const { canvas, ids } = bootSimulate(responses);
+  await tick();
+  const info = (ids["net-info"] ||= makeEl("div"));
+  info.hidden = true;
+  fire(firstByClass(canvas, "subnet-rect"), "click", {});
+  assert.ok(!info.hidden, "network click opens the info window");
+  const html = JSON.stringify(info);
+  assert.match(html, /office/, "window titled with the network name");
+  assert.match(html, /10\.0\.0\.0\/24/, "member CIDR listed");
+  fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
+  assert.ok(info.hidden, "zooming hides the window");
 });
 
 test("renderReport builds one card per path with verdict badges", async () => {
@@ -314,6 +339,84 @@ test("form submit posts to /api/simulate and renders the report", async () => {
   assert.deepEqual(post.body, { src: "10.0.0.5", dst: "10.0.1.7", proto: "tcp", dstPorts: ["443", "8080"] });
   const cards = ids["sim-paths"].children.filter((c) => c.className === "sim-path");
   assert.equal(cards.length, 1, "report rendered after submit");
+});
+
+// — разметка движения трафика (expandFlow + mark на карте) —
+
+const denyReport = {
+  srcSubnet: "main",
+  dstSubnet: "office-net",
+  note: "",
+  paths: [{
+    nodes: [
+      { kind: 1, name: "main" }, { kind: 2, name: "l2-0" }, { kind: 0, name: "r1" },
+      { kind: 0, name: "r2" }, { kind: 2, name: "l2-1" }, { kind: 1, name: "office-net" },
+    ],
+    routers: [
+      { router: "r1", action: "allow", matchedRule: "fwd-main", reason: "правило разрешило" },
+      { router: "r2", action: "deny", matchedRule: "block-office", reason: "правило запретило" },
+    ],
+    verdict: "deny",
+  }],
+};
+
+const allByClass = (node, cls) => {
+  const out = [];
+  const has = (n) => String(n.attrs.class || "").split(/\s+/).includes(cls);
+  (function walk(n) {
+    if (has(n)) out.push(n);
+    (n.children || []).forEach(walk);
+  })(node);
+  return out;
+};
+
+test("expandFlow colors the route green up to the denying router", async () => {
+  const { get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
+  const f = get("Simulate.expandFlow(Simulate.state.result, Simulate.state.topology)");
+  for (const name of ["MAIN", "sw1", "r1"]) assert.ok(f.ok.has(name), `${name} is before the deny point`);
+  assert.ok(!f.ok.has("r2"), "denying router itself is not green");
+  assert.ok(!f.ok.has("OFFICE"), "destination beyond deny stays unlit");
+  assert.deepEqual([...f.deny.keys()], ["r2"]);
+  assert.equal(f.deny.get("r2").rule, "block-office");
+});
+
+test("allowed path lights the whole route including destination", async () => {
+  const { get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(switchedReport)})`);
+  const f = get("Simulate.expandFlow(Simulate.state.result, Simulate.state.topology)");
+  for (const name of ["MAIN", "sw1", "r1", "r2", "sw2", "OFFICE"]) {
+    assert.ok(f.ok.has(name), `${name} is on an allowed route`);
+  }
+  assert.equal(f.deny.size, 0);
+});
+
+test("a denying router never turns green, even via another allowed path", async () => {
+  const rep = JSON.parse(JSON.stringify(denyReport));
+  rep.paths.push(JSON.parse(JSON.stringify(switchedReport.paths[0])));
+  const { get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(rep)})`);
+  const f = get("Simulate.expandFlow(Simulate.state.result, Simulate.state.topology)");
+  assert.ok(f.deny.has("r2"), "deny verdict wins on the shared route");
+  assert.ok(!f.ok.has("r2") && !f.ok.has("OFFICE"), "denied elements are not green");
+});
+
+test("map paints flow segments and marks the deny point with a tooltip", async () => {
+  const { canvas, get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
+  const okWires = allByClass(canvas, "sim-flow-ok");
+  assert.ok(okWires.some((w) => w.tag === "path"), "wires up to the deny point are green");
+  assert.ok(okWires.some((w) => w.tag === "line"), "attaches up to the deny point are green");
+  const denied = allByClass(canvas, "sim-flow-deny");
+  const rects = denied.filter((n) => n.tag === "rect");
+  assert.equal(rects.length, 1, "exactly one device carries the deny marker");
+  const title = (rects[0].children || []).find((c) => c.tag === "title");
+  assert.ok(title, "deny device has a tooltip");
+  assert.match(String(title._text || ""), /block-office/, "tooltip names the rule");
 });
 
 // — разделитель «форма ↔ карта» —

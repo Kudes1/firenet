@@ -21,7 +21,7 @@
       <p class="hint">Обычная связь даёт полную связность между устройствами. Фильтрованная связь работает как маршрутизация с фильтрами: каждая сторона имеет свой экспорт (что анонсирует соседу) и импорт (что принимает от соседа — зеркало его экспорта). Пакет проходит по связи, только если его источник в экспорте отправителя, а получатель в экспорте получателя. Создание связей — на холсте топологии инструментом «связать».</p>
     </div>
     <div class="toolbar-actions">
-      <button type="button" class="secondary btn-sm" @click="searchOpen = !searchOpen" title="Поиск по связям">&#128269;</button>
+      <button type="button" class="secondary btn-search" @click="searchOpen = !searchOpen" title="Поиск по связям"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.25"/><path d="m13.2 13.2-4.3-4.3"/></svg></button>
     </div>
   </div>
   <div class="table-wrap" x-show="loaded" x-cloak>

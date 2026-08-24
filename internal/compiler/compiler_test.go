@@ -501,6 +501,94 @@ func TestCompileMultiChainPlacementAndTargetGuarantee(t *testing.T) {
 	}
 }
 
+// lineTopology chains three routers r1-r2-r3, one subnet hanging off each, so
+// a rule between A and B never places on r3 (a genuine bystander).
+func lineTopology(t *testing.T) *topology.Topology {
+	t.Helper()
+	topo := &topology.Topology{
+		Devices: map[string]topology.Device{
+			"r1": {Name: "r1", Kind: topology.DeviceRouter},
+			"r2": {Name: "r2", Kind: topology.DeviceRouter},
+			"r3": {Name: "r3", Kind: topology.DeviceRouter},
+		},
+		Links: []topology.Link{
+			{A: topology.Endpoint{Device: "r1"}, B: topology.Endpoint{Device: "r2"}},
+			{A: topology.Endpoint{Device: "r2"}, B: topology.Endpoint{Device: "r3"}},
+		},
+		Subnets: map[string]topology.Subnet{
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
+			"C": {Name: "C", CIDR: prefix(t, "10.0.2.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nA": {Name: "nA", Subnets: []string{"A"}, Attach: []topology.Endpoint{{Device: "r1"}}},
+			"nB": {Name: "nB", Subnets: []string{"B"}, Attach: []topology.Endpoint{{Device: "r2"}}},
+			"nC": {Name: "nC", Subnets: []string{"C"}, Attach: []topology.Endpoint{{Device: "r3"}}},
+		},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("invalid fixture: %v", err)
+	}
+	return topo
+}
+
+// A secondary chain's any-rule places on every router, including ones that
+// never received the primary chain's jump rule. Such a router has no reachable
+// chain at all and must be omitted entirely: emitting a primary chain with no
+// rules there would wire a conntrack-accept/default-drop script into FORWARD
+// and blackhole all traffic through a device firenet should never have touched.
+func TestCompile_OrphanSecondaryRuleDoesNotBlackholeBystander(t *testing.T) {
+	topo := lineTopology(t)
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	pol := &rules.Policy{Chains: []rules.Chain{
+		{
+			Name: "FIRENET-FWD", DefaultAction: rules.ActionDeny, ChainPosition: rules.ChainTop,
+			Rules: []rules.Rule{{
+				Name: "restrict", Src: []string{"A"}, Dst: []string{"B"},
+				Proto: rules.ProtoAny, Action: rules.ActionJump, JumpTo: "FIRENET-RESTRICTED",
+			}},
+		},
+		{
+			Name: "FIRENET-RESTRICTED", DefaultAction: rules.ActionDeny,
+			Rules: []rules.Rule{{
+				Name: "restricted-dns", Src: []string{rules.Any}, Dst: []string{rules.Any},
+				Proto: rules.ProtoUDP, DstPorts: []string{"53"}, Action: rules.ActionAllow,
+			}},
+		},
+	}}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+
+	// r3 only ever received the secondary chain's any-rule — unreachable there.
+	requireNoDevice(t, out, "r3")
+
+	// r1 and r2 carry the jump, so both chains and both rules are legitimate.
+	for _, name := range []string{"r1", "r2"} {
+		d := deviceOf(t, out, name)
+		if len(d.Chains) != 2 || !d.Chains[0].Primary || d.Chains[0].Name != "FIRENET-FWD" || d.Chains[1].Name != "FIRENET-RESTRICTED" {
+			t.Fatalf("%s: chains = %+v, want primary FIRENET-FWD then FIRENET-RESTRICTED", name, d.Chains)
+		}
+		if len(d.Rules) != 2 {
+			t.Fatalf("%s: got %d rules, want 2", name, len(d.Rules))
+		}
+		byChain := map[string]string{}
+		for _, r := range d.Rules {
+			byChain[r.Chain] = r.Comment
+		}
+		if byChain["FIRENET-FWD"] != "restrict" || byChain["FIRENET-RESTRICTED"] != "restricted-dns" {
+			t.Fatalf("%s: rules by chain = %v", name, byChain)
+		}
+	}
+}
+
 func TestCompileDedupKeepsDifferentChains(t *testing.T) {
 	topo := redundantTopology(t)
 	g, err := graph.Build(topo)
@@ -509,7 +597,10 @@ func TestCompileDedupKeepsDifferentChains(t *testing.T) {
 	}
 	same := rules.Rule{Name: "r", Src: []string{"A"}, Dst: []string{"B"}, Action: rules.ActionAllow}
 	pol := &rules.Policy{Chains: []rules.Chain{
-		{Name: "A", DefaultAction: rules.ActionDeny, Rules: []rules.Rule{same}},
+		{Name: "A", DefaultAction: rules.ActionDeny, Rules: []rules.Rule{
+			{Name: "to-b", Src: []string{"A"}, Dst: []string{"B"}, Action: rules.ActionJump, JumpTo: "B"},
+			same,
+		}},
 		{Name: "B", DefaultAction: rules.ActionReturn, Rules: []rules.Rule{same}},
 	}}
 	devices, err := Compile(topo, pol, g, graph.DefaultLimits())
@@ -526,8 +617,98 @@ func TestCompileDedupKeepsDifferentChains(t *testing.T) {
 				bCount++
 			}
 		}
-		if aCount != 1 || bCount != 1 {
-			t.Fatalf("device %s: A=%d B=%d, want 1/1", d.Device, aCount, bCount)
+		if aCount != 2 || bCount != 1 {
+			t.Fatalf("device %s: A=%d B=%d, want 2/1", d.Device, aCount, bCount)
+		}
+	}
+}
+
+// A one-sided any-rule must place only on routers that actually transit the
+// bounded side's traffic: dst=any enumerates every declared subnet through
+// pathfinding, not "all routers".
+func TestCompile_OneSidedAnySkipsUnreachableRouters(t *testing.T) {
+	topo := redundantTopology(t)
+	pol := &rules.Policy{Chains: []rules.Chain{{
+		Name:          "FIRENET-FWD",
+		DefaultAction: rules.ActionDeny,
+		ChainPosition: rules.ChainTop,
+		Rules: []rules.Rule{
+			{Name: "a-to-any", Src: []string{"A"}, Dst: []string{rules.Any}, Proto: rules.ProtoICMP, Action: rules.ActionAllow},
+		},
+	}}}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	// C hangs off the isolated r3: no A→C traffic can ever exist, so r3
+	// must not receive the rule.
+	requireNoDevice(t, out, "r3")
+	for _, name := range []string{"r1", "r2"} {
+		d := deviceOf(t, out, name)
+		if len(d.Rules) != 1 || d.Rules[0].SrcSet != ipsetName("A") {
+			t.Fatalf("%s: unexpected rules %+v", name, d.Rules)
+		}
+	}
+}
+
+// A jump rule must survive only on routers that also host at least one rule
+// of the target chain (fixpoint, so nested jumps unwind too): a jump whose
+// chain is empty locally turns the chain's default action into a blackhole
+// for transit traffic the chain's rules were never meant to judge.
+func TestCompile_JumpWithoutLocalChainContentIsDropped(t *testing.T) {
+	topo := lineTopology(t)
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	pol := &rules.Policy{Chains: []rules.Chain{
+		{
+			Name: "FIRENET-FWD", DefaultAction: rules.ActionReturn, ChainPosition: rules.ChainTop,
+			Rules: []rules.Rule{{
+				Name: "guard", Src: []string{"A"}, Dst: []string{rules.Any},
+				Proto: rules.ProtoAny, Action: rules.ActionJump, JumpTo: "UNTRUSTED",
+			}},
+		},
+		{
+			Name: "UNTRUSTED", DefaultAction: rules.ActionDeny,
+			Rules: []rules.Rule{{
+				Name: "b-to-c", Src: []string{"B"}, Dst: []string{"C"},
+				Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow,
+			}},
+		},
+	}}
+	if err := pol.Validate(topo); err != nil {
+		t.Fatalf("invalid rules: %v", err)
+	}
+	out, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+
+	// r1 only ever received the jump: UNTRUSTED's B→C rule lives past it.
+	// An empty deny-chain behind the jump would blackhole A's transit there.
+	requireNoDevice(t, out, "r1")
+
+	for _, name := range []string{"r2", "r3"} {
+		d := deviceOf(t, out, name)
+		hasJump, hasContent := false, false
+		for _, r := range d.Rules {
+			switch {
+			case r.JumpTo == "UNTRUSTED":
+				hasJump = true
+			case r.Chain == "UNTRUSTED":
+				hasContent = true
+			}
+		}
+		if !hasJump || !hasContent {
+			t.Fatalf("%s: jump=%v content=%v, want both", name, hasJump, hasContent)
 		}
 	}
 }
