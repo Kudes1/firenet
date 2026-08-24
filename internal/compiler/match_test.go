@@ -24,7 +24,6 @@ func matchFixture() DeviceRuleset {
 			{Comment: "office-to-dmz", SrcSet: "fn_office", DstSet: "fn_dmz", Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 			{Comment: "catch-all-deny", Proto: rules.ProtoAny, Action: rules.ActionDeny},
 		},
-		DefaultAction: rules.ActionDeny,
 	}
 }
 
@@ -74,7 +73,6 @@ func TestMatchFlow_LiteralAndUnconditional(t *testing.T) {
 			{Comment: "host-block", SrcAddr: "10.0.0.9/32", Proto: rules.ProtoAny, Action: rules.ActionDeny},
 			{Comment: "uncond", Action: rules.ActionAllow},
 		},
-		DefaultAction: rules.ActionDeny,
 	}
 	if r := MatchFlow(rs, netip.MustParseAddr("10.0.0.9"), dmzIP, "", nil, nil); r == nil || r.Comment != "host-block" {
 		t.Fatalf("literal /32 must match contained host: %+v", r)
@@ -86,8 +84,7 @@ func TestMatchFlow_LiteralAndUnconditional(t *testing.T) {
 
 func TestMatchFlow_PortRanges(t *testing.T) {
 	rs := DeviceRuleset{
-		Rules:         []CompiledRule{{Comment: "range", Proto: rules.ProtoTCP, DstPorts: []string{"1000:2000"}, Action: rules.ActionAllow}},
-		DefaultAction: rules.ActionDeny,
+		Rules: []CompiledRule{{Comment: "range", Proto: rules.ProtoTCP, DstPorts: []string{"1000:2000"}, Action: rules.ActionAllow}},
 	}
 	if r := MatchFlow(rs, officeIP, dmzIP, rules.ProtoTCP, nil, []string{"1500"}); r == nil {
 		t.Fatal("1500 inside 1000:2000 must match")
@@ -99,8 +96,7 @@ func TestMatchFlow_PortRanges(t *testing.T) {
 
 func TestMatchFlow_NoMatchReturnsNil(t *testing.T) {
 	rs := DeviceRuleset{
-		Rules:         []CompiledRule{{Comment: "x", SrcSet: "fn_missing", Action: rules.ActionAllow}},
-		DefaultAction: rules.ActionDeny,
+		Rules: []CompiledRule{{Comment: "x", SrcSet: "fn_missing", Action: rules.ActionAllow}},
 	}
 	if got := MatchFlow(rs, officeIP, dmzIP, "", nil, nil); got != nil {
 		t.Fatalf("unknown ipset name must not match, got %+v", got)

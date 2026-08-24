@@ -20,6 +20,8 @@ type atomicRule struct {
 	SrcPorts []string
 	DstPorts []string
 	Action   rules.Action
+	JumpTo   string
+	Chain    string
 }
 
 func expandAtomic(r rules.Rule) []atomicRule {
@@ -30,11 +32,11 @@ func expandAtomic(r rules.Rule) []atomicRule {
 	out := make([]atomicRule, 0, len(r.Src)*len(r.Dst))
 	for _, s := range r.Src {
 		for _, d := range r.Dst {
-			out = append(out, atomicRule{Comment: comment, Src: s, Dst: d, Proto: r.Proto, SrcPorts: r.SrcPorts, DstPorts: r.DstPorts, Action: r.Action})
+			out = append(out, atomicRule{Comment: comment, Src: s, Dst: d, Proto: r.Proto, SrcPorts: r.SrcPorts, DstPorts: r.DstPorts, Action: r.Action, JumpTo: r.JumpTo})
 			if r.Mirror {
 				// Direction reverses, so what matched as the dst port now
 				// matches as the src port, and vice versa.
-				out = append(out, atomicRule{Comment: comment, Src: d, Dst: s, Proto: r.Proto, SrcPorts: r.DstPorts, DstPorts: r.SrcPorts, Action: r.Action})
+				out = append(out, atomicRule{Comment: comment, Src: d, Dst: s, Proto: r.Proto, SrcPorts: r.DstPorts, DstPorts: r.SrcPorts, Action: r.Action, JumpTo: r.JumpTo})
 			}
 		}
 	}
@@ -44,9 +46,11 @@ func expandAtomic(r rules.Rule) []atomicRule {
 type pairKey struct{ src, dst string }
 
 type deviceAccum struct {
-	rules  []CompiledRule
-	ips    []IPSet
-	ipsets map[string]int // entity name -> index into ips
+	rules    []CompiledRule
+	ips      []IPSet
+	ipsets   map[string]int // entity name -> index into ips
+	chainIdx map[string]int // chain name -> index into chains
+	chains   []CompiledChain
 }
 
 func (a *deviceAccum) addIPSetRef(entity, setName string) {
@@ -60,6 +64,17 @@ func (a *deviceAccum) addIPSetRef(entity, setName string) {
 	a.ips = append(a.ips, IPSet{Name: setName, DisplayName: entity})
 }
 
+func (a *deviceAccum) ensureChain(name string, cc CompiledChain) {
+	if _, ok := a.chainIdx[name]; ok {
+		return
+	}
+	if a.chainIdx == nil {
+		a.chainIdx = make(map[string]int)
+	}
+	a.chainIdx[name] = len(a.chains)
+	a.chains = append(a.chains, cc)
+}
+
 func (a *deviceAccum) addRule(r CompiledRule) {
 	key := ruleKey(r)
 	for _, existing := range a.rules {
@@ -71,7 +86,7 @@ func (a *deviceAccum) addRule(r CompiledRule) {
 }
 
 func ruleKey(r CompiledRule) string {
-	return fmt.Sprintf("%s|%s|%s|%s|%s|%v|%v|%s", r.SrcSet, r.DstSet, r.SrcAddr, r.DstAddr, r.Proto, r.SrcPorts, r.DstPorts, r.Action)
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%s|%v|%v|%s|%s", r.Chain, r.SrcSet, r.DstSet, r.SrcAddr, r.DstAddr, r.Proto, r.SrcPorts, r.DstPorts, r.Action, r.JumpTo)
 }
 
 func (a *deviceAccum) ipsetList(topo *topology.Topology) []IPSet {
@@ -174,111 +189,133 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 	pairCache := make(map[pairKey][]string)
 	names := newIPSetNamer()
 
-	primary := pol.Primary()
-	for _, rule := range primary.Rules {
-		for _, ar := range expandAtomic(rule) {
-			srcAny := ar.Src == rules.Any
-			dstAny := ar.Dst == rules.Any
+	for ci := range pol.Chains {
+		c := &pol.Chains[ci]
+		for _, rule := range c.Rules {
+			for _, ar := range expandAtomic(rule) {
+				srcAny := ar.Src == rules.Any
+				dstAny := ar.Dst == rules.Any
 
-			// resolveEndpoint maps an endpoint to the declared subnets
-			// pathfinding should use. A literally written address/CIDR
-			// anchors to the subnets overlapping it; the returned prefix
-			// is non-nil only for that case (the rule matches the address
-			// directly, no ipset is created).
-			resolveEndpoint := func(ep, side string) ([]string, *netip.Prefix, error) {
-				subs, err := topo.ResolveNetwork(ep)
-				if err == nil {
-					return subs, nil, nil
+				// resolveEndpoint maps an endpoint to the declared subnets
+				// pathfinding should use. A literally written address/CIDR
+				// anchors to the subnets overlapping it; the returned prefix
+				// is non-nil only for that case (the rule matches the address
+				// directly, no ipset is created).
+				resolveEndpoint := func(ep, side string) ([]string, *netip.Prefix, error) {
+					subs, err := topo.ResolveNetwork(ep)
+					if err == nil {
+						return subs, nil, nil
+					}
+					if p, ok := topology.ParseEndpointPrefix(ep); ok {
+						return topo.SubnetsOverlapping(p), &p, nil
+					}
+					return nil, nil, fmt.Errorf("rule %q: %s %q: %w", rule.Name, side, ep, err)
 				}
-				if p, ok := topology.ParseEndpointPrefix(ep); ok {
-					return topo.SubnetsOverlapping(p), &p, nil
-				}
-				return nil, nil, fmt.Errorf("rule %q: %s %q: %w", rule.Name, side, ep, err)
-			}
 
-			var srcSubnets, dstSubnets []string
-			var srcLit, dstLit *netip.Prefix
-			var err error
-			if !srcAny {
-				if srcSubnets, srcLit, err = resolveEndpoint(ar.Src, "src"); err != nil {
-					return nil, err
-				}
-			}
-			if !dstAny {
-				if dstSubnets, dstLit, err = resolveEndpoint(ar.Dst, "dst"); err != nil {
-					return nil, err
-				}
-			}
-
-			var targets []string
-			if srcAny || dstAny || (srcLit != nil && len(srcSubnets) == 0) || (dstLit != nil && len(dstSubnets) == 0) {
-				// One side is unbounded (e.g. real external traffic beyond
-				// any declared subnet) — pathfinding can't tell which
-				// routers are relevant, so place on all of them. This is
-				// conservative: possibly a few extra devices, never a gap.
-				targets = allRouters
-			} else {
-				routerSet := make(map[string]struct{})
-				for _, s := range srcSubnets {
-					for _, d := range dstSubnets {
-						if s == d {
-							continue // intra-subnet traffic never transits a managed router
-						}
-						key := pairKey{s, d}
-						rs, ok := pairCache[key]
-						if !ok {
-							paths, perr := g.AllSimplePaths(graph.SubnetNode(s), graph.SubnetNode(d), limits)
-							if perr != nil {
-								return nil, fmt.Errorf("rule %q: path %s -> %s: %w", rule.Name, s, d, perr)
-							}
-							rs = graph.RoutersOnPaths(paths)
-							pairCache[key] = rs
-						}
-						for _, r := range rs {
-							routerSet[r] = struct{}{}
-						}
+				var srcSubnets, dstSubnets []string
+				var srcLit, dstLit *netip.Prefix
+				var err error
+				if !srcAny {
+					if srcSubnets, srcLit, err = resolveEndpoint(ar.Src, "src"); err != nil {
+						return nil, err
 					}
 				}
-				targets = make([]string, 0, len(routerSet))
-				for r := range routerSet {
-					targets = append(targets, r)
+				if !dstAny {
+					if dstSubnets, dstLit, err = resolveEndpoint(ar.Dst, "dst"); err != nil {
+						return nil, err
+					}
 				}
-				sort.Strings(targets)
-			}
 
-			compiled := CompiledRule{
-				Comment:  ar.Comment,
-				Proto:    ar.Proto,
-				SrcPorts: ar.SrcPorts,
-				DstPorts: ar.DstPorts,
-				Action:   ar.Action,
-			}
-			var srcSet, dstSet string
-			if !srcAny {
-				if srcLit != nil {
-					compiled.SrcAddr = srcLit.String()
+				var targets []string
+				if srcAny || dstAny || (srcLit != nil && len(srcSubnets) == 0) || (dstLit != nil && len(dstSubnets) == 0) {
+					// One side is unbounded (e.g. real external traffic beyond
+					// any declared subnet) — pathfinding can't tell which
+					// routers are relevant, so place on all of them. This is
+					// conservative: possibly a few extra devices, never a gap.
+					targets = allRouters
 				} else {
-					srcSet = names.get(ar.Src)
+					routerSet := make(map[string]struct{})
+					for _, s := range srcSubnets {
+						for _, d := range dstSubnets {
+							if s == d {
+								continue // intra-subnet traffic never transits a managed router
+							}
+							key := pairKey{s, d}
+							rs, ok := pairCache[key]
+							if !ok {
+								paths, perr := g.AllSimplePaths(graph.SubnetNode(s), graph.SubnetNode(d), limits)
+								if perr != nil {
+									return nil, fmt.Errorf("rule %q: path %s -> %s: %w", rule.Name, s, d, perr)
+								}
+								rs = graph.RoutersOnPaths(paths)
+								pairCache[key] = rs
+							}
+							for _, r := range rs {
+								routerSet[r] = struct{}{}
+							}
+						}
+					}
+					targets = make([]string, 0, len(routerSet))
+					for r := range routerSet {
+						targets = append(targets, r)
+					}
+					sort.Strings(targets)
 				}
-			}
-			if !dstAny {
-				if dstLit != nil {
-					compiled.DstAddr = dstLit.String()
-				} else {
-					dstSet = names.get(ar.Dst)
-				}
-			}
-			compiled.SrcSet, compiled.DstSet = srcSet, dstSet
 
-			for _, target := range targets {
-				a := accum[target]
-				a.addRule(compiled)
-				if srcSet != "" {
-					a.addIPSetRef(ar.Src, srcSet)
+				compiled := CompiledRule{
+					Comment:  ar.Comment,
+					Proto:    ar.Proto,
+					SrcPorts: ar.SrcPorts,
+					DstPorts: ar.DstPorts,
+					Action:   ar.Action,
+					JumpTo:   ar.JumpTo,
+					Chain:    c.Name,
 				}
-				if dstSet != "" {
-					a.addIPSetRef(ar.Dst, dstSet)
+				var srcSet, dstSet string
+				if !srcAny {
+					if srcLit != nil {
+						compiled.SrcAddr = srcLit.String()
+					} else {
+						srcSet = names.get(ar.Src)
+					}
 				}
+				if !dstAny {
+					if dstLit != nil {
+						compiled.DstAddr = dstLit.String()
+					} else {
+						dstSet = names.get(ar.Dst)
+					}
+				}
+				compiled.SrcSet, compiled.DstSet = srcSet, dstSet
+
+				for _, target := range targets {
+					a := accum[target]
+					a.addRule(compiled)
+					if srcSet != "" {
+						a.addIPSetRef(ar.Src, srcSet)
+					}
+					if dstSet != "" {
+						a.addIPSetRef(ar.Dst, dstSet)
+					}
+				}
+			}
+		}
+	}
+
+	defaults := make(map[string]CompiledChain, len(pol.Chains))
+	for ci := range pol.Chains {
+		c := &pol.Chains[ci]
+		defaults[c.Name] = CompiledChain{Name: c.Name, Primary: ci == 0, Position: c.ChainPosition, Default: c.DefaultAction}
+	}
+	for _, name := range allRouters {
+		a := accum[name]
+		if len(a.rules) == 0 {
+			continue
+		}
+		a.ensureChain(pol.Chains[0].Name, defaults[pol.Chains[0].Name])
+		for _, r := range a.rules {
+			if r.JumpTo != "" {
+				a.ensureChain(r.JumpTo, defaults[r.JumpTo])
 			}
 		}
 	}
@@ -289,13 +326,17 @@ func Compile(topo *topology.Topology, pol *rules.Policy, g *graph.Graph, limits 
 		if len(a.rules) == 0 {
 			continue
 		}
+		sort.SliceStable(a.chains, func(i, j int) bool {
+			if a.chains[i].Primary != a.chains[j].Primary {
+				return a.chains[i].Primary
+			}
+			return a.chains[i].Name < a.chains[j].Name
+		})
 		result = append(result, DeviceRuleset{
-			Device:        name,
-			IPSets:        a.ipsetList(topo),
-			Rules:         a.rules,
-			DefaultAction: primary.DefaultAction,
-			ChainName:     primary.Name,
-			ChainPosition: primary.ChainPosition,
+			Device: name,
+			IPSets: a.ipsetList(topo),
+			Chains: a.chains,
+			Rules:  a.rules,
 		})
 	}
 	return result, nil

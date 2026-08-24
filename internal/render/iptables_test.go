@@ -27,12 +27,10 @@ func TestRenderIPSets(t *testing.T) {
 func TestRenderRules_StructureAndOrder(t *testing.T) {
 	ds := compiler.DeviceRuleset{
 		Device: "r1",
+		Chains: []compiler.CompiledChain{{Name: "FIRENET-FWD", Primary: true, Position: rules.ChainTop, Default: rules.ActionDeny}},
 		Rules: []compiler.CompiledRule{
-			{Comment: "allow-https", SrcSet: "fn_a", DstSet: "fn_b", Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
+			{Chain: "FIRENET-FWD", Comment: "allow-https", SrcSet: "fn_a", DstSet: "fn_b", Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
 		},
-		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
-		ChainPosition: rules.ChainTop,
 	}
 	out := string(RenderRules(ds))
 
@@ -60,14 +58,12 @@ func TestRenderRules_StructureAndOrder(t *testing.T) {
 func TestRenderRules_SrcAndDstPorts(t *testing.T) {
 	ds := compiler.DeviceRuleset{
 		Device: "r1",
+		Chains: []compiler.CompiledChain{{Name: "FIRENET-FWD", Primary: true, Position: rules.ChainTop, Default: rules.ActionDeny}},
 		Rules: []compiler.CompiledRule{
-			{Comment: "reverse-https", SrcSet: "fn_b", DstSet: "fn_a", Proto: rules.ProtoTCP, SrcPorts: []string{"443"}, Action: rules.ActionAllow},
-			{Comment: "both-sides", Proto: rules.ProtoTCP, SrcPorts: []string{"1024-65535"}, DstPorts: []string{"80", "443"}, Action: rules.ActionAllow},
-			{Comment: "dst-range", Proto: rules.ProtoUDP, DstPorts: []string{"5000-5010"}, Action: rules.ActionAllow},
+			{Chain: "FIRENET-FWD", Comment: "reverse-https", SrcSet: "fn_b", DstSet: "fn_a", Proto: rules.ProtoTCP, SrcPorts: []string{"443"}, Action: rules.ActionAllow},
+			{Chain: "FIRENET-FWD", Comment: "both-sides", Proto: rules.ProtoTCP, SrcPorts: []string{"1024-65535"}, DstPorts: []string{"80", "443"}, Action: rules.ActionAllow},
+			{Chain: "FIRENET-FWD", Comment: "dst-range", Proto: rules.ProtoUDP, DstPorts: []string{"5000-5010"}, Action: rules.ActionAllow},
 		},
-		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
-		ChainPosition: rules.ChainTop,
 	}
 	out := string(RenderRules(ds))
 
@@ -85,12 +81,10 @@ func TestRenderRules_SrcAndDstPorts(t *testing.T) {
 func TestRenderRules_LiteralAddressMatch(t *testing.T) {
 	ds := compiler.DeviceRuleset{
 		Device: "r1",
+		Chains: []compiler.CompiledChain{{Name: "FIRENET-FWD", Primary: true, Position: rules.ChainTop, Default: rules.ActionDeny}},
 		Rules: []compiler.CompiledRule{
-			{Comment: "host-ssh", SrcAddr: "10.0.0.5/32", DstAddr: "10.0.1.0/24", Proto: rules.ProtoTCP, DstPorts: []string{"22"}, Action: rules.ActionAllow},
+			{Chain: "FIRENET-FWD", Comment: "host-ssh", SrcAddr: "10.0.0.5/32", DstAddr: "10.0.1.0/24", Proto: rules.ProtoTCP, DstPorts: []string{"22"}, Action: rules.ActionAllow},
 		},
-		DefaultAction: rules.ActionDeny,
-		ChainName:     "FIRENET-FWD",
-		ChainPosition: rules.ChainTop,
 	}
 	out := string(RenderRules(ds))
 	if !strings.Contains(out, "-s 10.0.0.5/32") || !strings.Contains(out, "-d 10.0.1.0/24") {
@@ -102,7 +96,7 @@ func TestRenderRules_LiteralAddressMatch(t *testing.T) {
 }
 
 func TestRenderRules_ChainPositionTop(t *testing.T) {
-	ds := compiler.DeviceRuleset{Device: "r1", DefaultAction: rules.ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: rules.ChainTop}
+	ds := compiler.DeviceRuleset{Device: "r1", Chains: []compiler.CompiledChain{{Name: "FIRENET-FWD", Primary: true, Position: rules.ChainTop, Default: rules.ActionDeny}}}
 	out := string(RenderRules(ds))
 	if !strings.Contains(out, "iptables -I FORWARD -j FIRENET-FWD") {
 		t.Fatalf("expected -I FORWARD jump for top position:\n%s", out)
@@ -113,7 +107,7 @@ func TestRenderRules_ChainPositionTop(t *testing.T) {
 }
 
 func TestRenderRules_ChainPositionBottom(t *testing.T) {
-	ds := compiler.DeviceRuleset{Device: "r1", DefaultAction: rules.ActionDeny, ChainName: "FIRENET-FWD", ChainPosition: rules.ChainBottom}
+	ds := compiler.DeviceRuleset{Device: "r1", Chains: []compiler.CompiledChain{{Name: "FIRENET-FWD", Primary: true, Position: rules.ChainBottom, Default: rules.ActionDeny}}}
 	out := string(RenderRules(ds))
 	if !strings.Contains(out, "iptables -A FORWARD -j FIRENET-FWD") {
 		t.Fatalf("expected -A FORWARD jump for bottom position:\n%s", out)
@@ -125,11 +119,9 @@ func TestRenderRules_ChainPositionBottom(t *testing.T) {
 
 func TestRenderRules_ReturnAction(t *testing.T) {
 	ds := compiler.DeviceRuleset{
-		Device:        "r1",
-		Rules:         []compiler.CompiledRule{{Comment: "bypass", Action: rules.ActionReturn}},
-		DefaultAction: rules.ActionReturn,
-		ChainName:     "FIRENET-FWD",
-		ChainPosition: rules.ChainTop,
+		Device: "r1",
+		Chains: []compiler.CompiledChain{{Name: "FIRENET-FWD", Primary: true, Position: rules.ChainTop, Default: rules.ActionReturn}},
+		Rules:  []compiler.CompiledRule{{Chain: "FIRENET-FWD", Comment: "bypass", Action: rules.ActionReturn}},
 	}
 	out := string(RenderRules(ds))
 	if !strings.Contains(out, "iptables -A FIRENET-FWD -j RETURN\n") {
@@ -140,13 +132,42 @@ func TestRenderRules_ReturnAction(t *testing.T) {
 	}
 }
 
+func TestRenderRulesMultiChain(t *testing.T) {
+	ds := compiler.DeviceRuleset{
+		Device: "r1",
+		Chains: []compiler.CompiledChain{
+			{Name: "FIRENET-FWD", Primary: true, Default: rules.ActionDeny},
+			{Name: "FIRENET-RESTRICTED", Default: rules.ActionDeny},
+		},
+		Rules: []compiler.CompiledRule{
+			{Chain: "FIRENET-FWD", Action: rules.ActionJump, JumpTo: "FIRENET-RESTRICTED"},
+			{Chain: "FIRENET-RESTRICTED", Action: rules.ActionAllow},
+		},
+	}
+	out := string(RenderRules(ds))
+	for _, want := range []string{
+		"iptables -N FIRENET-FWD",
+		"iptables -N FIRENET-RESTRICTED",
+		"iptables -I FORWARD -j FIRENET-FWD",
+		"iptables -A FIRENET-FWD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
+		"iptables -A FIRENET-FWD -j FIRENET-RESTRICTED",
+		"iptables -A FIRENET-RESTRICTED -j ACCEPT",
+		"iptables -A FIRENET-RESTRICTED -j DROP",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "iptables -I FORWARD -j FIRENET-RESTRICTED") {
+		t.Fatal("secondary chain must not be wired into FORWARD")
+	}
+}
+
 func TestRenderRules_CustomChainName(t *testing.T) {
 	ds := compiler.DeviceRuleset{
-		Device:        "r1",
-		Rules:         []compiler.CompiledRule{{Comment: "allow-https", Action: rules.ActionAllow}},
-		DefaultAction: rules.ActionDeny,
-		ChainName:     "MY-CHAIN",
-		ChainPosition: rules.ChainTop,
+		Device: "r1",
+		Chains: []compiler.CompiledChain{{Name: "MY-CHAIN", Primary: true, Position: rules.ChainTop, Default: rules.ActionDeny}},
+		Rules:  []compiler.CompiledRule{{Chain: "MY-CHAIN", Comment: "allow-https", Action: rules.ActionAllow}},
 	}
 	out := string(RenderRules(ds))
 	if strings.Contains(out, "FIRENET-FWD") {

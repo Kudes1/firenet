@@ -25,16 +25,23 @@ type CompiledRule struct {
 	SrcPorts []string
 	DstPorts []string
 	Action   rules.Action
+	JumpTo   string // target chain when Action == ActionJump
+	Chain    string // owning chain name on this device
 }
 
-// DeviceRuleset is everything one managed device needs: its ipsets and its
-// ordered rules, the policy default to apply when nothing matches, and
-// where/how firenet's own chain is wired into FORWARD.
+// CompiledChain is metadata of one chain present on a device.
+type CompiledChain struct {
+	Name     string
+	Primary  bool                // the chain jumped into from FORWARD
+	Position rules.ChainPosition // meaningful only when Primary
+	Default  rules.Action
+}
+
+// DeviceRuleset is everything one managed device needs: its ipsets, the
+// chains it hosts (primary first), and its ordered rules grouped by chain.
 type DeviceRuleset struct {
-	Device        string
-	IPSets        []IPSet
-	Rules         []CompiledRule
-	DefaultAction rules.Action
-	ChainName     string
-	ChainPosition rules.ChainPosition
+	Device string
+	IPSets []IPSet
+	Chains []CompiledChain
+	Rules  []CompiledRule
 }

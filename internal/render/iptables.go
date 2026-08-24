@@ -26,34 +26,39 @@ func RenderIPSets(ds compiler.DeviceRuleset) []byte {
 	return []byte(b.String())
 }
 
-// RenderRules renders an idempotent shell script that creates (if absent)
-// and fully owns ds.ChainName, wires its jump into FORWARD at ds.ChainPosition,
-// then repopulates the chain: conntrack accept first, then the compiled
-// rules in order, then the policy default.
+// RenderRules renders an idempotent shell script that creates (if absent),
+// flushes and repopulates every chain of ds, wiring only the primary chain's
+// jump into FORWARD at its position. Secondary chains are reachable only via
+// jump rules inside other firenet chains.
 //
 // The jump is deleted and re-inserted on every run (rather than left alone
-// once present) so that changing ChainName or ChainPosition actually takes
-// effect the next time this script runs, instead of leaving a stale jump
-// from a previous configuration in place.
+// once present) so that changing the primary chain's name or position
+// actually takes effect the next time this script runs, instead of leaving a
+// stale jump from a previous configuration in place.
 func RenderRules(ds compiler.DeviceRuleset) []byte {
-	chain := ds.ChainName
 	var b strings.Builder
 	fmt.Fprint(&b, "#!/bin/sh\nset -e\n")
-	fmt.Fprintf(&b, "iptables -N %s 2>/dev/null || true\n", chain)
-	fmt.Fprintf(&b, "while iptables -C FORWARD -j %s 2>/dev/null; do iptables -D FORWARD -j %s; done\n", chain, chain)
-	if ds.ChainPosition == rules.ChainBottom {
-		fmt.Fprintf(&b, "iptables -A FORWARD -j %s\n", chain)
+	for _, ch := range ds.Chains {
+		fmt.Fprintf(&b, "iptables -N %s 2>/dev/null || true\n", ch.Name)
+	}
+	primary := ds.Chains[0]
+	fmt.Fprintf(&b, "while iptables -C FORWARD -j %s 2>/dev/null; do iptables -D FORWARD -j %s; done\n", primary.Name, primary.Name)
+	if primary.Position == rules.ChainBottom {
+		fmt.Fprintf(&b, "iptables -A FORWARD -j %s\n", primary.Name)
 	} else {
-		fmt.Fprintf(&b, "iptables -I FORWARD -j %s\n", chain)
+		fmt.Fprintf(&b, "iptables -I FORWARD -j %s\n", primary.Name)
 	}
-	fmt.Fprintf(&b, "iptables -F %s\n", chain)
-	fmt.Fprintf(&b, "iptables -A %s -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n", chain)
-
-	for _, r := range ds.Rules {
-		fmt.Fprintf(&b, "iptables -A %s %s-j %s\n", chain, matchArgs(r), actionTarget(r.Action))
+	for _, ch := range ds.Chains {
+		fmt.Fprintf(&b, "iptables -F %s\n", ch.Name)
+		fmt.Fprintf(&b, "iptables -A %s -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n", ch.Name)
+		for _, r := range ds.Rules {
+			if r.Chain != ch.Name {
+				continue
+			}
+			fmt.Fprintf(&b, "iptables -A %s %s-j %s\n", ch.Name, matchArgs(r), actionTarget(r))
+		}
+		fmt.Fprintf(&b, "iptables -A %s -j %s\n", ch.Name, actionTarget(compiler.CompiledRule{Action: ch.Default}))
 	}
-
-	fmt.Fprintf(&b, "iptables -A %s -j %s\n", chain, actionTarget(ds.DefaultAction))
 	return []byte(b.String())
 }
 
@@ -99,12 +104,14 @@ func multiportList(ports []string) string {
 	return strings.Join(out, ",")
 }
 
-func actionTarget(a rules.Action) string {
-	switch a {
+func actionTarget(r compiler.CompiledRule) string {
+	switch r.Action {
 	case rules.ActionAllow:
 		return "ACCEPT"
 	case rules.ActionReturn:
 		return "RETURN"
+	case rules.ActionJump:
+		return r.JumpTo
 	default:
 		return "DROP"
 	}

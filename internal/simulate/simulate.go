@@ -141,7 +141,7 @@ func verdict(rs compiler.DeviceRuleset, def rules.Action, flow Flow, router stri
 	if matched == nil {
 		reason := fmt.Sprintf("нет подходящих правил — применяется действие по умолчанию %q", def)
 		if def == rules.ActionReturn {
-			reason = fmt.Sprintf("нет подходящих правил — цепочка %s возвращает трафик в FORWARD", rs.ChainName)
+			reason = fmt.Sprintf("нет подходящих правил — цепочка %s возвращает трафик в FORWARD", rs.Chains[0].Name)
 		}
 		return RouterVerdict{Router: router, Action: def, Reason: reason}
 	}
@@ -151,7 +151,7 @@ func verdict(rs compiler.DeviceRuleset, def rules.Action, flow Flow, router stri
 		sideDesc(rs, matched.DstSet, matched.DstAddr, false),
 		matched.Proto, portsDesc(matched.SrcPorts), portsDesc(matched.DstPorts))
 	if matched.Action == rules.ActionReturn {
-		reason += fmt.Sprintf(" — цепочка %s возвращает трафик в FORWARD", rs.ChainName)
+		reason += fmt.Sprintf(" — цепочка %s возвращает трафик в FORWARD", rs.Chains[0].Name)
 	}
 	return RouterVerdict{
 		Router:      router,

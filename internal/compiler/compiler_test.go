@@ -451,6 +451,87 @@ func TestCompile_LiteralEndpointOutsideSubnetsPlacesEverywhere(t *testing.T) {
 	}
 }
 
+func TestCompileMultiChainPlacementAndTargetGuarantee(t *testing.T) {
+	topo := redundantTopology(t)
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	pol := &rules.Policy{Chains: []rules.Chain{
+		{
+			Name: "FIRENET-FWD", DefaultAction: rules.ActionDeny, ChainPosition: rules.ChainTop,
+			Rules: []rules.Rule{{
+				Name: "restrict", Src: []string{"A"}, Dst: []string{"B"},
+				Action: rules.ActionJump, JumpTo: "FIRENET-RESTRICTED",
+			}},
+		},
+		{Name: "FIRENET-RESTRICTED", DefaultAction: rules.ActionDeny,
+			Rules: []rules.Rule{{
+				Name: "restricted-dns", Src: []string{"A"}, Dst: []string{"B"},
+				Proto: rules.ProtoUDP, DstPorts: []string{"53"}, Action: rules.ActionAllow,
+			}},
+		},
+	}}
+	devices, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, d := range devices {
+		for _, r := range d.Rules {
+			if r.JumpTo == "FIRENET-RESTRICTED" {
+				found = true
+				ok := false
+				for _, ch := range d.Chains {
+					if ch.Name == "FIRENET-RESTRICTED" {
+						ok = true
+					}
+				}
+				if !ok {
+					t.Fatalf("device %s jumps to missing chain", d.Device)
+				}
+				if r.Chain != "FIRENET-FWD" {
+					t.Fatalf("jump rule owner = %q", r.Chain)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no compiled jump rule")
+	}
+}
+
+func TestCompileDedupKeepsDifferentChains(t *testing.T) {
+	topo := redundantTopology(t)
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	same := rules.Rule{Name: "r", Src: []string{"A"}, Dst: []string{"B"}, Action: rules.ActionAllow}
+	pol := &rules.Policy{Chains: []rules.Chain{
+		{Name: "A", DefaultAction: rules.ActionDeny, Rules: []rules.Rule{same}},
+		{Name: "B", DefaultAction: rules.ActionReturn, Rules: []rules.Rule{same}},
+	}}
+	devices, err := Compile(topo, pol, g, graph.DefaultLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range devices {
+		aCount, bCount := 0, 0
+		for _, r := range d.Rules {
+			switch r.Chain {
+			case "A":
+				aCount++
+			case "B":
+				bCount++
+			}
+		}
+		if aCount != 1 || bCount != 1 {
+			t.Fatalf("device %s: A=%d B=%d, want 1/1", d.Device, aCount, bCount)
+		}
+	}
+}
+
 func TestCompile_MirrorExpandsReverseDirection(t *testing.T) {
 	topo := redundantTopology(t)
 	pol := &rules.Policy{Chains: []rules.Chain{{
