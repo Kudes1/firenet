@@ -8,7 +8,6 @@ const {
   resizePair,
   toPercentages,
 } = require("./columns.js");
-const { formatChainPosition, formatChainName } = require("./rules.js");
 
 test("resizePair changes only the selected pair", () => {
   const widths = [46, 130, 170];
@@ -35,12 +34,4 @@ test("stored widths require the current format and a complete 100-percent layout
   assert.equal(parseColumnWidths('{"version":1,"widths":[40,60]}', 2, 2), null);
   assert.equal(parseColumnWidths('{"version":2,"widths":[40,50]}', 2, 2), null);
   assert.deepEqual(toPercentages([40, 60]), [40, 60]);
-});
-
-test("formatChainPosition and formatChainName return formatted labels", () => {
-  assert.equal(formatChainPosition("top"), "в начало FORWARD");
-  assert.equal(formatChainPosition("bottom"), "в конец FORWARD");
-  assert.equal(formatChainName("CUSTOM-CHAIN"), "CUSTOM-CHAIN");
-  assert.equal(formatChainName(""), "FIRENET-FWD");
-  assert.equal(formatChainName("   "), "FIRENET-FWD");
 });

@@ -6,17 +6,11 @@
 // server re-validates authoritatively. Column search ports the server-side
 // semantics of internal/rules/filter.go: Src/Dst accept endpoint name
 // substrings or IP/CIDR values matched against resolved subnet prefixes.
+// Rules are grouped into named chains (doc.chains); one tab is active at a
+// time and all mutations operate on that chain's rules.
 
 const RULES_COL_WIDTHS_KEY = "firenet-rules-col-widths-v4";
 const RULES_COL_WIDTHS_VERSION = 4;
-
-function formatChainPosition(pos) {
-  return pos === "bottom" ? "в конец FORWARD" : "в начало FORWARD";
-}
-
-function formatChainName(name) {
-  return name && name.trim() ? name.trim() : "FIRENET-FWD";
-}
 
 function splitPorts(s) {
   return (s || "")
@@ -51,13 +45,14 @@ function parseEndpointPrefix(s) {
 function registerRulesPage() {
   document.addEventListener("alpine:init", () => {
     Alpine.data("rulesPage", () => ({
-    doc: { defaultAction: "deny", chainName: "", chainPosition: "top", rules: [] },
+    doc: { chains: [] },
+    active: 0,
     subnets: [], // {name, cidr}
     networks: [], // {name, subnets}
     sets: [], // {name, subnets, addresses}
-    settings: { defaultAction: "deny", chainName: "", chainPosition: "top" },
+    settings: { name: "", defaultAction: "deny", chainPosition: "top" },
     filters: { name: "", comment: "", src: "", dst: "", proto: "", srcPorts: "", dstPorts: "", action: "" },
-    draft: { index: -1, name: "", comment: "", src: [], dst: [], proto: "any", action: "deny", srcPorts: "", dstPorts: "", mirror: false },
+    draft: { index: -1, name: "", comment: "", src: [], dst: [], proto: "any", action: "deny", jumpTo: "", srcPorts: "", dstPorts: "", mirror: false },
     srcSearch: "",
     srcOpen: false,
     srcCursor: 0,
@@ -84,18 +79,18 @@ function registerRulesPage() {
       }
     },
 
+    get activeChain() { return this.doc.chains[this.active]; },
+    get isPrimary() { return this.active === 0; },
+
     _applyDoc(doc) {
-      this.doc = {
-        defaultAction: doc.defaultAction || "deny",
-        chainName: doc.chainName || "",
-        chainPosition: doc.chainPosition || "top",
-        rules: (doc.rules || []).map((r) => ({ ...r })),
-      };
-      this.settings = {
-        defaultAction: this.doc.defaultAction,
-        chainName: this.doc.chainName,
-        chainPosition: this.doc.chainPosition,
-      };
+      this.doc = { chains: (doc.chains || []).map((c) => ({ ...c, rules: (c.rules || []).map((r) => ({ ...r })) })) };
+      this._syncSettings();
+    },
+
+    _syncSettings() {
+      const c = this.doc.chains[this.active];
+      if (!c) return;
+      this.settings = { name: c.name, defaultAction: c.defaultAction, chainPosition: c.chainPosition || "top" };
     },
 
     initTable(tableEl) {
@@ -171,8 +166,10 @@ function registerRulesPage() {
     },
 
     get filteredRules() {
+      const chain = this.activeChain;
+      if (!chain) return [];
       const f = this.filters;
-      return this.doc.rules
+      return chain.rules
         .map((rule, index) => ({ index, rule }))
         .filter(
           ({ rule }) =>
@@ -190,7 +187,7 @@ function registerRulesPage() {
     // --- unified create/edit modal ---
 
     emptyDraft() {
-      return { index: -1, name: "", comment: "", src: [], dst: [], proto: "any", action: "deny", srcPorts: "", dstPorts: "", mirror: false };
+      return { index: -1, name: "", comment: "", src: [], dst: [], proto: "any", action: "deny", jumpTo: "", srcPorts: "", dstPorts: "", mirror: false };
     },
 
     openAdd() {
@@ -201,7 +198,7 @@ function registerRulesPage() {
     },
 
     openEdit(i) {
-      const r = this.doc.rules[i];
+      const r = this.activeChain.rules[i];
       this.draft = {
         index: i,
         name: r.name,
@@ -210,6 +207,7 @@ function registerRulesPage() {
         dst: [...(r.dst || [])],
         proto: r.proto || "any",
         action: r.action || "deny",
+        jumpTo: r.jumpTo || "",
         srcPorts: (r.srcPorts || []).join(","),
         dstPorts: (r.dstPorts || []).join(","),
         mirror: !!r.mirror,
@@ -289,7 +287,7 @@ function registerRulesPage() {
     get draftHint() {
       const d = this.draft;
       if (!d.name.trim()) return "Укажите имя правила";
-      if (this.doc.rules.some((r, i) => i !== d.index && r.name === d.name.trim())) {
+      if (this.activeChain.rules.some((r, i) => i !== d.index && r.name === d.name.trim())) {
         return `Имя ${d.name.trim()} уже используется`;
       }
       if (!d.src.length) return "Выберите хотя бы один Src";
@@ -299,6 +297,10 @@ function registerRulesPage() {
       }
       for (const spec of splitPorts(d.srcPorts).concat(splitPorts(d.dstPorts))) {
         if (!this.validPortSpec(spec)) return `Порты: неверный формат «${spec}» (ожидается порт или диапазон from-to)`;
+      }
+      if (d.action === "jump") {
+        if (!d.jumpTo) return "Выберите цепочку для перехода";
+        if (d.jumpTo === this.activeChain.name) return "Цель перехода должна отличаться от текущей цепочки";
       }
       return "";
     },
@@ -315,14 +317,17 @@ function registerRulesPage() {
         srcPorts: splitPorts(d.srcPorts),
         dstPorts: splitPorts(d.dstPorts),
         action: d.action,
+        jumpTo: d.action === "jump" ? d.jumpTo : "",
         mirror: d.mirror,
       };
-      const rules = this.doc.rules.slice();
+      const rules = this.activeChain.rules.slice();
       if (d.index >= 0) rules[d.index] = rule;
       else rules.push(rule);
+      const chains = this.doc.chains.slice();
+      chains[this.active] = { ...chains[this.active], rules };
       this.saving = true;
       try {
-        await this.persist({ ...this.doc, rules });
+        await this.persist({ chains });
         this.modalError = "";
         this.closeModal();
       } catch (e) {
@@ -333,9 +338,11 @@ function registerRulesPage() {
     },
 
     async removeRule(i) {
-      if (!confirm(`Удалить правило «${this.doc.rules[i].name}»?`)) return;
+      if (!confirm(`Удалить правило «${this.activeChain.rules[i].name}»?`)) return;
+      const chains = this.doc.chains.slice();
+      chains[this.active] = { ...chains[this.active], rules: this.activeChain.rules.filter((_, j) => j !== i) };
       try {
-        await this.persist({ ...this.doc, rules: this.doc.rules.filter((_, j) => j !== i) });
+        await this.persist({ chains });
       } catch (e) {
         showBanner("Ошибка удаления правила: " + e.message);
       }
@@ -343,20 +350,46 @@ function registerRulesPage() {
 
     async moveRule(i, delta) {
       const j = i + delta;
-      if (j < 0 || j >= this.doc.rules.length) return;
-      const rules = this.doc.rules.slice();
+      if (j < 0 || j >= this.activeChain.rules.length) return;
+      const rules = this.activeChain.rules.slice();
       [rules[i], rules[j]] = [rules[j], rules[i]];
+      const chains = this.doc.chains.slice();
+      chains[this.active] = { ...chains[this.active], rules };
       try {
-        await this.persist({ ...this.doc, rules });
+        await this.persist({ chains });
       } catch (e) {
         showBanner("Ошибка перемещения правила: " + e.message);
       }
     },
 
+    // --- chain tabs ---
+
+    addChain() {
+      this.doc.chains.push({ name: "", defaultAction: "deny", rules: [] });
+      this.active = this.doc.chains.length - 1;
+      this.startEdit();
+    },
+
+    async removeChain(i) {
+      if (i === 0) return;
+      const name = this.doc.chains[i]?.name;
+      const referenced = this.doc.chains.some((c) => c.rules.some((r) => r.action === "jump" && r.jumpTo === name));
+      if (referenced) { showBanner("Цепочка используется действием jump — сначала уберите ссылки"); return; }
+      if (!confirm(`Удалить цепочку «${name}»?`)) return;
+      try {
+        await this.persist({ chains: this.doc.chains.filter((_, j) => j !== i) });
+        if (this.active >= this.doc.chains.length) this.active = this.doc.chains.length - 1;
+      } catch (e) {
+        showBanner("Ошибка удаления цепочки: " + e.message);
+      }
+    },
+
+    switchChain(i) { this.active = i; this.editing = false; this._syncSettings(); },
+
     // --- toolbar settings ---
 
     startEdit() {
-      this.settings = { defaultAction: this.doc.defaultAction, chainName: this.doc.chainName, chainPosition: this.doc.chainPosition };
+      this._syncSettings();
       this.editing = true;
     },
 
@@ -366,7 +399,10 @@ function registerRulesPage() {
 
     async saveSettings() {
       try {
-        await this.persist({ ...this.doc, ...this.settings });
+        const chains = this.doc.chains.slice();
+        chains[this.active] = { ...chains[this.active], name: this.settings.name.trim(), defaultAction: this.settings.defaultAction };
+        if (this.isPrimary) chains[this.active].chainPosition = this.settings.chainPosition;
+        await this.persist({ chains });
         this.editing = false;
       } catch (e) {
         showBanner("Ошибка сохранения параметров: " + e.message);
@@ -374,12 +410,7 @@ function registerRulesPage() {
     },
 
     async persist(next) {
-      const doc = await Api.put("/api/rules", {
-        defaultAction: next.defaultAction,
-        chainName: next.chainName,
-        chainPosition: next.chainPosition,
-        rules: next.rules,
-      });
+      const doc = await Api.put("/api/rules", { chains: next.chains });
       this._applyDoc(doc);
       showBanner("Правила сохранены", "ok");
     },
@@ -388,4 +419,3 @@ function registerRulesPage() {
 }
 
 if (typeof document !== "undefined") registerRulesPage();
-if (typeof module !== "undefined") module.exports = { formatChainPosition, formatChainName };

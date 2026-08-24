@@ -16,11 +16,20 @@
 
 <main x-data="rulesPage">
   <form id="rules-form" @submit.prevent>
+    <div class="chain-tabs">
+      <template x-for="(c, i) in doc.chains" :key="i">
+        <button type="button" class="chain-tab" :class="{ active: active === i }" @click="switchChain(i)">
+          <span x-text="c.name || 'без имени'"></span>
+          <span x-show="i > 0" class="chain-tab-remove" @click.stop="removeChain(i)" title="Удалить цепочку">×</span>
+        </button>
+      </template>
+      <button type="button" class="chain-tab-add" @click="addChain()">+ цепочка</button>
+    </div>
     <div class="table-toolbar">
       <div class="rules-settings-group" x-show="!editing">
-        <span class="settings-badge" title="Действие по умолчанию">Действие: <strong x-text="doc.defaultAction"></strong></span>
-        <span class="settings-badge" title="Имя цепочки">Цепочка: <strong x-text="formatChainName(doc.chainName)"></strong></span>
-        <span class="settings-badge" title="Вставка перехода">Переход: <strong x-text="formatChainPosition(doc.chainPosition)"></strong></span>
+        <span class="settings-badge" title="Действие по умолчанию">Действие: <strong x-text="activeChain?.defaultAction || 'deny'"></strong></span>
+        <span class="settings-badge" title="Имя цепочки">Цепочка: <strong x-text="activeChain?.name || 'без имени'"></strong></span>
+        <span class="settings-badge" x-show="isPrimary" title="Вставка перехода">Переход: <strong x-text="activeChain?.chainPosition === 'bottom' ? 'в конец FORWARD' : 'в начало FORWARD'"></strong></span>
         <button type="button" class="secondary btn-sm" @click="startEdit()" title="Разблокировать и изменить параметры">⚙ Изменить параметры</button>
       </div>
 
@@ -32,10 +41,10 @@
             <option value="return">return</option>
           </select>
         </label>
-        <label>Имя цепочки:
-          <input x-model.trim="settings.chainName" placeholder="FIRENET-FWD">
+        <label>Цепочка:
+          <input x-model.trim="settings.name" placeholder="FIRENET-FWD">
         </label>
-        <label>Вставка перехода:
+        <label x-show="isPrimary">Вставка перехода:
           <select x-model="settings.chainPosition">
             <option value="top">в начало FORWARD</option>
             <option value="bottom">в конец FORWARD</option>
@@ -48,7 +57,7 @@
       </div>
 
       <div class="toolbar-actions">
-        <button type="button" class="secondary btn-sm" @click="searchOpen = !searchOpen" title="Поиск по правилам">&#128269;</button>
+        <button type="button" class="secondary btn-search" @click="searchOpen = !searchOpen" title="Поиск по правилам"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.25"/><path d="m13.2 13.2-4.3-4.3"/></svg></button>
         <button type="button" class="primary" @click="openAdd()">+ правило</button>
       </div>
     </div>
@@ -220,6 +229,7 @@
           <option value="allow">allow</option>
           <option value="deny">deny</option>
           <option value="return">return</option>
+          <option value="jump">переход в цепочку</option>
         </select>
       </label>
     </div>
@@ -231,6 +241,15 @@
         <input x-model.trim="draft.dstPorts" placeholder="80,443">
       </label>
     </div>
+    <label x-show="draft.action === 'jump'">
+      <span>Перейти в цепочку</span>
+      <select x-model="draft.jumpTo">
+        <option value="" disabled>— выберите —</option>
+        <template x-for="c in doc.chains.filter((c, i) => i !== active)" :key="c.name">
+          <option :value="c.name" x-text="c.name"></option>
+        </template>
+      </select>
+    </label>
     <label class="modal-check">
       <input type="checkbox" x-model="draft.mirror" title="При компиляции также разрешить трафик в обратном направлении (dst → src)">
       Зеркало — также разрешить обратное направление

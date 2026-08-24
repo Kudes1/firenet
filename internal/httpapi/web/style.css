@@ -511,6 +511,8 @@ td:has(> input[type="checkbox"]) {
   padding: 0.25rem 0.5rem;
   font-size: 0.85rem;
 }
+/* Search glyph matches the primary action's text size (1rem), not btn-sm's. */
+.btn-search svg { width: 1rem; height: 1rem; display: block; }
 
 .table-toolbar {
   display: flex;
@@ -570,6 +572,12 @@ td:has(> input[type="checkbox"]) {
   align-items: center;
   margin-left: auto;
 }
+
+.chain-tabs { display: flex; gap: 6px; margin-bottom: var(--space-2); flex-wrap: wrap; align-items: center; }
+.chain-tab { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--fg); cursor: pointer; }
+.chain-tab.active { font-weight: 600; background: var(--panel-bg-hover); border-color: var(--accent); }
+.chain-tab-remove { color: var(--danger); cursor: pointer; padding: 0 2px; }
+.chain-tab-add { border-style: dashed; color: var(--muted); }
 
 .multiselect { position: relative; display: block; width: 100%; }
 details.multiselect[open] { position: relative; z-index: 25; }

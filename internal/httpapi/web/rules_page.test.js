@@ -8,7 +8,7 @@ const vm = require("node:vm");
 
 // Boots the rules Alpine component outside a browser and exercises its
 // unified create/edit modal, client-side filtering (including IP/CIDR
-// search) and persistence against a stubbed fetch.
+// search), chain tabs, and persistence against a stubbed fetch.
 
 function bootPage({ failPut = null } = {}) {
   const factories = {};
@@ -28,20 +28,19 @@ function bootPage({ failPut = null } = {}) {
     sets: [{ name: "blocked", subnets: ["a"], addresses: ["10.0.0.9"] }],
   };
   const rulesFixture = {
-    defaultAction: "deny",
-    chainName: "",
-    chainPosition: "top",
-    rules: [
+    chains: [
       {
-        name: "web",
-        comment: "",
-        src: ["office"],
-        dst: ["dmz"],
-        proto: "tcp",
-        srcPorts: [],
-        dstPorts: ["80"],
-        action: "allow",
-        mirror: false,
+        name: "FIRENET-FWD", defaultAction: "deny", chainPosition: "top",
+        rules: [
+          { name: "web", comment: "", src: ["office"], dst: ["dmz"], proto: "tcp", srcPorts: [], dstPorts: ["80"], action: "allow", mirror: false },
+          { name: "to-limited", comment: "", src: ["guests"], dst: ["any"], proto: "any", srcPorts: [], dstPorts: [], action: "jump", jumpTo: "LIMITED", mirror: false },
+        ],
+      },
+      {
+        name: "LIMITED", defaultAction: "deny",
+        rules: [
+          { name: "limited-dns", comment: "", src: ["guests"], dst: ["dns"], proto: "udp", srcPorts: [], dstPorts: ["53"], action: "allow", mirror: false },
+        ],
       },
     ],
   };
@@ -98,7 +97,7 @@ async function bootLoadedPage() {
 test("init loads the policy doc and orders endpoints as any, subnets, sets", async () => {
   const { page } = await bootLoadedPage();
 
-  assert.equal(page.doc.defaultAction, "deny");
+  assert.equal(page.activeChain.defaultAction, "deny");
   assert.deepEqual([...page.endpoints], ["any", "a", "b", "blocked"]);
 });
 
@@ -120,7 +119,7 @@ test("resolvePrefixes matches a literal endpoint by its own CIDR", async () => {
 test("draftHint mirrors server-side rule validation", async () => {
   const { page } = await bootLoadedPage();
 
-  page.draft = { index: -1, name: "", comment: "", src: ["any"], dst: ["any"], proto: "any", action: "deny", srcPorts: "", dstPorts: "", mirror: false };
+  page.draft = { index: -1, name: "", comment: "", src: ["any"], dst: ["any"], proto: "any", action: "deny", jumpTo: "", srcPorts: "", dstPorts: "", mirror: false };
   assert.match(page.draftHint, /Укажите имя/);
 
   page.draft.name = "web";
@@ -241,12 +240,12 @@ test("saveDraft appends a new rule and persists the whole policy doc", async () 
   await page.saveDraft();
 
   const put = calls.find((c) => c.path === "/api/rules" && c.method === "PUT");
-  assert.equal(put.body.defaultAction, "deny");
-  assert.equal(put.body.chainPosition, "top");
-  assert.deepEqual(put.body.rules.map((r) => r.name), ["web", "dns"]);
-  assert.deepEqual(put.body.rules[1].dstPorts, ["53"]);
+  assert.equal(put.body.chains[0].defaultAction, "deny");
+  assert.equal(put.body.chains[0].chainPosition, "top");
+  assert.deepEqual(put.body.chains[0].rules.map((r) => r.name), ["web", "to-limited", "dns"]);
+  assert.deepEqual(put.body.chains[0].rules[2].dstPorts, ["53"]);
   assert.ok(calls.some((c) => c.path === "dialog.close"));
-  assert.equal(page.doc.rules.length, 2);
+  assert.equal(page.activeChain.rules.length, 3);
 });
 
 test("saveDraft replaces the edited rule in place", async () => {
@@ -257,9 +256,9 @@ test("saveDraft replaces the edited rule in place", async () => {
   await page.saveDraft();
 
   const put = calls.find((c) => c.method === "PUT");
-  assert.equal(put.body.rules.length, 1);
-  assert.equal(put.body.rules[0].action, "deny");
-  assert.equal(page.doc.rules[0].action, "deny");
+  assert.equal(put.body.chains[0].rules.length, 2);
+  assert.equal(put.body.chains[0].rules[0].action, "deny");
+  assert.equal(page.activeChain.rules[0].action, "deny");
 });
 
 test("saveDraft keeps the modal open with the server error on rejection", async () => {
@@ -276,29 +275,29 @@ test("saveDraft keeps the modal open with the server error on rejection", async 
 
 test("moveRule swaps neighbours and removeRule deletes after confirmation", async () => {
   const { page, calls } = await bootLoadedPage();
-  page.doc.rules.push({ ...page.doc.rules[0], name: "second" });
+  page.activeChain.rules.push({ ...page.activeChain.rules[0], name: "second" });
 
-  await page.moveRule(1, -1);
-  assert.deepEqual(page.doc.rules.map((r) => r.name), ["second", "web"]);
+  await page.moveRule(2, -1);
+  assert.deepEqual(page.activeChain.rules.map((r) => r.name), ["web", "second", "to-limited"]);
   let put = calls.find((c) => c.method === "PUT");
-  assert.deepEqual(put.body.rules.map((r) => r.name), ["second", "web"]);
+  assert.deepEqual(put.body.chains[0].rules.map((r) => r.name), ["web", "second", "to-limited"]);
 
-  await page.removeRule(0);
+  await page.removeRule(1);
   put = calls.findLast((c) => c.method === "PUT");
-  assert.deepEqual(page.doc.rules.map((r) => r.name), ["web"]);
+  assert.deepEqual(page.activeChain.rules.map((r) => r.name), ["web", "to-limited"]);
 });
 
 test("saveSettings persists toolbar parameters", async () => {
   const { page, calls } = await bootLoadedPage();
-  page.settings = { defaultAction: "allow", chainName: "MY-CHAIN", chainPosition: "bottom" };
+  page.settings = { name: "MY-CHAIN", defaultAction: "allow", chainPosition: "bottom" };
 
   await page.saveSettings();
 
   const put = calls.find((c) => c.method === "PUT");
-  assert.equal(put.body.defaultAction, "allow");
-  assert.equal(put.body.chainName, "MY-CHAIN");
-  assert.equal(put.body.chainPosition, "bottom");
-  assert.equal(page.doc.defaultAction, "allow");
+  assert.equal(put.body.chains[0].defaultAction, "allow");
+  assert.equal(put.body.chains[0].name, "MY-CHAIN");
+  assert.equal(put.body.chains[0].chainPosition, "bottom");
+  assert.equal(page.activeChain.defaultAction, "allow");
 });
 
 test("filteredRules matches endpoints by IP, partial IP, CIDR and name substring", async () => {
@@ -324,4 +323,52 @@ test("filteredRules matches endpoints by IP, partial IP, CIDR and name substring
 
   page.filters = { ...page.filters, name: "nope" };
   assert.deepEqual(page.filteredRules, []);
+});
+
+test("tabs switch the visible chain", async () => {
+  const { page } = await bootLoadedPage();
+  assert.equal(page.activeChain.name, "FIRENET-FWD");
+  page.active = 1;
+  assert.deepEqual(page.filteredRules.map((x) => x.rule.name), ["limited-dns"]);
+});
+
+test("addChain appends a secondary chain and activates settings edit", async () => {
+  const { page } = await bootLoadedPage();
+  page.addChain();
+  assert.equal(page.doc.chains.length, 3);
+  assert.equal(page.doc.chains[2].name, "");
+  assert.equal(page.active, 2);
+  assert.equal(page.editing, true);
+});
+
+test("removeChain refuses the primary and jump-referenced chains", async () => {
+  const { page } = await bootLoadedPage();
+  await page.removeChain(0); // primary
+  assert.equal(page.doc.chains.length, 2);
+  await page.removeChain(1); // referenced by jumpTo
+  assert.equal(page.doc.chains.length, 2);
+});
+
+test("draftHint requires jumpTo for jump action", async () => {
+  const { page } = await bootLoadedPage();
+  page.openAdd();
+  page.draft.name = "x";
+  page.draft.src = ["office"];
+  page.draft.dst = ["dmz"];
+  page.draft.action = "jump";
+  page.draft.jumpTo = "";
+  assert.match(page.draftHint, /цепочк/i);
+  page.draft.jumpTo = "LIMITED";
+  assert.equal(page.draftHint, "");
+});
+
+test("persist sends chains-shaped body", async () => {
+  const { page, calls } = await bootLoadedPage();
+  page.openAdd();
+  Object.assign(page.draft, { name: "y", src: ["office"], dst: ["dmz"] });
+
+  await page.saveDraft();
+
+  const put = calls.find((c) => c.path === "/api/rules" && c.method === "PUT");
+  assert.ok(Array.isArray(put.body.chains));
 });
