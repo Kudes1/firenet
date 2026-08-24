@@ -81,7 +81,7 @@ func ResolveIP(topo *topology.Topology, addr netip.Addr) (string, error) {
 // every simple path exactly like the compiler does, and produce a per-router
 // verdict over that device's compiled rules. A path is denied at its first
 // denying router; otherwise allowed.
-func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph, limits graph.Limits, defaultAction rules.Action, flow Flow) (*Report, error) {
+func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph, limits graph.Limits, flow Flow) (*Report, error) {
 	srcName, err := ResolveIP(topo, flow.Src)
 	if err != nil {
 		return nil, fmt.Errorf("src: %w", err)
@@ -114,7 +114,7 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 		pr := PathResult{Nodes: p.Nodes, Routers: []RouterVerdict{}}
 		denied, returned := false, false
 		for _, r := range p.Routers() {
-			v := verdict(byDevice[r], defaultAction, flow, r)
+			v := verdict(byDevice[r], flow, r)
 			switch v.Action {
 			case rules.ActionDeny:
 				denied = true
@@ -136,29 +136,101 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 	return rep, nil
 }
 
-func verdict(rs compiler.DeviceRuleset, def rules.Action, flow Flow, router string) RouterVerdict {
-	matched := compiler.MatchFlow(rs, flow.Src, flow.Dst, flow.Proto, flow.SrcPorts, flow.DstPorts)
-	if matched == nil {
-		reason := fmt.Sprintf("нет подходящих правил — применяется действие по умолчанию %q", def)
-		if def == rules.ActionReturn {
-			reason = fmt.Sprintf("нет подходящих правил — цепочка %s возвращает трафик в FORWARD", rs.Chains[0].Name)
+// verdict walks the chain graph starting at the primary chain: jump descends,
+// return ascends (or hands the packet back to FORWARD from the primary),
+// terminal actions end the walk. The reason trail records every transition.
+func verdict(rs compiler.DeviceRuleset, flow Flow, router string) RouterVerdict {
+	if len(rs.Chains) == 0 {
+		return RouterVerdict{Router: router, Action: rules.ActionAllow, Reason: "устройство не имеет скомпилированных цепочек — трафик проходит через него без фильтрации"}
+	}
+	type frame struct {
+		name string
+		from int
+	}
+	stack := []frame{{rs.Chains[0].Name, 0}}
+	var trail []string
+	var last *compiler.CompiledRule
+	for len(stack) > 0 {
+		top := len(stack) - 1
+		cur := stack[top]
+		m, idx := matchFrom(rs, cur.name, cur.from, flow)
+		if m != nil {
+			last = m
 		}
-		return RouterVerdict{Router: router, Action: def, Reason: reason}
+		act := defaultOf(rs, cur.name)
+		if m != nil {
+			act = m.Action
+		}
+		switch act {
+		case rules.ActionJump:
+			detail := ruleDetail(rs, m)
+			trail = append(trail, fmt.Sprintf("сработало правило %q (%s) — прыжок в цепочку %s", m.Comment, detail, m.JumpTo))
+			stack[top].from = idx + 1
+			stack = append(stack, frame{m.JumpTo, 0})
+		case rules.ActionReturn:
+			if len(stack) > 1 {
+				trail = append(trail, fmt.Sprintf("цепочка %s возвращает трафик в вызывающую цепочку", cur.name))
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			reason := strings.Join(trail, "; ")
+			if m != nil {
+				reason += fmt.Sprintf("; сработало правило %q (%s)", m.Comment, ruleDetail(rs, m))
+			} else {
+				reason += "; нет подходящих правил"
+			}
+			return RouterVerdict{Router: router, Action: rules.ActionReturn,
+				MatchedRule: matchedComment(last), Reason: reason + " — цепочка " + cur.name + " возвращает трафик в FORWARD"}
+		default:
+			reason := strings.Join(trail, "; ")
+			if m != nil {
+				reason += fmt.Sprintf("; сработало правило %q (%s)", m.Comment, ruleDetail(rs, m))
+			} else {
+				reason += fmt.Sprintf("; нет подходящих правил — применяется действие по умолчанию %q цепочки %s", act, cur.name)
+			}
+			return RouterVerdict{Router: router, Action: act, MatchedRule: matchedComment(last), Reason: reason}
+		}
 	}
-	reason := fmt.Sprintf("сработало правило %q (%s): src %s, dst %s, proto %s, порты src %s / dst %s",
-		matched.Comment, matched.Action,
-		sideDesc(rs, matched.SrcSet, matched.SrcAddr, true),
-		sideDesc(rs, matched.DstSet, matched.DstAddr, false),
-		matched.Proto, portsDesc(matched.SrcPorts), portsDesc(matched.DstPorts))
-	if matched.Action == rules.ActionReturn {
-		reason += fmt.Sprintf(" — цепочка %s возвращает трафик в FORWARD", rs.Chains[0].Name)
+	// недостижимо: валидация исключает циклы, терминальные действия завершают обход
+	return RouterVerdict{Router: router, Action: rules.ActionDeny, Reason: "исчерпан обход цепочек"}
+}
+
+func matchFrom(rs compiler.DeviceRuleset, chain string, from int, flow Flow) (*compiler.CompiledRule, int) {
+	sub := rs
+	sub.Rules = rs.Rules[from:]
+	m := compiler.MatchFlowInChain(sub, chain, flow.Src, flow.Dst, flow.Proto, flow.SrcPorts, flow.DstPorts)
+	if m == nil {
+		return nil, -1
 	}
-	return RouterVerdict{
-		Router:      router,
-		Action:      matched.Action,
-		MatchedRule: matched.Comment,
-		Reason:      reason,
+	for i := range sub.Rules {
+		if &sub.Rules[i] == m {
+			return m, from + i
+		}
 	}
+	return m, from
+}
+
+func defaultOf(rs compiler.DeviceRuleset, chain string) rules.Action {
+	for _, ch := range rs.Chains {
+		if ch.Name == chain {
+			return ch.Default
+		}
+	}
+	return rules.ActionDeny
+}
+
+func matchedComment(m *compiler.CompiledRule) string {
+	if m == nil {
+		return ""
+	}
+	return m.Comment
+}
+
+func ruleDetail(rs compiler.DeviceRuleset, m *compiler.CompiledRule) string {
+	return fmt.Sprintf("src %s, dst %s, proto %s, порты src %s / dst %s",
+		sideDesc(rs, m.SrcSet, m.SrcAddr, true),
+		sideDesc(rs, m.DstSet, m.DstAddr, false),
+		m.Proto, portsDesc(m.SrcPorts), portsDesc(m.DstPorts))
 }
 
 func sideDesc(rs compiler.DeviceRuleset, set, literal string, src bool) string {

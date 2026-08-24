@@ -84,7 +84,7 @@ func loadTopo(t *testing.T) (*topology.Topology, *graph.Graph) {
 	return topo, g
 }
 
-func compilePolicy(t *testing.T, topo *topology.Topology, g *graph.Graph, policyYAML string) ([]compiler.DeviceRuleset, rules.Action) {
+func compilePolicy(t *testing.T, topo *topology.Topology, g *graph.Graph, policyYAML string) []compiler.DeviceRuleset {
 	t.Helper()
 	pol, err := rules.Load(strings.NewReader(policyYAML))
 	if err != nil {
@@ -97,20 +97,20 @@ func compilePolicy(t *testing.T, topo *topology.Topology, g *graph.Graph, policy
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	return sets, pol.Primary().DefaultAction
+	return sets
 }
 
 func runSim(t *testing.T, policyYAML string, src, dst string, proto rules.Proto, dstPorts ...string) *simulate.Report {
 	t.Helper()
 	topo, g := loadTopo(t)
-	sets, def := compilePolicy(t, topo, g, policyYAML)
+	sets := compilePolicy(t, topo, g, policyYAML)
 	flow := simulate.Flow{
 		Src:      netip.MustParseAddr(src),
 		Dst:      netip.MustParseAddr(dst),
 		Proto:    proto,
 		DstPorts: dstPorts,
 	}
-	rep, err := simulate.Run(topo, sets, g, graph.DefaultLimits(), def, flow)
+	rep, err := simulate.Run(topo, sets, g, graph.DefaultLimits(), flow)
 	if err != nil {
 		t.Fatalf("simulate.Run: %v", err)
 	}

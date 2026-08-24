@@ -21,8 +21,8 @@ func matchFixture() DeviceRuleset {
 			{Name: "fn_dmz", DisplayName: "dmz", CIDRs: []string{"10.0.1.0/24"}},
 		},
 		Rules: []CompiledRule{
-			{Comment: "office-to-dmz", SrcSet: "fn_office", DstSet: "fn_dmz", Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
-			{Comment: "catch-all-deny", Proto: rules.ProtoAny, Action: rules.ActionDeny},
+			{Chain: "FWD", Comment: "office-to-dmz", SrcSet: "fn_office", DstSet: "fn_dmz", Proto: rules.ProtoTCP, DstPorts: []string{"443"}, Action: rules.ActionAllow},
+			{Chain: "FWD", Comment: "catch-all-deny", Proto: rules.ProtoAny, Action: rules.ActionDeny},
 		},
 	}
 }
@@ -45,7 +45,7 @@ func TestMatchFlow(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := MatchFlow(matchFixture(), tt.src, tt.dst, tt.proto, tt.srcPorts, tt.dstPorts)
+			got := MatchFlowInChain(matchFixture(), "FWD", tt.src, tt.dst, tt.proto, tt.srcPorts, tt.dstPorts)
 			if tt.want == "" {
 				if got != nil {
 					t.Fatalf("want nil, got %+v", got)
@@ -61,7 +61,7 @@ func TestMatchFlow(t *testing.T) {
 
 func TestMatchFlow_FirstMatchOrder(t *testing.T) {
 	rs := matchFixture()
-	got := MatchFlow(rs, officeIP, dmzIP, rules.ProtoTCP, nil, []string{"443"})
+	got := MatchFlowInChain(rs, "FWD", officeIP, dmzIP, rules.ProtoTCP, nil, []string{"443"})
 	if got == nil || got.Comment != "office-to-dmz" {
 		t.Fatalf("first-match order broken: %+v", got)
 	}
@@ -70,35 +70,35 @@ func TestMatchFlow_FirstMatchOrder(t *testing.T) {
 func TestMatchFlow_LiteralAndUnconditional(t *testing.T) {
 	rs := DeviceRuleset{
 		Rules: []CompiledRule{
-			{Comment: "host-block", SrcAddr: "10.0.0.9/32", Proto: rules.ProtoAny, Action: rules.ActionDeny},
-			{Comment: "uncond", Action: rules.ActionAllow},
+			{Chain: "FWD", Comment: "host-block", SrcAddr: "10.0.0.9/32", Proto: rules.ProtoAny, Action: rules.ActionDeny},
+			{Chain: "FWD", Comment: "uncond", Action: rules.ActionAllow},
 		},
 	}
-	if r := MatchFlow(rs, netip.MustParseAddr("10.0.0.9"), dmzIP, "", nil, nil); r == nil || r.Comment != "host-block" {
+	if r := MatchFlowInChain(rs, "FWD", netip.MustParseAddr("10.0.0.9"), dmzIP, "", nil, nil); r == nil || r.Comment != "host-block" {
 		t.Fatalf("literal /32 must match contained host: %+v", r)
 	}
-	if r := MatchFlow(rs, officeIP, dmzIP, "", nil, nil); r == nil || r.Comment != "uncond" {
+	if r := MatchFlowInChain(rs, "FWD", officeIP, dmzIP, "", nil, nil); r == nil || r.Comment != "uncond" {
 		t.Fatalf("empty SrcSet/DstSet is unconditional: %+v", r)
 	}
 }
 
 func TestMatchFlow_PortRanges(t *testing.T) {
 	rs := DeviceRuleset{
-		Rules: []CompiledRule{{Comment: "range", Proto: rules.ProtoTCP, DstPorts: []string{"1000:2000"}, Action: rules.ActionAllow}},
+		Rules: []CompiledRule{{Chain: "FWD", Comment: "range", Proto: rules.ProtoTCP, DstPorts: []string{"1000:2000"}, Action: rules.ActionAllow}},
 	}
-	if r := MatchFlow(rs, officeIP, dmzIP, rules.ProtoTCP, nil, []string{"1500"}); r == nil {
+	if r := MatchFlowInChain(rs, "FWD", officeIP, dmzIP, rules.ProtoTCP, nil, []string{"1500"}); r == nil {
 		t.Fatal("1500 inside 1000:2000 must match")
 	}
-	if r := MatchFlow(rs, officeIP, dmzIP, rules.ProtoTCP, nil, []string{"2500"}); r != nil {
+	if r := MatchFlowInChain(rs, "FWD", officeIP, dmzIP, rules.ProtoTCP, nil, []string{"2500"}); r != nil {
 		t.Fatalf("2500 outside range must not match: %+v", r)
 	}
 }
 
 func TestMatchFlow_NoMatchReturnsNil(t *testing.T) {
 	rs := DeviceRuleset{
-		Rules: []CompiledRule{{Comment: "x", SrcSet: "fn_missing", Action: rules.ActionAllow}},
+		Rules: []CompiledRule{{Chain: "FWD", Comment: "x", SrcSet: "fn_missing", Action: rules.ActionAllow}},
 	}
-	if got := MatchFlow(rs, officeIP, dmzIP, "", nil, nil); got != nil {
+	if got := MatchFlowInChain(rs, "FWD", officeIP, dmzIP, "", nil, nil); got != nil {
 		t.Fatalf("unknown ipset name must not match, got %+v", got)
 	}
 }

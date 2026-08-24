@@ -8,17 +8,16 @@ import (
 	"github.com/kudes1/firenet/internal/rules"
 )
 
-// MatchFlow returns the first CompiledRule of rs matching a packet from src
-// to dst — the same first-match order the rendered iptables script evaluates
-// in. nil means no rule matches and traffic falls to rs.DefaultAction.
-// Semantics mirror render exactly: empty set/literal side is unconditional;
-// an ipset matches when any of its CIDRs contains the address; a rule with
-// ProtoAny matches every protocol, otherwise the flow proto must be set and
-// equal to the rule proto; a rule without ports matches any port, otherwise
-// some flow port must intersect a rule entry ("a:b" ranges overlap numerically).
-func MatchFlow(rs DeviceRuleset, src, dst netip.Addr, proto rules.Proto, srcPorts, dstPorts []string) *CompiledRule {
+// MatchFlowInChain returns the first CompiledRule of rs belonging to chain
+// and matching a packet from src to dst — the same first-match order the
+// rendered iptables script evaluates in. nil means no rule of that chain
+// matches and traffic falls to that chain's default action.
+func MatchFlowInChain(rs DeviceRuleset, chain string, src, dst netip.Addr, proto rules.Proto, srcPorts, dstPorts []string) *CompiledRule {
 	for i := range rs.Rules {
 		r := &rs.Rules[i]
+		if r.Chain != chain {
+			continue
+		}
 		if !sideMatches(rs, r.SrcSet, r.SrcAddr, src) || !sideMatches(rs, r.DstSet, r.DstAddr, dst) {
 			continue
 		}
