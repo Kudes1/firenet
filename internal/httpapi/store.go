@@ -92,12 +92,12 @@ func emptySubnetsYAML() []byte {
 }
 
 func emptyPolicyYAML() []byte {
-	b, err := yaml.Marshal(PolicyDoc{
+	b, err := yaml.Marshal(PolicyDoc{Chains: []ChainDoc{{
+		Name:          rules.DefaultChainName,
 		DefaultAction: "deny",
-		ChainName:     rules.DefaultChainName,
 		ChainPosition: string(rules.ChainTop),
 		Rules:         []RuleDoc{},
-	})
+	}}})
 	if err != nil {
 		panic(err) // static value, can't fail
 	}

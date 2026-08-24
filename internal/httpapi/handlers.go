@@ -187,12 +187,12 @@ func (h *handlers) getRules(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	var doc PolicyDoc
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
+	pol, err := rules.Load(bytes.NewReader(raw))
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("parse stored rules: %w", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, doc)
+	writeJSON(w, http.StatusOK, NewPolicyDoc(pol))
 }
 
 func (h *handlers) putRules(w http.ResponseWriter, r *http.Request) {
@@ -222,17 +222,13 @@ func (h *handlers) validateAndPersistRules(doc PolicyDoc) (invalid bool, err err
 	if err != nil {
 		return false, err
 	}
-
+	pol := doc.ToPolicy()
+	if err := pol.Validate(topo); err != nil {
+		return true, err
+	}
 	raw, err := yaml.Marshal(doc)
 	if err != nil {
 		return false, err
-	}
-	pol, err := rules.Load(bytes.NewReader(raw))
-	if err != nil {
-		return true, err
-	}
-	if err := pol.Validate(topo); err != nil {
-		return true, err
 	}
 	return false, h.store.WriteRules(raw)
 }

@@ -487,15 +487,50 @@ func TestPutRules_RejectsUnknownEndpoint(t *testing.T) {
 	h, store := newTestServer(t)
 	before, _ := store.ReadRules()
 
-	doc := PolicyDoc{
+	doc := PolicyDoc{Chains: []ChainDoc{{
 		DefaultAction: "deny",
 		Rules: []RuleDoc{
 			{Name: "bad", Src: []string{"office"}, Dst: []string{"does-not-exist"}, Action: "allow"},
 		},
-	}
+	}}}
 	rec := doJSON(t, h, http.MethodPut, "/api/rules", doc)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got status = %d, body = %s", rec.Code, rec.Body)
+	}
+	after, _ := store.ReadRules()
+	if !bytes.Equal(before, after) {
+		t.Fatalf("invalid rules must not be persisted")
+	}
+}
+
+func TestGetRulesNormalizesLegacyFile(t *testing.T) {
+	h, store := newTestServer(t)
+	if err := store.WriteRules([]byte("defaultAction: deny\nchainName: OLD\nrules: []\n")); err != nil {
+		t.Fatal(err)
+	}
+	rec := doJSON(t, h, http.MethodGet, "/api/rules", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var doc PolicyDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Chains) != 1 || doc.Chains[0].Name != "OLD" {
+		t.Fatalf("normalized doc = %+v", doc)
+	}
+}
+
+func TestPutRules_RejectsUnknownJumpTarget(t *testing.T) {
+	h, store := newTestServer(t)
+	before, _ := store.ReadRules()
+	doc := PolicyDoc{Chains: []ChainDoc{{
+		Name: "FIRENET-FWD", DefaultAction: "deny",
+		Rules: []RuleDoc{{Name: "r", Src: []string{"any"}, Dst: []string{"any"}, Action: "jump", JumpTo: "GHOST"}},
+	}}}
+	rec := doJSON(t, h, http.MethodPut, "/api/rules", doc)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("code = %d, want 422", rec.Code)
 	}
 	after, _ := store.ReadRules()
 	if !bytes.Equal(before, after) {
