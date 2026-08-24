@@ -6,8 +6,6 @@
 // server re-validates authoritatively. Column search ports the server-side
 // semantics of internal/rules/filter.go: Src/Dst accept endpoint name
 // substrings or IP/CIDR values matched against resolved subnet prefixes.
-// Rules are grouped into named chains (doc.chains); one tab is active at a
-// time and all mutations operate on that chain's rules.
 
 const RULES_COL_WIDTHS_KEY = "firenet-rules-col-widths-v4";
 const RULES_COL_WIDTHS_VERSION = 4;
@@ -362,8 +360,6 @@ function registerRulesPage() {
       }
     },
 
-    // --- chain tabs ---
-
     addChain() {
       this.doc.chains.push({ name: "", defaultAction: "deny", rules: [] });
       this.active = this.doc.chains.length - 1;
@@ -378,7 +374,8 @@ function registerRulesPage() {
       if (!confirm(`Удалить цепочку «${name}»?`)) return;
       try {
         await this.persist({ chains: this.doc.chains.filter((_, j) => j !== i) });
-        if (this.active >= this.doc.chains.length) this.active = this.doc.chains.length - 1;
+        if (i < this.active) this.active -= 1;
+        else if (this.active >= this.doc.chains.length) this.active = this.doc.chains.length - 1;
       } catch (e) {
         showBanner("Ошибка удаления цепочки: " + e.message);
       }
