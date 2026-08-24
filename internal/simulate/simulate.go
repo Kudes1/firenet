@@ -173,21 +173,23 @@ func verdict(rs compiler.DeviceRuleset, flow Flow, router string) RouterVerdict 
 				stack = stack[:len(stack)-1]
 				continue
 			}
-			reason := strings.Join(trail, "; ")
+			parts := append([]string(nil), trail...)
 			if m != nil {
-				reason += fmt.Sprintf("; сработало правило %q (%s)", m.Comment, ruleDetail(rs, m))
+				parts = append(parts, fmt.Sprintf("сработало правило %q (%s)", m.Comment, ruleDetail(rs, m)))
 			} else {
-				reason += "; нет подходящих правил"
+				parts = append(parts, "нет подходящих правил")
 			}
+			reason := strings.Join(parts, "; ")
 			return RouterVerdict{Router: router, Action: rules.ActionReturn,
 				MatchedRule: matchedComment(last), Reason: reason + " — цепочка " + cur.name + " возвращает трафик в FORWARD"}
 		default:
-			reason := strings.Join(trail, "; ")
+			parts := append([]string(nil), trail...)
 			if m != nil {
-				reason += fmt.Sprintf("; сработало правило %q (%s)", m.Comment, ruleDetail(rs, m))
+				parts = append(parts, fmt.Sprintf("сработало правило %q (%s)", m.Comment, ruleDetail(rs, m)))
 			} else {
-				reason += fmt.Sprintf("; нет подходящих правил — применяется действие по умолчанию %q цепочки %s", act, cur.name)
+				parts = append(parts, fmt.Sprintf("нет подходящих правил — применяется действие по умолчанию %q цепочки %s", act, cur.name))
 			}
+			reason := strings.Join(parts, "; ")
 			return RouterVerdict{Router: router, Action: act, MatchedRule: matchedComment(last), Reason: reason}
 		}
 	}
