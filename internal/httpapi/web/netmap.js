@@ -59,5 +59,27 @@ const NetMap = (() => {
     return { x: a.x + dx * t + (-dy / len) * offset, y: a.y + dy * t + (dx / len) * offset };
   }
 
-  return Object.freeze({ SVG_NS, DEVICE_W, DEVICE_H, NET_W, NET_H, UNION_COLORS, KINDS, el, center, linkOffsets, spreadOffset, pointAt });
+  // cloudSegs выдаёт контур L2-облака как замкнутый список квадратичных
+  // сегментов: прямоугольный периметр с наружными выпуклостями (глубина 6).
+  function cloudSegs(x, y, w, h) {
+    const depth = 6, HB = 7, VB = 3;
+    const pts = [[x, y]];
+    const edge = (x1, y1, x2, y2, n) => {
+      for (let i = 1; i <= n + 1; i++) pts.push([x1 + ((x2 - x1) * i) / (n + 1), y1 + ((y2 - y1) * i) / (n + 1)]);
+    };
+    edge(x, y, x + w, y, HB);
+    edge(x + w, y, x + w, y + h, VB);
+    edge(x + w, y + h, x, y + h, HB);
+    for (let i = VB; i >= 1; i--) pts.push([x, y + (h * i) / (VB + 1)]);
+    const segs = [];
+    for (let i = 0; i < pts.length; i++) {
+      const [ax, ay] = pts[i];
+      const [bx, by] = pts[(i + 1) % pts.length];
+      const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy);
+      segs.push({ x1: ax, y1: ay, cx: ax + dx / 2 + (dy / len) * depth, cy: ay + dy / 2 + (-dx / len) * depth, x2: bx, y2: by });
+    }
+    return segs;
+  }
+
+  return Object.freeze({ SVG_NS, DEVICE_W, DEVICE_H, NET_W, NET_H, UNION_COLORS, KINDS, el, center, linkOffsets, spreadOffset, pointAt, cloudSegs });
 })();
