@@ -25,6 +25,8 @@ const Topology = (() => {
   let marqueeRect = null; // рамка выделения в мировых координатах
   let popoverCreate = null; // callback awaiting a name from the popover
   let popoverWorld = null; // world point the open popover is anchored to
+  let ctxPending = null; // {items, at}: node menu awaiting a clean right-release
+  let camControls = null; // CameraControls handle (isRightDown)
   // поиск по канвасу: подсветка совпавших узлов, приглушение остальных,
   // камера центрируется на активном совпадении
   let searchQ = "";
@@ -77,12 +79,115 @@ const Topology = (() => {
   // through the debounced layout save. Left button stays free for selection
   // and node dragging (setupSelection).
   function setupCamera() {
-    CameraControls.wire(canvas(), {
+    camControls = CameraControls.wire(canvas(), {
       getCam: () => State.camera,
       setCam: (c) => { State.camera = c; applyCamera(); },
       buttons: [1, 2],
       onChange: scheduleLayoutSave,
+      onDragEnd: (moved, button) => {
+        if (button === 2 && !moved && ctxPending) showContextMenu(ctxPending.at, ctxPending.items);
+        ctxPending = null;
+      },
     });
+  }
+
+  // --- context menu ---
+
+  const hideContextMenu = () => { document.getElementById("topo-context-menu").hidden = true; };
+
+  // showContextMenu рисует меню в точке экрана. Пункт — [label, action, cls?]
+  // либо {label, children} для подменю; action === null — неактивный пункт.
+  function showContextMenu(at, items) {
+    const menu = document.getElementById("topo-context-menu");
+    menu.innerHTML = "";
+    const mkItem = (label, action, cls, active = !!action) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      if (action) {
+        if (cls) btn.setAttribute("class", cls);
+        btn.onclick = (e) => { e.stopPropagation(); hideContextMenu(); action(); };
+      }
+      if (!active) btn.disabled = true;
+      return btn;
+    };
+    const fill = (parent, entries) => {
+      entries.forEach((it) => {
+        if (it.children) {
+          const wrap = document.createElement("div");
+          wrap.setAttribute("class", "ctx-sub");
+          const sub = document.createElement("div");
+          sub.setAttribute("class", "submenu");
+          wrap.append(mkItem(it.label, null, null, true), sub);
+          fill(sub, it.children);
+          parent.append(wrap);
+        } else {
+          parent.append(mkItem(...it));
+        }
+      });
+    };
+    fill(menu, items);
+    menu.hidden = false;
+    menu.style.left = at.x + "px";
+    menu.style.top = at.y + "px";
+  }
+
+  // setUnion перемещает объект в объединение idx (или из всех объединений при idx < 0).
+  function setUnion(name, key, idx) {
+    State.topology.unions.forEach((s) => { s[key] = (s[key] || []).filter((n) => n !== name); });
+    if (idx >= 0) {
+      const s = State.topology.unions[idx];
+      s[key] = [...(s[key] || []), name];
+    }
+    render();
+  }
+
+  // menuItemsFor собирает пункты меню объекта: членство в объединениях
+  // (только у узлов) и удаление с подписью по типу; объединения — до danger.
+  function menuItemsFor(obj, nodeType) {
+    const key = nodeType === "device" ? "devices" : nodeType === "network" ? "networks" : null;
+    const label = nodeType === "device" ? `устройство ${obj.name}`
+      : nodeType === "network" ? `сеть ${obj.name}`
+      : obj.type === "attach" ? `привязка ${obj.net.name}–${obj.device}`
+      : `связь ${obj.a.device}–${obj.b.device}`;
+    const items = [];
+    if (key) {
+      const inSet = (s) => (s[key] || []).includes(obj.name);
+      if ((State.topology.unions || []).some(inSet)) {
+        items.push(["Убрать из объединения", () => setUnion(obj.name, key, -1)]);
+      }
+      const candidates = (State.topology.unions || [])
+        .filter((s) => !inSet(s))
+        .map((s) => [`В объединение «${s.name}»`, () => setUnion(obj.name, key, State.topology.unions.indexOf(s))]);
+      items.push({
+        label: "Добавить в объединение",
+        children: candidates.length ? candidates : [["(нет доступных объединений)", null]],
+      });
+    }
+    items.push(["Удалить " + label, () => {
+      State.selection.clear();
+      State.selection.add(obj);
+      deleteSelection();
+      scheduleLayoutSave();
+    }, "danger"]);
+    return items;
+  }
+
+  // Контекстное меню канвы: правый клик по объекту в режиме select.
+  // Платформы шлют contextmenu в разное время: пока ПКМ зажата (Linux)
+  // ждём чистый mouseup через ctxPending, после отпускания открываем сразу.
+  function setupContextMenu() {
+    canvas().addEventListener("contextmenu", (e) => {
+      if (State.tool !== "select") return;
+      e.preventDefault();
+      const hit = HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z);
+      if (!hit || !(hit.nodeType || hit.id.startsWith("link:") || hit.id.startsWith("attach:"))) return;
+      const items = menuItemsFor(hit.ref, hit.nodeType);
+      const at = screenPoint(e);
+      if (camControls && camControls.isRightDown()) ctxPending = { items, at };
+      else showContextMenu(at, items);
+    });
+    document.addEventListener("click", hideContextMenu);
   }
 
   const clearSelection = () => {
@@ -256,6 +361,7 @@ const Topology = (() => {
     TOOLS.forEach((t) => {
       document.getElementById("tool-" + t).addEventListener("click", () => setTool(t));
     });
+    document.getElementById("topo-fit").addEventListener("click", fitMap);
     canvas().addEventListener("click", (e) => {
       if (marqueeEnded) { marqueeEnded = false; return; } // click trailing the marquee drag
       // клик по узлу/связи уже обработан их mousedown — фону он не адресован
@@ -357,15 +463,15 @@ const Topology = (() => {
     ];
   }
 
-  // focusHit наводит камеру на bbox узла (мировые координаты -> центр канваса)
-  function focusHit(obj) {
+  // fitNode считает камеру, центрирующую bbox узла, или null без позиции.
+  function fitNode(obj) {
     const isDev = State.topology.devices.includes(obj);
     const pos = (isDev ? State.layout.devices : State.layout.networks)[obj.name];
-    if (!pos) return;
+    if (!pos) return null;
     const w = isDev ? DEVICE_W : NET_W;
     const h = isDev ? DEVICE_H : NET_H;
     const r = canvas().getBoundingClientRect();
-    State.camera = {
+    return {
       ...State.camera,
       x: r.width / 2 - State.camera.z * (pos.x + w / 2),
       y: r.height / 2 - State.camera.z * (pos.y + h / 2),
@@ -377,7 +483,8 @@ const Topology = (() => {
     searchHits = computeSearchHits(searchQ);
     searchSet = new Set(searchHits);
     hitIdx = 0;
-    if (searchHits.length) focusHit(searchHits[0]);
+    const target = searchHits.length && fitNode(searchHits[0]);
+    if (target) State.camera = target;
     render();
   }
 
@@ -402,14 +509,30 @@ const Topology = (() => {
       if (e.key === "Escape") clearSearch();
       else if (e.key === "Enter" && searchHits.length) {
         hitIdx = (hitIdx + 1) % searchHits.length;
-        focusHit(searchHits[hitIdx]);
-        applyCamera();
+        const target = fitNode(searchHits[hitIdx]);
+        if (target) flyCam(target, 180);
       }
     });
     // пустое поле, потерявшее фокус, прячем; активный запрос оставляем видимым
     input.addEventListener("blur", () => {
       if (!input.value) input.hidden = true;
     });
+  }
+
+  // --- pop появления узлов: id сцены → performance.now() создания ---
+
+  const pops = new Map();
+  const popOf = (id) => {
+    const t0 = pops.get(id);
+    return t0 === undefined ? undefined : Math.min(1, (performance.now() - t0) / 180);
+  };
+  let popping = false;
+  function popStep() {
+    const now = performance.now();
+    for (const [id, t0] of pops) if (now - t0 >= 180) pops.delete(id);
+    render();
+    if (pops.size) requestAnimationFrame(popStep);
+    else popping = false;
   }
 
   function createNode(kind, name, world) {
@@ -423,6 +546,11 @@ const Topology = (() => {
       State.topology.networks.push({ name, subnets: [], attach: [] });
       State.layout.networks[name] = { x: world.x - NET_W / 2, y: world.y - NET_H / 2 };
     }
+    pops.set(`${kind}:${name}`, performance.now());
+    if (!popping) {
+      popping = true;
+      requestAnimationFrame(popStep);
+    }
     setTool("select");
     render();
   }
@@ -433,26 +561,67 @@ const Topology = (() => {
     render();
   }
 
-  // setupConnectPreview рисует пунктир от pending-устройства к курсору,
-  // пока connect ждёт второй конец; линия — элемент оверлея канвы.
-  function setupConnectPreview() {
+  // flyCam плавно ведёт камеру к цели (кнопка «вписать», поиск)
+  function flyCam(to, ms = 250) {
+    const cur = { ...State.camera };
+    const tw = Tween.create();
+    tw.to(cur, to, ms);
+    const step = () => {
+      tw.tick(performance.now());
+      State.camera = { ...cur };
+      applyCamera();
+      if (tw.active()) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  // fitMap вписывает всю топологию во вьюпорт анимацией камеры
+  function fitMap() {
+    ensureLayout();
+    const b = TopoScene.bounds(State.topology, State.layout);
+    if (!b) return;
+    const r = canvas().getBoundingClientRect();
+    flyCam(Camera.fitView(State.camera, b, Math.round(r.width), Math.round(r.height), 60));
+  }
+
+  // --- указатель: превью связи, курсор и тултипы ---
+
+  // setupPointer ведёт один mousemove канвы: пунктир от pending-устройства
+  // к курсору в режиме connect; cursor grab над узлами и pointer над
+  // связями; тултип meta.tooltip (экспорт фильтрованной связи) с задержкой.
+  function setupPointer() {
+    const tip = document.getElementById("topo-tooltip");
+    tip.hidden = true;
+    let tipTimer = 0;
+    const hideTip = () => { clearTimeout(tipTimer); tip.hidden = true; };
     canvas().addEventListener("mousemove", (e) => {
-      const want = pending && State.tool === "connect";
-      if (want) {
+      const p = screenPoint(e);
+      const hit = HitTest.pick(State.list, toWorld(p), State.camera.z);
+      canvas().style.cursor = hit ? (hit.nodeType ? "grab" : "pointer") : "default";
+      if (pending && State.tool === "connect") {
         const from = deviceCenter(pending.device);
-        if (!from) return;
-        const to = toWorld(screenPoint(e));
-        previewWire = {
-          kind: "path",
-          geom: { segs: [{ x1: from.x, y1: from.y, cx: (from.x + to.x) / 2, cy: (from.y + to.y) / 2, x2: to.x, y2: to.y }] },
-          style: { stroke: theme.accent, lineWidth: 1.5, dash: [6, 4] },
-        };
-      } else {
-        if (!previewWire) return;
-        previewWire = null;
-      }
+        if (from) {
+          const to = toWorld(p);
+          previewWire = {
+            kind: "path",
+            geom: { segs: [{ x1: from.x, y1: from.y, cx: (from.x + to.x) / 2, cy: (from.y + to.y) / 2, x2: to.x, y2: to.y }] },
+            style: { stroke: theme.accent, lineWidth: 1.5, dash: [6, 4] },
+          };
+        }
+      } else previewWire = null;
       view.invalidate();
+      clearTimeout(tipTimer);
+      if (hit && hit.meta && hit.meta.tooltip) {
+        tipTimer = setTimeout(() => {
+          tip.textContent = hit.meta.tooltip;
+          tip.style.left = p.x + 14 + "px";
+          tip.style.top = p.y + 14 + "px";
+          tip.hidden = false;
+        }, 300);
+      } else hideTip();
     });
+    canvas().addEventListener("mouseleave", hideTip);
+    canvas().addEventListener("mousedown", hideTip); // жест начался — подсказка ни к чему
   }
 
   function onDeviceConnect(device) {
@@ -525,7 +694,7 @@ const Topology = (() => {
 
   function render() {
     ensureLayout();
-    State.list = TopoScene.buildScene(State, { theme, classes: nodeClasses }).list;
+    State.list = TopoScene.buildScene(State, { theme, classes: nodeClasses, popOf }).list;
     view.invalidate();
     // trash button mirrors the selection state
     document.getElementById("topo-delete").disabled = !State.selection.size;
@@ -585,7 +754,8 @@ const Topology = (() => {
     setupTools();
     setupSelection();
     setupDeleteButton();
-    setupConnectPreview();
+    setupPointer();
+    setupContextMenu();
     setupPopover();
     setupSearch();
     NetInfo.attach(canvas());

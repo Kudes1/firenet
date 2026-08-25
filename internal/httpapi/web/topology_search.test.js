@@ -90,6 +90,10 @@ function bootTopology(responses) {
       if (list) doc.listeners[t] = list.filter((f) => f !== fn);
     },
   };
+  // управляемые кадры: rAF-очередь + фейковые часы (Enter летит к совпадению
+  // твином камеры)
+  let clock = 0;
+  const rafQueue = [];
   const sandbox = {
     document: doc,
     window: {
@@ -105,6 +109,8 @@ function bootTopology(responses) {
     FormData: class { get() { return ""; } },
     Path2D: class {},               // стаб для kind:"glyph"
     getComputedStyle: () => ({ getPropertyValue: () => "" }),
+    performance: { now: () => clock },
+    requestAnimationFrame: (fn) => rafQueue.push(fn),
     setTimeout,
     clearTimeout,
     Promise,
@@ -121,7 +127,16 @@ function bootTopology(responses) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
-  return { canvas, ctx, doc, ids, get: (expr) => vm.runInContext(expr, sandbox), sandbox };
+  return {
+    canvas, ctx, doc, ids, get: (expr) => vm.runInContext(expr, sandbox), sandbox,
+    // pump исполняет кадры до исчерпания очереди (твин камеры дошёл до цели)
+    pump() {
+      while (rafQueue.length) {
+        clock += 50;
+        rafQueue.splice(0).forEach((fn) => fn(clock));
+      }
+    },
+  };
 }
 
 // подсветка поиска на канве: совпавшие светятся (glow), остальные приглушены.
@@ -220,10 +235,13 @@ test("Enter cycles the camera through the matches", async () => {
   search(page.ids, "1"); // r1, sw1 и net1
   assert.deepEqual(cam(page.get), { x: 490, y: 330, z: 1 }, "camera on the first hit");
   fire(page.ids["topo-search"], "keydown", { key: "Enter" });
+  page.pump(); // камера долетает твином
   assert.deepEqual(cam(page.get), { x: 290, y: 330, z: 1 }, "second hit centered");
   fire(page.ids["topo-search"], "keydown", { key: "Enter" });
+  page.pump();
   assert.deepEqual(cam(page.get), { x: 480, y: 70, z: 1 }, "third hit (net1 at 40,300) centered");
   fire(page.ids["topo-search"], "keydown", { key: "Enter" });
+  page.pump();
   assert.deepEqual(cam(page.get), { x: 490, y: 330, z: 1 }, "wraps back to the first hit");
 });
 

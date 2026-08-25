@@ -59,6 +59,11 @@
           </svg>
         </button>
         <span class="toolbar-sep"></span>
+        <button id="topo-fit" class="tool" title="Вписать карту в окно" aria-label="Вписать карту">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m15-5h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3m15 5h3a2 2 0 0 0 2-2v-3"/>
+          </svg>
+        </button>
         <button id="topo-save" class="primary tool" title="Сохранить топологию" aria-label="Сохранить топологию">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
@@ -78,6 +83,7 @@
       </div>
       <div id="topo-context-menu" class="context-menu" hidden></div>
       <div id="net-info" class="net-info" hidden></div>
+      <div id="topo-tooltip" class="topo-tooltip" hidden></div>
     </div>
   </div>
 </main>

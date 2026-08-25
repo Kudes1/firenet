@@ -7,9 +7,9 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 // Minimal DOM stub sufficient to boot topology.js outside a browser and
-// exercise the canvas editor against a stubbed fetch. Canvas draws are
-// synchronous: the sandbox has no requestAnimationFrame, so CanvasView and
-// CameraControls fall back to running scheduled work immediately.
+// exercise the canvas editor against a stubbed fetch. Animation frames go
+// through a controllable rAF queue with fake clocks: page.pump() advances
+// time and drains pending frames (camera tweens, node pop, canvas redraws).
 function makeEl(tag) {
   const el = {
     tag,
@@ -93,6 +93,9 @@ function bootTopology(responses) {
       if (list) doc.listeners[t] = list.filter((f) => f !== fn);
     },
   };
+  // управляемые кадры: rAF-очередь + фейковые часы для твинов и pop
+  let clock = 0;
+  const rafQueue = [];
   const sandbox = {
     document: doc,
     window: {
@@ -108,6 +111,8 @@ function bootTopology(responses) {
     FormData: class { get() { return ""; } },
     Path2D: class {},               // стаб для kind:"glyph"
     getComputedStyle: () => ({ getPropertyValue: () => "" }),
+    performance: { now: () => clock },
+    requestAnimationFrame: (fn) => rafQueue.push(fn),
     setTimeout,
     clearTimeout,
     Promise,
@@ -127,7 +132,14 @@ function bootTopology(responses) {
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
   // top-level const bindings live in the context's lexical env; grab them
   const get = (expr) => vm.runInContext(expr, sandbox);
-  return { canvas, ctx, doc, ids, get, sandbox };
+  // pump исполняет кадры до исчерпания очереди (твин дошёл до цели)
+  const pump = () => {
+    while (rafQueue.length) {
+      clock += 50;
+      rafQueue.splice(0).forEach((fn) => fn(clock));
+    }
+  };
+  return { canvas, ctx, doc, ids, get, sandbox, pump };
 }
 
 const texts = (get) => get("State.list.filter((i) => i.text).map((i) => i.text)");
@@ -232,13 +244,14 @@ test("camera from layout is applied to the canvas view", async () => {
 });
 
 test("wheel zooms around the cursor", async () => {
-  const { canvas, get } = bootTopology({
+  const { canvas, get, pump } = bootTopology({
     ...responses,
     "/api/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
   });
   await tick();
   const before = JSON.parse(get("JSON.stringify(State.camera)"));
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
+  pump(); // зум применяется кадром rAF
   const after = JSON.parse(get("JSON.stringify(State.camera)"));
   assert.ok(after.z > before.z, "zoom changed the camera");
   // the world point under the cursor stays under the cursor
@@ -249,7 +262,7 @@ test("wheel zooms around the cursor", async () => {
 });
 
 test("middle-button drag pans the camera", async () => {
-  const { canvas, doc, get } = bootTopology({
+  const { canvas, doc, get, pump } = bootTopology({
     ...responses,
     "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 1 } },
   });
@@ -257,6 +270,7 @@ test("middle-button drag pans the camera", async () => {
   fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
   fire(doc, "mouseup", {});
+  pump(); // пан применяется кадром rAF
   assert.deepEqual(JSON.parse(get("JSON.stringify(State.camera)")), { x: 60, y: 30, z: 1 });
 });
 
@@ -292,7 +306,7 @@ test("toolbar switches the active tool", async () => {
 });
 
 test("device tool creates a device at the clicked world position", async () => {
-  const { canvas, ids, get } = bootTopology({
+  const { canvas, ids, get, pump } = bootTopology({
     ...responses,
     "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 2 } },
   });
@@ -304,6 +318,7 @@ test("device tool creates a device at the clicked world position", async () => {
   assert.ok(input, "name input shown");
   input.value = "r3";
   fire(ids["node-name-form"], "submit", {});
+  pump(); // pop-анимация добегает: геометрия финальная
   const dev = byId(get, "device:r3");
   assert.ok(dev, "device created");
   // world position of the click: (300, 200); node is centred on the cursor
@@ -428,18 +443,67 @@ test("connect tool shows a preview wire while connecting", async () => {
   fire(page.ids["tool-connect"], "click", {});
   clickNode(page, "r1"); // pending = r1
   fire(page.canvas, "mousemove", { clientX: 500, clientY: 300 });
-  // превью рисуется оверлеем канвы: пунктир [6,4] есть только у него
+  page.pump(); // превью рисуется оверлеем канвы кадром rAF
+  // пунктир [6,4] есть только у превью связи
   assert.ok(
     page.ctx.calls.some((c) => c[0] === "setLineDash" && String(c[1][0]) === "6,4"),
     "dashed preview wire painted",
   );
 });
 
-test("context menu deletes a node", { skip: "задача 10: контекстное меню переезжает на HitTest.pick канвы" }, () => {});
+// контекстное меню: правый клик по канве в режиме select открывает меню
+// объекта под курсором; рекурсивный поиск по дереву меню (подменю — это
+// div.ctx-sub внутри меню)
+function findBtn(node, pred) {
+  if (pred(node)) return node;
+  for (const c of node.children) {
+    const f = findBtn(c, pred);
+    if (f) return f;
+  }
+  return null;
+}
+// элемент меню создаётся production-кодом лениво; прекоммитим его в реестр
+// в состоянии «закрыто», как в html
+const ctxMenu = (page) => {
+  const el = (page.ids["topo-context-menu"] ||= makeEl("div"));
+  if (el.hidden === undefined) el.hidden = true;
+  return el;
+};
 
-test("clean right-click on a node opens its menu after release", { skip: "задача 10: контекстное меню на канве" }, () => {});
+test("context menu deletes a node", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  const menu = ctxMenu(page);
+  assert.ok(menu && !menu.hidden, "menu shown");
+  const del = findBtn(menu, (b) => String(b.textContent).startsWith("Удалить"));
+  assert.ok(del, "delete item present");
+  fire(del, "click", {});
+  assert.ok(!texts(page.get).includes("r1 (router)"), "r1 removed");
+});
 
-test("right-button drag does not open the node menu", { skip: "задача 10: контекстное меню на канве" }, () => {});
+test("clean right-click on a node opens its menu after release", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  // press-order platforms (Linux): contextmenu fires while RMB is still held
+  fire(page.canvas, "mousedown", { button: 2, clientX: AT.r1.x, clientY: AT.r1.y });
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  assert.ok(ctxMenu(page).hidden, "menu waits for a clean release");
+  fire(page.doc, "mouseup", { button: 2 });
+  assert.ok(!ctxMenu(page).hidden, "menu shown on clean right-click");
+  const del = findBtn(ctxMenu(page), (b) => String(b.textContent).startsWith("Удалить"));
+  assert.ok(del, "delete item present");
+});
+
+test("right-button drag does not open the node menu", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "mousedown", { button: 2, clientX: AT.r1.x, clientY: AT.r1.y });
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  fire(page.doc, "mousemove", { clientX: AT.r1.x + 100, clientY: AT.r1.y + 60 });
+  fire(page.doc, "mouseup", { button: 2 });
+  assert.ok(ctxMenu(page).hidden, "no menu after a drag");
+});
 
 test("native context menu is suppressed on the canvas", async () => {
   const page = bootTopology(responses);
@@ -492,7 +556,7 @@ test("popover clamp measures real size after unhide", async () => {
 });
 
 test("popover follows camera panning like the scene", async () => {
-  const { canvas, doc, ids } = bootTopology({
+  const { canvas, doc, ids, pump } = bootTopology({
     ...responses,
     "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 1 } },
   });
@@ -505,6 +569,7 @@ test("popover follows camera panning like the scene", async () => {
   fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
   fire(doc, "mouseup", {});
+  pump(); // пан применяется кадром rAF
   assert.equal(pop.style.left, "360px", "popover shifted with the pan (+60)");
   assert.equal(pop.style.top, "230px", "popover shifted with the pan (+30)");
 });
@@ -668,15 +733,80 @@ test("no union frames when topology has none", async () => {
   assert.equal(get(`State.list.filter((i) => i.id.startsWith("union:")).length`), 0);
 });
 
-// --- union assignment via the context menu (returns in task 10) ---
+// --- union assignment via the context menu ---
 
-test("context menu assigns a node to a union and removes it back", { skip: "задача 10: меню объединений на канве" }, () => {});
+test("context menu assigns a node to a union and removes it back", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: [] }] },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y }); // r1
+  const assign = findBtn(ctxMenu(page), (b) => String(b.textContent).includes("office"));
+  assert.ok(assign, "assign item listed in the union submenu");
+  fire(assign, "click", {});
+  assert.equal(vm.runInContext("JSON.stringify(State.topology.unions[0].devices)", page.sandbox), '["r1"]', "member recorded");
 
-test("union submenu lists locations and shows a placeholder when none are available", { skip: "задача 10: меню объединений на канве" }, () => {});
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  const unassign = findBtn(ctxMenu(page), (b) => String(b.textContent).includes("Убрать"));
+  fire(unassign, "click", {});
+  assert.equal(vm.runInContext("JSON.stringify(State.topology.unions[0].devices)", page.sandbox), "[]", "membership cleared");
+});
 
-test("context menu keeps union items above the danger delete item", { skip: "задача 10: меню объединений на канве" }, () => {});
+test("union submenu lists locations and shows a placeholder when none are available", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: ["r1"] }] },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y }); // r1
+  const sub = findBtn(
+    ctxMenu(page),
+    (n) => n.tag !== "button" && String(n.attrs.class || "").includes("submenu"),
+  );
+  assert.ok(sub, "submenu rendered");
+  const empty = findBtn(sub, (b) => b.tag === "button" && String(b.textContent).includes("нет доступных"));
+  assert.ok(empty && empty.disabled, "placeholder shown and disabled when all unions hold the node");
 
-test("network nodes get union assignment in the context menu too", { skip: "задача 10: меню объединений на канве" }, () => {});
+  fire(page.canvas, "contextmenu", { clientX: AT.r2.x, clientY: AT.r2.y }); // r2
+  const listed = findBtn(
+    ctxMenu(page),
+    (n) => n.tag !== "button" && String(n.attrs.class || "").includes("submenu"),
+  );
+  assert.ok(listed, "submenu rendered for r2");
+  const item = findBtn(listed, (b) => b.tag === "button" && String(b.textContent).includes("office"));
+  assert.ok(item && !item.disabled, "union listed for a node outside it");
+});
+
+test("context menu keeps union items above the danger delete item", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: [] }] },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  const menu = ctxMenu(page);
+  const buttons = menu.children.map((c) => (c.tag === "div" ? c.children[0] : c));
+  assert.ok(String(buttons[0].textContent).includes("Добавить в объединение"), "union submenu first");
+  assert.ok(!buttons[0].disabled, "submenu button is enabled");
+  const del = buttons[buttons.length - 1];
+  assert.ok(String(del.textContent).startsWith("Удалить"), "delete item last");
+  assert.ok(String(del.attrs.class || "").includes("danger"), "delete styled as danger");
+  assert.ok(!String(buttons[0].attrs.class || "").includes("danger"), "union item is not danger-colored");
+});
+
+test("network nodes get union assignment in the context menu too", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office" }] },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.net1.x, clientY: AT.net1.y });
+  const assign = findBtn(ctxMenu(page), (b) => String(b.textContent).includes("office"));
+  assert.ok(assign, "network can be assigned");
+  fire(assign, "click", {});
+  assert.equal(vm.runInContext("JSON.stringify(State.topology.unions[0].networks)", page.sandbox), '["net1"]', "network member recorded");
+});
 
 test("deleting a node scrubs it from union membership", async () => {
   const page = bootTopology({
@@ -687,4 +817,81 @@ test("deleting a node scrubs it from union membership", async () => {
   clickNode(page, "r1");
   fire(page.doc, "keydown", { key: "Delete" });
   assert.equal(vm.runInContext("JSON.stringify(State.topology.unions[0].devices)", page.sandbox), "[]", "r1 dropped from union");
+});
+
+// --- hover: курсор и тултип экспорта фильтрованной связи ---
+
+const filteredResponses = {
+  ...responses,
+  "/api/topology": {
+    ...responses["/api/topology"],
+    links: [{ a: { device: "r1" }, b: { device: "r2" }, filter: { aExports: ["office"], bExports: ["dmz"] } }],
+  },
+};
+
+test("hover sets the cursor by target kind", async () => {
+  const page = bootTopology(filteredResponses);
+  await tick();
+  fire(page.canvas, "mousemove", { clientX: AT.r1.x, clientY: AT.r1.y });
+  assert.equal(page.canvas.style.cursor, "grab", "grab over a node");
+  fire(page.canvas, "mousemove", { clientX: 900, clientY: 700 });
+  assert.equal(page.canvas.style.cursor, "default", "default over background");
+  const mid = JSON.parse(page.get(`JSON.stringify((() => {
+    const s = State.list.find((i) => i.id === "link:r1|r2").geom.segs[0];
+    return { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 };
+  })())`));
+  fire(page.canvas, "mousemove", { clientX: mid.x, clientY: mid.y });
+  assert.equal(page.canvas.style.cursor, "pointer", "pointer over a wire");
+});
+
+test("hovering a filtered wire shows a delayed exports tooltip", async () => {
+  const page = bootTopology(filteredResponses);
+  await tick();
+  page.pump();
+  const mid = JSON.parse(page.get(`JSON.stringify((() => {
+    const s = State.list.find((i) => i.id === "link:r1|r2").geom.segs[0];
+    return { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 };
+  })())`));
+  const tip = page.ids["topo-tooltip"];
+  fire(page.canvas, "mousemove", { clientX: mid.x, clientY: mid.y });
+  assert.ok(tip.hidden, "tooltip waits out the delay");
+  await new Promise((r) => setTimeout(r, 320));
+  assert.ok(!tip.hidden, "tooltip appears after the delay");
+  assert.match(String(tip.textContent), /office/, "tooltip names the a-side exports");
+  assert.match(String(tip.textContent), /→/, "tooltip separates the sides");
+  fire(page.canvas, "mouseleave", {});
+  assert.ok(tip.hidden, "leaving the canvas hides the tooltip");
+});
+
+// --- кнопка «вписать карту» и pop появления узлов ---
+
+test("fit button flies the camera to the scene bounds", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  page.pump();
+  const expected = JSON.parse(page.get(
+    `JSON.stringify(Camera.fitView(State.camera, TopoScene.bounds(State.topology, State.layout), 1200, 800, 60))`,
+  ));
+  fire(page.ids["topo-fit"], "click", {});
+  page.pump(); // камера долетает твином
+  assert.deepEqual(JSON.parse(page.get("JSON.stringify(State.camera)")), expected);
+});
+
+test("a freshly created node pops in and settles", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 2 } },
+  });
+  await tick();
+  fire(page.ids["tool-device"], "click", {});
+  fire(page.canvas, "click", { clientX: 600, clientY: 400 }); // world (300,200)
+  page.ids["node-name-input"].value = "r3";
+  fire(page.ids["node-name-form"], "submit", {});
+  // сразу после создания узел меньше и прозрачнее финального состояния
+  const fresh = JSON.parse(page.get(`JSON.stringify(State.list.find((i) => i.id === "device:r3"))`));
+  assert.ok((fresh.style.alpha ?? 1) < 1 || fresh.geom.w < 140, "node starts popped-down");
+  page.pump(); // анимация 180 мс добегает до полного размера
+  const settled = JSON.parse(page.get(`JSON.stringify(State.list.find((i) => i.id === "device:r3"))`));
+  assert.equal(settled.geom.w, 140, "full-size box after the pop");
+  assert.equal(settled.style.alpha ?? 1, 1, "fully opaque after the pop");
 });
