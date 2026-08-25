@@ -139,9 +139,10 @@ function bootTopology(responses) {
   };
 }
 
-// подсветка поиска на канве: совпавшие светятся (glow), остальные приглушены.
+// подсветка поиска на канве: совпавшие получают утолщённый контур (search-hit
+// в styled() добавляет +2 к lineWidth), остальные приглушены.
 // JSON-прогон: массивы из vm-контекста не сравниваются deepEqual напрямую.
-const glowIds = (get) => JSON.parse(get(`JSON.stringify(State.list.filter((i) => i.style.glow).map((i) => i.id))`));
+const hitIds = (get) => JSON.parse(get(`JSON.stringify(State.list.filter((i) => i.style.lineWidth > 2).map((i) => i.id))`));
 const dimCount = (get) => get(`State.list.filter((i) => (i.style.alpha ?? 1) < 1).length`);
 const cam = (get) => JSON.parse(get("JSON.stringify(State.camera)"));
 
@@ -176,8 +177,8 @@ test("search by device name highlights it and dims the rest", async () => {
   await tick();
   search(page.ids, "sw1");
   page.pump(); // твин затемнения проявляется кадрами
-  assert.deepEqual(glowIds(page.get), ["device:sw1"], "one highlighted device");
-  assert.ok(!glowIds(page.get).some((id) => id.startsWith("network:")), "networks untouched");
+  assert.deepEqual(hitIds(page.get), ["device:sw1"], "one highlighted device");
+  assert.ok(!hitIds(page.get).some((id) => id.startsWith("network:")), "networks untouched");
   assert.ok(dimCount(page.get) > 0, "non-matching elements dimmed");
 });
 
@@ -185,24 +186,24 @@ test("search is case-insensitive", async () => {
   const page = bootTopology(responses);
   await tick();
   search(page.ids, "SW1");
-  assert.deepEqual(glowIds(page.get), ["device:sw1"], "case-insensitive name match");
+  assert.deepEqual(hitIds(page.get), ["device:sw1"], "case-insensitive name match");
 });
 
 test("network matches by subnet CIDR substring and highlights the network node", async () => {
   const page = bootTopology(responses);
   await tick();
   search(page.ids, "10.0.0");
-  assert.deepEqual(glowIds(page.get), ["network:net1"], "net1 cloud highlighted via its subnet cidr");
+  assert.deepEqual(hitIds(page.get), ["network:net1"], "net1 cloud highlighted via its subnet cidr");
 });
 
 test("host IP inside a subnet prefix finds the owning network", async () => {
   const page = bootTopology(responses);
   await tick();
   search(page.ids, "10.0.0.55");
-  assert.deepEqual(glowIds(page.get), ["network:net1"], "net1 found by contained host address");
+  assert.deepEqual(hitIds(page.get), ["network:net1"], "net1 found by contained host address");
 
   search(page.ids, "10.0.1.1");
-  assert.deepEqual(glowIds(page.get), [], "address outside every prefix matches nothing");
+  assert.deepEqual(hitIds(page.get), [], "address outside every prefix matches nothing");
 });
 
 test("empty query clears highlighting and dimming", async () => {
@@ -211,7 +212,7 @@ test("empty query clears highlighting and dimming", async () => {
   search(page.ids, "r1");
   search(page.ids, "");
   page.pump(); // дождались затухания затемнения
-  assert.deepEqual(glowIds(page.get), []);
+  assert.deepEqual(hitIds(page.get), []);
   assert.equal(dimCount(page.get), 0);
 });
 
@@ -220,7 +221,7 @@ test("no-match query leaves everything dimmed and nothing hit", async () => {
   await tick();
   search(page.ids, "zzz");
   page.pump();
-  assert.deepEqual(glowIds(page.get), []);
+  assert.deepEqual(hitIds(page.get), []);
   assert.ok(dimCount(page.get) > 0, "all elements dimmed");
 });
 
@@ -275,11 +276,11 @@ test("a background canvas click resets the search", async () => {
   await tick();
   fire(page.ids["topo-search-toggle"], "click", {});
   search(page.ids, "r1");
-  assert.deepEqual(glowIds(page.get), ["device:r1"]);
+  assert.deepEqual(hitIds(page.get), ["device:r1"]);
   fire(page.canvas, "click", {}); // empty-background click
   assert.equal(page.ids["topo-search"].value, "", "query cleared");
   assert.equal(page.ids["topo-search"].hidden, true, "field hidden again");
-  assert.deepEqual(glowIds(page.get), []);
+  assert.deepEqual(hitIds(page.get), []);
 });
 
 test("Escape clears the query and the highlighting", async () => {
@@ -291,7 +292,7 @@ test("Escape clears the query and the highlighting", async () => {
   assert.equal(page.ids["topo-search"].value, "", "input cleared");
   assert.equal(page.ids["topo-search"].hidden, true, "input hidden again");
   page.pump();
-  assert.deepEqual(glowIds(page.get), []);
+  assert.deepEqual(hitIds(page.get), []);
   assert.equal(dimCount(page.get), 0);
 });
 

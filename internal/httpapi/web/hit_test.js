@@ -30,35 +30,44 @@ const HitTest = (() => {
     return Math.hypot(p.x - (ax + dx * t), p.y - (ay + dy * t));
   }
 
-  // сэмплы квадратичного сегмента: 8 хорд на сегмент
-  function segPts(s) {
-    const pts = [];
-    for (let i = 0; i <= 8; i++) {
-      const q = i / 8, r = 1 - q;
-      pts.push([r * r * s.x1 + 2 * r * q * s.cx + q * q * s.x2, r * r * s.y1 + 2 * r * q * s.cy + q * q * s.y2]);
-    }
-    return pts;
+  // точка квадратичного сегмента при t = i/8
+  function segPt(s, i) {
+    const q = i / 8, r = 1 - q;
+    return [r * r * s.x1 + 2 * r * q * s.cx + q * q * s.x2, r * r * s.y1 + 2 * r * q * s.cy + q * q * s.y2];
   }
 
-  // расстояние до пути: контур сэмплируется в хорды
+  // расстояние до пути: контур сэмплируется в 8 хорд на сегмент, без аллокаций
   function distPath(p, segs) {
     let best = Infinity;
     for (const s of segs) {
-      const pts = segPts(s);
-      for (let i = 0; i + 1 < pts.length; i++) {
-        best = Math.min(best, distSeg(p, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]));
+      let ax = s.x1, ay = s.y1;
+      for (let i = 1; i <= 8; i++) {
+        const [bx, by] = segPt(s, i);
+        const d = distSeg(p, ax, ay, bx, by);
+        if (d < best) best = d;
+        ax = bx; ay = by;
       }
     }
     return best;
   }
 
-  // точка внутри полигона: ray-casting (even-odd)
-  function pointInPolygon(p, poly) {
+  // точка внутри замкнутого контура из квадратичных сегментов: ray-casting
+  // (even-odd) по рёбрам, образуемым соседними сэмплами; без материала
+  function pointInPolygon(p, segs) {
     let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    let firstX = 0, firstY = 0, prevX = null, prevY = null;
+    const edge = (xi, yi, xj, yj) => {
       if ((yi > p.y) !== (yj > p.y) && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi) inside = !inside;
+    };
+    for (const s of segs) {
+      for (let i = 0; i <= 8; i++) {
+        const [x, y] = segPt(s, i);
+        if (prevX === null) { firstX = x; firstY = y; }
+        else edge(x, y, prevX, prevY);
+        prevX = x; prevY = y;
+      }
     }
+    if (prevX !== null) edge(firstX, firstY, prevX, prevY); // замыкание на первую точку
     return inside;
   }
 
@@ -70,7 +79,7 @@ const HitTest = (() => {
         if (distPath(p, it.geom.segs) <= 14 / z) return it;
         // замкнутый залитый путь (облако сети) ловит и свою внутренность
         if (it.geom.closed && it.style && it.style.fill
-          && pointInPolygon(p, it.geom.segs.flatMap(segPts))) return it;
+          && pointInPolygon(p, it.geom.segs)) return it;
       } else if (hits(bbox(it), p)) return it;
     }
     return null;

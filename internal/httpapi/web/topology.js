@@ -634,7 +634,9 @@ const Topology = (() => {
           };
         }
       }
-      view.invalidate();
+      // hover сам по себе сцену не меняет — перерисовываем только когда есть
+      // динамический оверлей (превью связи), чтобы не гонять красный кадр
+      if (previewWire) view.invalidate();
     });
     canvas().addEventListener("click", (e) => {
       const p = screenPoint(e);

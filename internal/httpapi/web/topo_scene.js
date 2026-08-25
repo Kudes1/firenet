@@ -62,8 +62,8 @@ const TopoScene = (() => {
   const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
   // styled применяет состояния к базовому стилю по правилам спецификации:
-  // selected/pending → accent; search-hit → glow; diag-flow-* → лерп цвета и
-  // ширины по fade.flow; search-dim|diag-dim → alpha по fade.dim.
+  // selected/pending → accent; search-hit → утолщение контура; diag-flow-* →
+  // лерп цвета и ширины по fade.flow; search-dim|diag-dim → alpha по fade.dim.
   // Служебный признак связи (base.wire) тратится на ширину flow-подсветки
   // и в итоговый стиль не выходит.
   function styled(base, states, theme, fade) {
@@ -71,14 +71,13 @@ const TopoScene = (() => {
     const st = { ...pub };
     if (states.has("selected")) { st.stroke = theme.accent; st.lineWidth = 2.5; }
     if (states.has("pending")) { st.stroke = theme.accent; st.lineWidth = 3; }
-    if (states.has("search-hit")) st.glow = { color: theme.accent, blur: 8 };
+    if (states.has("search-hit")) st.lineWidth = (pub.lineWidth || 1) + 2;
     const flow = states.has("diag-flow-ok") ? theme.flowOk : states.has("diag-flow-deny") ? theme.flowDeny : null;
     // flow красит только контуры; у подписей stroke нет
     if (flow && base.stroke) {
       const k = fade?.flow ?? 1;
       st.stroke = theme.lerpHex(base.stroke, flow, k);
       st.lineWidth = pub.lineWidth + ((wire ? 4 : 2.5) - pub.lineWidth) * k;
-      if (k > 0.05) st.glow = { color: flow, blur: 4 * k };
     }
     // дефолты fade.* = 1: если страница не анимирует переход, эффект
     // состояния применён полностью; fade:{dim:0} — стартовая точка твина

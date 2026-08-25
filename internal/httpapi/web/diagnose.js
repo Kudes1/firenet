@@ -132,6 +132,44 @@ const Diagnose = (() => {
     return { hl, ok, deny, okE, denyE };
   }
 
+  // baseIp — представительский адрес подсети: сетевой адрес её CIDR, который
+  // по определению принадлежит подсети независимо от версии IP.
+  const baseIp = (cidr) => cidr.split("/")[0];
+
+  // resolveSpreadSources резолвит ввод инструмента «Распространение сети» в
+  // список представительских источников для /api/diagnose: точное совпадение
+  // с именем подсети или сети даёт известный subnetName (чтобы не опрашивать
+  // источник сам про себя), а любой другой ввод считается голым IP-адресом.
+  function resolveSpreadSources(input, subnets, networks) {
+    const subnet = subnets.find((s) => s.name === input);
+    if (subnet) return [{ ip: baseIp(subnet.cidr), subnetName: subnet.name }];
+    const net = networks.find((n) => n.name === input);
+    if (net) {
+      return (net.subnets || []).map((name) => {
+        const s = subnets.find((s) => s.name === name);
+        return { ip: s ? baseIp(s.cidr) : name, subnetName: name };
+      });
+    }
+    return [{ ip: input, subnetName: null }];
+  }
+
+  // mergeFlows объединяет несколько expandFlow (один на пару источник×подсеть-
+  // назначения) в одну разметку карты. Приоритет запрета над разрешением уже
+  // встроен в flowMark (проверяет deny/denyE раньше ok/okE), поэтому здесь
+  // достаточно простого объединения множеств без повторного вычитания.
+  function mergeFlows(flows) {
+    const hl = new Set(), ok = new Set(), okE = new Set(), denyE = new Set();
+    const deny = new Map();
+    flows.forEach((f) => {
+      f.hl.forEach((n) => hl.add(n));
+      f.ok.forEach((n) => ok.add(n));
+      f.okE.forEach((k) => okE.add(k));
+      f.denyE.forEach((k) => denyE.add(k));
+      f.deny.forEach((v, k) => { if (!deny.has(k)) deny.set(k, v); });
+    });
+    return { hl, ok, deny, okE, denyE };
+  }
+
   // flowMark возвращает mark(obj) для TopoScene: состояние движения трафика
   // элемента карты. Узлы — по ok/deny; рёбра (связи и привязки) — по
   // собственным множествам okE/denyE: цвет ребра не выводится из концов,
@@ -200,7 +238,7 @@ const Diagnose = (() => {
     requestAnimationFrame(step);
   }
 
-  const setCam = (c) => { state.camera = c; view.invalidate(); minimap.update(); };
+  const setCam = (c) => { state.camera = c; view.invalidate(); minimap.update(); panels.forEach((p) => p.position()); };
 
   // flyCam плавно ведёт камеру к цели (кнопка «вписать карту»)
   function flyCam(to, ms = 250) {
@@ -251,45 +289,100 @@ const Diagnose = (() => {
     cv.addEventListener("mouseleave", hideTip);
     cv.addEventListener("mousedown", hideTip); // жест начался — подсказка ни к чему
     document.getElementById("diag-fit").addEventListener("click", fitMap);
+    document.getElementById("diag-tool-reset").addEventListener("click", resetResult);
+    updateResetButton(); // явное начальное состояние: не полагаемся на атрибут disabled в разметке
   }
 
-  // — плавающее окно параметров: тумблер тулбара, перетаскивание, позиция —
-  const DIAG_PANEL_POS_KEY = "firenet-diag-panel-pos-v1";
+  // — плавающие окна параметров: тумблер тулбара, перетаскивание, позиция —
+  // Каждое окно привязано не к экрану, а к точке мировых координат холста
+  // (anchor): при панорамировании/зуме камеры оно остаётся на том же месте
+  // карты. createFloatingPanel — общая фабрика для обоих инструментов
+  // диагностики (путь и распространение), каждый со своими id и ключами.
+  const panels = [];
 
-  function setPanelOpen(open) {
-    document.getElementById("diag-panel").hidden = !open;
-    document.getElementById("diag-tool-path").classList.toggle("active", open);
-  }
+  function createFloatingPanel({ panelId, toolId, closeId, headerId, posKey, openKey, defaultOpen }) {
+    let anchor = null;
+    const panelEl = () => document.getElementById(panelId);
 
-  function wirePanel() {
-    const panel = document.getElementById("diag-panel");
-    const header = document.getElementById("diag-panel-header");
-    document.getElementById("diag-tool-path").addEventListener("click", () => setPanelOpen(panel.hidden));
-    document.getElementById("diag-panel-close").addEventListener("click", () => setPanelOpen(false));
-    header.addEventListener("mousedown", (ev) => {
+    function setOpen(open, persist = true) {
+      panelEl().hidden = !open;
+      document.getElementById(toolId).classList.toggle("active", open);
+      if (persist) localStorage.setItem(openKey, open ? "1" : "0");
+    }
+    // position переносит окно на экран по его якорю в мировых координатах;
+    // вызывается при каждой смене камеры (setCam), чтобы окно ехало вместе с картой.
+    function position() {
+      if (!anchor) return;
+      const p = Camera.worldToScreen(state.camera, anchor.x, anchor.y);
+      panelEl().style.left = `${p.x}px`;
+      panelEl().style.top = `${p.y}px`;
+    }
+    // clampToViewport подтягивает окно внутрь видимой области холста при
+    // открытии: панорамирование камеры, пока окно было закрыто (или просто
+    // далеко унесено), могло увести его якорь за пределы экрана — окно не
+    // должно теряться, его всегда должно быть видно сразу после открытия.
+    function clampToViewport() {
+      const wrap = wrapEl().getBoundingClientRect();
+      const rect = panelEl().getBoundingClientRect();
+      const margin = 8;
+      const maxLeft = Math.max(margin, wrap.width - rect.width - margin);
+      const maxTop = Math.max(margin, wrap.height - rect.height - margin);
+      const left = Math.min(Math.max(parseFloat(panelEl().style.left) || 0, margin), maxLeft);
+      const top = Math.min(Math.max(parseFloat(panelEl().style.top) || 0, margin), maxTop);
+      panelEl().style.left = `${left}px`;
+      panelEl().style.top = `${top}px`;
+      anchor = Camera.screenToWorld(state.camera, left, top);
+      localStorage.setItem(posKey, JSON.stringify(anchor));
+    }
+
+    document.getElementById(toolId).addEventListener("click", () => {
+      const opening = panelEl().hidden;
+      setOpen(opening);
+      if (opening) clampToViewport();
+    });
+    document.getElementById(closeId).addEventListener("click", () => setOpen(false));
+    document.getElementById(headerId).addEventListener("mousedown", (ev) => {
       ev.preventDefault();
       const wrap = wrapEl().getBoundingClientRect();
-      const rect = panel.getBoundingClientRect();
+      const rect = panelEl().getBoundingClientRect();
       const startX = ev.clientX, startY = ev.clientY;
       const startLeft = rect.left - wrap.left, startTop = rect.top - wrap.top;
-      const move = (left, top) => { panel.style.left = `${left}px`; panel.style.top = `${top}px`; };
+      const move = (left, top) => { panelEl().style.left = `${left}px`; panelEl().style.top = `${top}px`; };
       const onMove = (e) => move(startLeft + e.clientX - startX, startTop + e.clientY - startY);
       const onUp = () => {
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
-        localStorage.setItem(DIAG_PANEL_POS_KEY, JSON.stringify({ left: parseFloat(panel.style.left), top: parseFloat(panel.style.top) }));
+        anchor = Camera.screenToWorld(state.camera, parseFloat(panelEl().style.left), parseFloat(panelEl().style.top));
+        localStorage.setItem(posKey, JSON.stringify(anchor));
       };
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
     });
-    setPanelOpen(true);
+    const storedOpen = localStorage.getItem(openKey);
+    setOpen(storedOpen === null ? defaultOpen : storedOpen === "1", false);
     try {
-      const saved = JSON.parse(localStorage.getItem(DIAG_PANEL_POS_KEY));
-      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
-        panel.style.left = `${saved.left}px`;
-        panel.style.top = `${saved.top}px`;
-      }
+      const saved = JSON.parse(localStorage.getItem(posKey));
+      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) anchor = saved;
     } catch {}
+    if (!anchor) {
+      const wrap = wrapEl().getBoundingClientRect();
+      const rect = panelEl().getBoundingClientRect();
+      anchor = Camera.screenToWorld(state.camera, rect.left - wrap.left, rect.top - wrap.top);
+    }
+    position();
+    if (!panelEl().hidden) clampToViewport();
+    return { position };
+  }
+
+  function wirePanels() {
+    panels.push(createFloatingPanel({
+      panelId: "diag-panel", toolId: "diag-tool-path", closeId: "diag-panel-close", headerId: "diag-panel-header",
+      posKey: "firenet-diag-panel-pos-v2", openKey: "firenet-diag-panel-open-v1", defaultOpen: true,
+    }));
+    panels.push(createFloatingPanel({
+      panelId: "spread-panel", toolId: "diag-tool-spread", closeId: "spread-panel-close", headerId: "spread-panel-header",
+      posKey: "firenet-spread-panel-pos-v1", openKey: "firenet-spread-panel-open-v1", defaultOpen: false,
+    }));
   }
 
   // — запоминание введённых параметров формы —
@@ -343,6 +436,7 @@ const Diagnose = (() => {
     const host = document.getElementById("diag-paths");
     host.innerHTML = "";
     state.result = report;
+    updateResetButton();
     const summary = document.getElementById("diag-summary");
     summary.hidden = false;
     summary.textContent = `${report.srcSubnet} → ${report.dstSubnet}: путей ${report.paths.length}` + (report.note ? `. ${report.note}` : "");
@@ -426,6 +520,31 @@ const Diagnose = (() => {
     });
   }
 
+  // updateResetButton держит кнопку сброса на тулбаре активной, только пока
+  // есть что сбрасывать (выполнена диагностика).
+  const updateResetButton = () => { document.getElementById("diag-tool-reset").disabled = !state.result; };
+
+  // resetResult очищает отчёт любого из инструментов диагностики (путь или
+  // распространение) и подсветку на карте, не трогая поля форм. animGen.flow
+  // инвалидирует недоигранный твин проявления потока, чтобы он не перезаписал
+  // сброшенный flowFade кадром позже.
+  function resetResult() {
+    animGen.flow = (animGen.flow || 0) + 1;
+    state.result = null;
+    state.hl = null;
+    state.flow = null;
+    state.flowFade = 0;
+    const summary = document.getElementById("diag-summary");
+    summary.hidden = true;
+    summary.textContent = "";
+    document.getElementById("diag-paths").innerHTML = "";
+    const spreadSummary = document.getElementById("spread-summary");
+    spreadSummary.hidden = true;
+    spreadSummary.textContent = "";
+    updateResetButton();
+    if (state.topology) render();
+  }
+
   async function run(ev) {
     ev.preventDefault();
     const ports = document.getElementById("diag-dstports").value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -439,6 +558,78 @@ const Diagnose = (() => {
       renderReport(report);
     } catch (e) {
       showBanner("Ошибка диагностики: " + e.message);
+    }
+  }
+
+  // fillSpreadSources заполняет datalist поля «Источник» именами всех сетей
+  // и подсетей топологии — подсказка для инструмента распространения.
+  function fillSpreadSources() {
+    const dl = document.getElementById("spread-sources");
+    dl.innerHTML = "";
+    [...state.topology.networks.map((n) => n.name), ...state.subnets.map((s) => s.name)].forEach((name) => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      dl.append(opt);
+    });
+  }
+
+  // ownerNetwork находит сеть, которой принадлежит подсеть — для переноса
+  // источника (известного только по имени подсети) в якорь карты, где узлы
+  // подсетей адресуются по имени их сети (см. anchorOf).
+  const ownerNetwork = (subnetName) => {
+    const n = state.topology.networks.find((n) => (n.subnets || []).includes(subnetName));
+    return n ? n.name : null;
+  };
+
+  // runSpread опрашивает /api/diagnose от каждого резолвленного источника до
+  // каждой другой подсети топологии (любой трафик, без фильтра по протоколу/
+  // портам) и объединяет результаты в одну разметку карты. Подсеть считается
+  // достижимой, если существует хотя бы один физический путь до неё от любого
+  // источника, — это проверка маршрутизации, а не фаерволла: вердикт
+  // правила (allow/deny/return) на достижимость не влияет. Отдельные подсети
+  // источника на карте адресуются по имени владеющей сети (см. ownerNetwork).
+  async function runSpread(ev) {
+    ev.preventDefault();
+    const input = document.getElementById("spread-src").value.trim();
+    const sources = resolveSpreadSources(input, state.subnets, state.topology.networks);
+    const selfNames = new Set(sources.map((s) => s.subnetName).filter(Boolean));
+    const candidates = state.subnets.map((s) => s.name).filter((n) => !selfNames.has(n));
+    const dstIp = (name) => baseIp(state.subnets.find((s) => s.name === name).cidr);
+    const pairs = sources.flatMap((src) => candidates.map((dstName) => ({ src, dstName })));
+    try {
+      const reports = await Promise.all(
+        pairs.map(({ src, dstName }) => Api.post("/api/diagnose", { src: src.ip, dst: dstIp(dstName), proto: "", dstPorts: [] })),
+      );
+      const flows = reports.map((r) => expandFlow(r, state.topology)).filter(Boolean);
+      const merged = mergeFlows(flows);
+      selfNames.forEach((n) => {
+        const owner = ownerNetwork(n);
+        if (owner) { merged.hl.add(owner); merged.ok.add(owner); }
+      });
+      const reached = new Set(selfNames);
+      reports.forEach((r, i) => { if (r.paths.length) reached.add(pairs[i].dstName); });
+      renderSpread(input, merged, reached.size);
+    } catch (e) {
+      showBanner("Ошибка распространения: " + e.message);
+    }
+  }
+
+  // renderSpread показывает свод («достижимо N из M подсетей») и красит карту
+  // той же разметкой flow, что и диагностика одного пути.
+  function renderSpread(input, merged, reachedCount) {
+    state.result = { spread: true };
+    updateResetButton();
+    state.hl = merged.hl;
+    state.flow = merged;
+    const summary = document.getElementById("spread-summary");
+    summary.hidden = false;
+    summary.textContent = `Источник: ${input}. Достижимо ${reachedCount} из ${state.subnets.length} подсетей.`;
+    if (state.topology) {
+      state.flowFade = 0;
+      render();
+      const tw = Tween.create();
+      tw.to(state, { flowFade: 1 }, 200);
+      animate("flow", tw, render);
     }
   }
 
@@ -487,15 +678,20 @@ const Diagnose = (() => {
       setupCamera();
       wireInteractions();
       NetInfo.attach(canvasEl());
+      fillSpreadSources();
     } catch (e) {
       showBanner("Не удалось загрузить топологию: " + e.message);
     }
-    wirePanel();
+    wirePanels();
     wireFormPersistence();
     document.getElementById("diag-form").addEventListener("submit", run);
+    document.getElementById("spread-form").addEventListener("submit", runSpread);
   }
 
-  return { boot, renderReport, run, state, expandHighlight, expandFlow, flowMark };
+  return {
+    boot, renderReport, run, resetResult, state, expandHighlight, expandFlow, flowMark,
+    resolveSpreadSources, mergeFlows, runSpread,
+  };
 })();
 
 if (document.readyState === "loading") {

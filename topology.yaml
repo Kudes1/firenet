@@ -94,15 +94,6 @@ links:
         device: market-a
       b:
         device: core-market-a
-    - a:
-        device: market-a
-      b:
-        device: office1
-      filter:
-        a-exports:
-            - market-a
-        b-exports:
-            - OFFICE-NETWORK
 networks:
     - name: OFFICE-NETWORK
       subnets:

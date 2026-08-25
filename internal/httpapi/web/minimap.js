@@ -35,11 +35,15 @@ const Minimap = (() => {
   function create(canvas, { getBounds, getPoints, getCam, setCam, getViewport, getTheme, pad = 10 }) {
     let map = null; // текущее отображение мир -> пиксели миникарты
 
+    let cw = 0, ch = 0;
     function draw(b) {
-      const cw = canvas.clientWidth, ch = canvas.clientHeight;
+      const w = canvas.clientWidth, h = canvas.clientHeight;
       const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
-      canvas.width = Math.round(cw * dpr);
-      canvas.height = Math.round(ch * dpr);
+      if (w !== cw || h !== ch) {
+        cw = w; ch = h;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+      }
       const ctx = canvas.getContext("2d");
       const theme = (getTheme && getTheme()) || {};
       map = layout(b, cw, ch, pad);

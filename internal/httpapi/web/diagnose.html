@@ -30,6 +30,22 @@
             <path d="M7 6h6a4 4 0 0 1 4 4v2a4 4 0 0 0 4 4h-2"/>
           </svg>
         </button>
+        <button id="diag-tool-spread" class="tool" title="Распространение сети" aria-label="Распространение сети">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>
+            <path d="M8.5 8.5a5 5 0 0 1 7 0"/>
+            <path d="M5.5 5.5a9 9 0 0 1 13 0"/>
+          </svg>
+        </button>
+        <span class="toolbar-sep"></span>
+        <button id="diag-tool-reset" class="tool" title="Сбросить результаты диагностики" aria-label="Сбросить результаты диагностики" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/>
+            <path d="M23 4v6h-6"/>
+            <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
+            <path d="M1 20v-6h6"/>
+          </svg>
+        </button>
       </div>
       <div id="diag-panel" class="diag-panel">
         <header id="diag-panel-header" class="diag-panel-header">
@@ -59,6 +75,22 @@
           </form>
           <section id="diag-summary" hidden></section>
           <section id="diag-paths"></section>
+        </div>
+      </div>
+      <div id="spread-panel" class="diag-panel" hidden>
+        <header id="spread-panel-header" class="diag-panel-header">
+          <strong>Распространение сети</strong>
+          <button type="button" id="spread-panel-close" class="diag-panel-close" title="Закрыть" aria-label="Закрыть">&times;</button>
+        </header>
+        <div class="diag-panel-body">
+          <form id="spread-form">
+            <label>Источник (сеть, подсеть или IP)
+              <input id="spread-src" list="spread-sources" placeholder="office, 10.0.0.0/24 или 10.0.0.5" autocomplete="off" spellcheck="false" required>
+              <datalist id="spread-sources"></datalist>
+            </label>
+            <button type="submit" class="primary">Показать распространение</button>
+          </form>
+          <section id="spread-summary" hidden></section>
         </div>
       </div>
       <div id="net-info" class="net-info" hidden></div>

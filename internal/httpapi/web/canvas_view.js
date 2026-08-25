@@ -27,7 +27,6 @@ const CanvasView = (() => {
     const s = item.style || {};
     ctx.save();
     ctx.globalAlpha = s.alpha ?? 1;
-    if (s.glow) { ctx.shadowColor = s.glow.color; ctx.shadowBlur = s.glow.blur; }
     if (item.kind === "text") {
       ctx.font = s.font;
       ctx.fillStyle = s.fill;
@@ -57,11 +56,13 @@ const CanvasView = (() => {
     ctx.restore();
   }
 
-  function create(canvas, { getList, getCam, getOverlay, textHideZoom = 0.5 }) {
+function create(canvas, { getList, getCam, getOverlay, textHideZoom = 0.5 }) {
     let dirty = true;
     let scheduled = false;
     let ctx = null;
     let cw = 0, ch = 0;
+    let view0 = null;
+    let hideText = false;
 
     function resizeIfNeeded() {
       const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -73,6 +74,13 @@ const CanvasView = (() => {
       ctx = canvas.getContext("2d");
     }
 
+    function paintIfVisible(it) {
+      if (it.text && hideText) return;
+      const b = HitTest.bbox(it);
+      if (b.x > view0.x + view0.w || b.x + b.w < view0.x || b.y > view0.y + view0.h || b.y + b.h < view0.y) return;
+      paint(ctx, it);
+    }
+
     function draw() {
       resizeIfNeeded();
       const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
@@ -81,14 +89,10 @@ const CanvasView = (() => {
       ctx.clearRect(0, 0, cw, ch);
       ctx.setTransform(cam.z * dpr, 0, 0, cam.z * dpr, cam.x * dpr, cam.y * dpr);
       // видимый мировой прямоугольник
-      const view0 = { x: -cam.x / cam.z, y: -cam.y / cam.z, w: cw / cam.z, h: ch / cam.z };
-      const hideText = cam.z < textHideZoom;
-      for (const it of [...(getList() || []), ...(getOverlay ? getOverlay() || [] : [])]) {
-        if (it.text && hideText) continue;
-        const b = HitTest.bbox(it);
-        if (b.x > view0.x + view0.w || b.x + b.w < view0.x || b.y > view0.y + view0.h || b.y + b.h < view0.y) continue;
-        paint(ctx, it);
-      }
+      view0 = { x: -cam.x / cam.z, y: -cam.y / cam.z, w: cw / cam.z, h: ch / cam.z };
+      hideText = cam.z < textHideZoom;
+      for (const it of getList() || []) paintIfVisible(it);
+      for (const it of getOverlay ? getOverlay() || [] : []) paintIfVisible(it);
     }
 
     function schedule() {

@@ -142,10 +142,14 @@ function bootDiagnose(responses, savedStore) {
     clearTimeout,
     Promise,
     console,
-    // clone: production mutates loaded state, responses must stay pristine
+    // clone: production mutates loaded state, responses must stay pristine.
+    // responses[p] may be a function(body) for endpoints hit with varying
+    // payloads (e.g. one /api/diagnose call per spread candidate).
     fetch: async (p, opts) => {
-      calls.push({ path: p, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
-      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(responses[p] ?? null)) };
+      const body = opts?.body ? JSON.parse(opts.body) : null;
+      calls.push({ path: p, method: opts?.method, body });
+      const raw = typeof responses[p] === "function" ? responses[p](body) : responses[p];
+      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(raw ?? null)) };
     },
   };
   sandbox.globalThis = sandbox;
@@ -640,7 +644,7 @@ test("map paints flow segments and marks the deny point with a tooltip", async (
   assert.deepEqual(byStroke(theme.flowDeny), ["attach:OFFICE|sw2", "link:r2|sw2"],
     "segments beyond the deny point are red");
   const denied = JSON.parse(get(`JSON.stringify(Diagnose.state.list.find((i) => i.id === "device:r2"))`));
-  assert.equal(denied.style.glow.color, theme.flowDeny, "deny device glows red");
+  assert.equal(denied.style.stroke, theme.flowDeny, "deny device outlined red");
   assert.match(denied.meta.tooltip, /block-office/, "deny tooltip names the rule");
   assert.match(denied.meta.tooltip, /правило запретило/, "deny tooltip carries the reason");
 });
@@ -668,6 +672,44 @@ test("hovering the denying router shows a delayed tooltip", async () => {
   assert.ok(!tip.hidden, "tooltip shown again over the deny router");
   fire(canvas, "mousemove", { clientX: 1000, clientY: 400 });
   assert.ok(tip.hidden, "moving onto empty space hides the shown tooltip");
+});
+
+test("reset toolbar button is disabled until a diagnosis produces a result", async () => {
+  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  await frames(1);
+  assert.equal(ids["diag-tool-reset"].disabled, true, "nothing to reset yet");
+  get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
+  assert.equal(ids["diag-tool-reset"].disabled, false, "a report is now showing");
+  fire(ids["diag-tool-reset"], "click", {});
+  assert.equal(ids["diag-tool-reset"].disabled, true, "disabled again once reset");
+});
+
+test("reset button clears the report and the map highlight", async () => {
+  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  await frames(1);
+  get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
+  await frames(10);
+  assert.ok(ids["diag-paths"].children.length > 0, "report rendered before reset");
+  fire(ids["diag-tool-reset"], "click", {});
+  assert.equal(get("Diagnose.state.result"), null);
+  assert.equal(get("Diagnose.state.hl"), null);
+  assert.equal(get("Diagnose.state.flow"), null);
+  assert.equal(ids["diag-summary"].hidden, true);
+  assert.equal(ids["diag-paths"].children.length, 0);
+  const dimmed = get("Diagnose.state.list.some((i) => (i.style.alpha ?? 1) < 1)");
+  assert.ok(!dimmed, "nothing stays dimmed once the highlight is cleared");
+});
+
+test("reset during the flow fade-in does not get overwritten by the stale animation", async () => {
+  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  await frames(1);
+  get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
+  fire(ids["diag-tool-reset"], "click", {});
+  await frames(10);
+  assert.equal(get("Diagnose.state.flowFade"), 0, "stale flow tween no longer drives flowFade");
 });
 
 // — плавающее окно параметров —
@@ -698,6 +740,32 @@ test("close button hides the panel and deactivates the toggle", async () => {
   assert.ok(!ids["diag-tool-path"].classList.contains("active"));
 });
 
+test("opening the panel snaps it back into the viewport if it drifted off-screen", async () => {
+  const { ids } = bootDiagnose(responses);
+  await tick();
+  const panel = ids["diag-panel"];
+  panel.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
+  panel.style.left = "5000px";
+  panel.style.top = "5000px";
+  fire(ids["diag-tool-path"], "click", {}); // закрыли
+  fire(ids["diag-tool-path"], "click", {}); // открыли снова — окно должно подтянуться в видимую область
+  assert.equal(panel.style.left, "892px");
+  assert.equal(panel.style.top, "592px");
+});
+
+test("opening the panel leaves it in place when it's already within the viewport", async () => {
+  const { ids } = bootDiagnose(responses);
+  await tick();
+  const panel = ids["diag-panel"];
+  panel.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
+  panel.style.left = "100px";
+  panel.style.top = "50px";
+  fire(ids["diag-tool-path"], "click", {});
+  fire(ids["diag-tool-path"], "click", {});
+  assert.equal(panel.style.left, "100px");
+  assert.equal(panel.style.top, "50px");
+});
+
 test("dragging the header moves the panel and persists its position", async () => {
   const { ids, doc, store } = bootDiagnose(responses);
   await tick();
@@ -706,11 +774,14 @@ test("dragging the header moves the panel and persists its position", async () =
   fire(doc, "mouseup", {});
   assert.equal(ids["diag-panel"].style.left, "60px");
   assert.equal(ids["diag-panel"].style.top, "30px");
-  assert.deepEqual(JSON.parse(store["firenet-diag-panel-pos-v1"]), { left: 60, top: 30 });
+  assert.deepEqual(JSON.parse(store["firenet-diag-panel-pos-v2"]), { x: 60, y: 30 });
 });
 
 test("saved panel position is restored on boot", async () => {
-  const { ids } = bootDiagnose(responses, { "firenet-diag-panel-pos-v1": JSON.stringify({ left: 200, top: 80 }) });
+  const { ids } = bootDiagnose(responses, { "firenet-diag-panel-pos-v2": JSON.stringify({ x: 200, y: 80 }) });
+  // boot clamps an initially-open panel into the viewport; give it a
+  // realistic footprint so a saved position well within 1200x800 survives.
+  (ids["diag-panel"] ||= makeEl("div")).getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
   await tick();
   assert.equal(ids["diag-panel"].style.left, "200px");
   assert.equal(ids["diag-panel"].style.top, "80px");
@@ -740,4 +811,162 @@ test("saved form values are restored on boot", async () => {
   assert.equal(ids["diag-dst"].value, "10.0.1.7");
   assert.equal(ids["diag-proto"].value, "udp");
   assert.equal(ids["diag-dstports"].value, "53");
+});
+
+// — распространение сети (инструмент «Распространение сети») —
+
+test("resolveSpreadSources resolves a subnet name to its base IP", async () => {
+  const { get } = bootDiagnose(responses);
+  await tick();
+  const out = JSON.parse(get(
+    'JSON.stringify(Diagnose.resolveSpreadSources("main", [{name:"main",cidr:"10.0.0.0/24"},{name:"office-net",cidr:"10.0.1.0/24"}], []))',
+  ));
+  assert.deepEqual(out, [{ ip: "10.0.0.0", subnetName: "main" }]);
+});
+
+test("resolveSpreadSources resolves a network name to every attached subnet", async () => {
+  const { get } = bootDiagnose(responses);
+  await tick();
+  const out = JSON.parse(get(
+    'JSON.stringify(Diagnose.resolveSpreadSources("HQ", ' +
+    '[{name:"main",cidr:"10.0.0.0/24"},{name:"office-net",cidr:"10.0.1.0/24"}], ' +
+    '[{name:"HQ",subnets:["main","office-net"]}]))',
+  ));
+  assert.deepEqual(out, [{ ip: "10.0.0.0", subnetName: "main" }, { ip: "10.0.1.0", subnetName: "office-net" }]);
+});
+
+test("resolveSpreadSources treats unmatched input as a literal IP", async () => {
+  const { get } = bootDiagnose(responses);
+  await tick();
+  const out = JSON.parse(get('JSON.stringify(Diagnose.resolveSpreadSources("10.0.0.5", [{name:"main",cidr:"10.0.0.0/24"}], []))'));
+  assert.deepEqual(out, [{ ip: "10.0.0.5", subnetName: null }]);
+});
+
+test("mergeFlows unions ok/deny/edge sets from several reports", async () => {
+  const { get } = bootDiagnose(responses);
+  await tick();
+  const out = JSON.parse(get(`JSON.stringify((() => {
+    const f1 = { hl: new Set(["a", "r1"]), ok: new Set(["a", "r1"]), deny: new Map(), okE: new Set(["a\\0r1"]), denyE: new Set() };
+    const f2 = { hl: new Set(["a", "r2"]), ok: new Set(["a"]), deny: new Map([["r2", { rule: "x", reason: "y" }]]), okE: new Set(), denyE: new Set(["a\\0r2"]) };
+    const m = Diagnose.mergeFlows([f1, f2]);
+    return { hl: [...m.hl].sort(), ok: [...m.ok].sort(), denyKeys: [...m.deny.keys()], okE: [...m.okE], denyE: [...m.denyE] };
+  })())`));
+  assert.deepEqual(out.hl, ["a", "r1", "r2"]);
+  assert.deepEqual(out.ok, ["a", "r1"]);
+  assert.deepEqual(out.denyKeys, ["r2"]);
+  assert.deepEqual(out.okE, ["a\0r1"]);
+  assert.deepEqual(out.denyE, ["a\0r2"]);
+});
+
+const spreadSubnets = {
+  subnets: [
+    { name: "main", cidr: "10.0.0.0/24" },
+    { name: "office-net", cidr: "10.0.1.0/24" },
+    { name: "dmz", cidr: "10.0.2.0/24" },
+  ],
+};
+const spreadTopo = {
+  devices: [{ name: "r1", kind: "router" }, { name: "r2", kind: "router" }],
+  links: [{ a: { device: "r1" }, b: { device: "r2" } }],
+  networks: [
+    { name: "MAIN", subnets: ["main"], attach: [{ device: "r1" }] },
+    { name: "OFFICE", subnets: ["office-net"], attach: [{ device: "r1" }] },
+    { name: "DMZ", subnets: ["dmz"], attach: [{ device: "r2" }] },
+  ],
+};
+const spreadResponses = {
+  ...responses,
+  "/api/topology": spreadTopo,
+  "/api/subnets": spreadSubnets,
+  "/api/diagnose": (body) => {
+    if (body.dst === "10.0.1.0") {
+      return {
+        srcSubnet: "main", dstSubnet: "office-net", note: "", paths: [{
+          nodes: [{ kind: 1, name: "main" }, { kind: 0, name: "r1" }, { kind: 1, name: "office-net" }],
+          routers: [{ router: "r1", action: "allow", reason: "ok" }], verdict: "allow",
+        }],
+      };
+    }
+    if (body.dst === "10.0.2.0") {
+      return {
+        srcSubnet: "main", dstSubnet: "dmz", note: "", paths: [{
+          nodes: [{ kind: 1, name: "main" }, { kind: 0, name: "r1" }, { kind: 0, name: "r2" }, { kind: 1, name: "dmz" }],
+          routers: [
+            { router: "r1", action: "allow", reason: "ok" },
+            { router: "r2", action: "deny", matchedRule: "block-dmz", reason: "запрещено" },
+          ],
+          verdict: "deny",
+        }],
+      };
+    }
+    throw new Error("unexpected dst " + body.dst);
+  },
+};
+
+test("the source datalist lists every network and subnet name", async () => {
+  const { ids, frames } = bootDiagnose(spreadResponses);
+  await tick();
+  await frames(1);
+  const names = ids["spread-sources"].children.map((o) => o.value).sort();
+  assert.deepEqual(names, ["DMZ", "MAIN", "OFFICE", "dmz", "main", "office-net"]);
+});
+
+test("spread panel starts closed while the path panel starts open", async () => {
+  const { ids } = bootDiagnose(spreadResponses);
+  await tick();
+  assert.equal(ids["diag-panel"].hidden, false);
+  assert.equal(ids["spread-panel"].hidden, true);
+  fire(ids["diag-tool-spread"], "click", {});
+  assert.equal(ids["spread-panel"].hidden, false);
+  assert.ok(ids["diag-tool-spread"].classList.contains("active"));
+});
+
+test("spread form queries every other subnet and highlights what's reachable", async () => {
+  const { ids, calls, frames, get } = bootDiagnose(spreadResponses);
+  await tick();
+  await frames(1);
+  ids["spread-src"] ||= makeEl("input");
+  ids["spread-src"].value = "main";
+  fire(ids["spread-form"], "submit", {});
+  await tick();
+  const posts = calls.filter((c) => c.path === "/api/diagnose");
+  assert.equal(posts.length, 2, "one call per non-source subnet");
+  assert.deepEqual(
+    posts.map((c) => c.body).sort((a, b) => a.dst.localeCompare(b.dst)),
+    [
+      { src: "10.0.0.0", dst: "10.0.1.0", proto: "", dstPorts: [] },
+      { src: "10.0.0.0", dst: "10.0.2.0", proto: "", dstPorts: [] },
+    ],
+  );
+  await frames(10);
+  const ok = JSON.parse(get("JSON.stringify([...Diagnose.state.flow.ok])"));
+  const deny = JSON.parse(get("JSON.stringify([...Diagnose.state.flow.deny.keys()])"));
+  // подсети адресуются на карте по имени владеющей сети (MAIN/OFFICE/DMZ),
+  // не по собственному имени подсети — как и в диагностике одного пути.
+  assert.ok(ok.includes("MAIN"), "source network itself is reachable");
+  assert.ok(ok.includes("OFFICE") && ok.includes("r1"), "allowed route toward office-net is lit");
+  assert.ok(deny.includes("r2"), "r2 is the boundary where dmz is blocked");
+  assert.ok(!ok.includes("DMZ"), "dmz itself is not lit past the denied hop");
+  assert.ok(!ids["spread-summary"].hidden);
+  assert.match(String(ids["spread-summary"]._text || ""), /main/);
+  // достижимость считает физический путь, а не вердикт фаервола: к dmz путь
+  // есть (хоть и deny), поэтому он тоже в счётчике.
+  assert.match(String(ids["spread-summary"]._text || ""), /3 из 3/);
+});
+
+test("reset button also clears the spread result", async () => {
+  const { ids, calls, frames, get } = bootDiagnose(spreadResponses);
+  await tick();
+  await frames(1);
+  ids["spread-src"] ||= makeEl("input");
+  ids["spread-src"].value = "main";
+  fire(ids["spread-form"], "submit", {});
+  await tick();
+  await frames(10);
+  assert.equal(ids["diag-tool-reset"].disabled, false);
+  fire(ids["diag-tool-reset"], "click", {});
+  assert.equal(get("Diagnose.state.hl"), null);
+  assert.equal(get("Diagnose.state.flow"), null);
+  assert.equal(ids["spread-summary"].hidden, true);
+  assert.equal(ids["diag-tool-reset"].disabled, true);
 });
