@@ -14,7 +14,7 @@ const CameraControls = (() => {
   //                   реальное перетаскивание (сдвиг больше порога).
   // Возвращает { isRightDown } — зажата ли ПКМ (страницы используют это,
   // чтобы отличить правый клик от правого перетаскивания).
-  function wire(svg, { getCam, setCam, buttons = [0, 1], onChange, onDragEnd, rectEl }) {
+  function wire(svg, { getCam, setCam, buttons = [0, 1], onChange, onDragEnd }) {
     let rightDown = false;
     // Ввод (mousemove до 1000 Гц) приходит чаще кадров дисплея, а каждая
     // смена transform перерисовывает сцену. Обновления копятся в pending
@@ -38,10 +38,8 @@ const CameraControls = (() => {
         onChange && onChange();
       });
     };
-    // У стейдж-канвы собственная трансформа, поэтому координаты указателя
-    // берутся из контейнера (rectEl); по умолчанию — сам холст.
     const screenPoint = (e) => {
-      const r = (rectEl || svg).getBoundingClientRect();
+      const r = svg.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
     svg.addEventListener("wheel", (e) => {
@@ -60,9 +58,6 @@ const CameraControls = (() => {
       if (!buttons.includes(e.button)) return;
       e.preventDefault();
       if (e.button === 2) rightDown = true;
-      // Класс .panning: страницы гасят им дорогую отделку сцены (свечение,
-      // подписи, pointer-events), пока камера двигается.
-      svg.classList.add("panning");
       const start = screenPoint(e);
       let last = start;
       let moved = false;
@@ -79,7 +74,6 @@ const CameraControls = (() => {
       const onUp = () => {
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
-        svg.classList.remove("panning");
         if (e.button === 2) rightDown = false;
         onDragEnd && onDragEnd(moved, e.button);
       };

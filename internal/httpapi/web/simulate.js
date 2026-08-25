@@ -123,17 +123,13 @@ const Simulate = (() => {
     return { hl, ok, deny, okE, denyE };
   }
 
-  // flowMark возвращает mark(obj) для TopoScene: класс движения трафика
+  // flowMark возвращает mark(obj) для TopoScene: состояние движения трафика
   // элемента карты. Узлы — по ok/deny; рёбра (связи и привязки) — по
   // собственным множествам okE/denyE: цвет ребра не выводится из концов,
   // иначе хоп к запрещающему роутеру красился бы по его вердикту.
-  // Объединения с членами на маршруте получают лишь лёгкую метку.
   // Непомеченные элементы остаются приглушёнными.
   const flowMark = (flow) => (obj) => {
-    if (!flow) return "";
-    if (obj.devices)
-      return obj.devices.some((d) => flow.hl.has(d)) || (obj.networks || []).some((n) => flow.hl.has(n))
-        ? "sim-flow-union" : "";
+    if (!flow || obj.devices) return "";
     if (!obj.a && obj.type !== "attach")
       return flow.deny.has(obj.name) ? "sim-flow-deny" : flow.ok.has(obj.name) ? "sim-flow-ok" : "";
     const names = obj.type === "attach" ? [obj.net.name, obj.device] : [obj.a.device, obj.b.device];

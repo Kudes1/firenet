@@ -99,7 +99,6 @@ function bootSimulate(responses, savedStore) {
     listeners: {},
     body: makeEl("body"),
     documentElement: { dataset: {} },
-    createElementNS: (ns, tag) => makeEl(tag),
     createElement: (tag) => makeEl(tag),
     // stable registry: production code resolves widgets by id repeatedly
     getElementById: (id) => (id === "sim-canvas" ? canvas : (ids[id] ||= makeEl("div"))),
@@ -311,17 +310,6 @@ test("clicking a network on the read-only map shows its subnets", async () => {
   assert.match(html, /10\.0\.0\.0\/24/, "member CIDR listed");
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
   assert.ok(info.hidden, "zooming hides the window");
-});
-
-test("pan drag toggles the panning class that sheds expensive path styling", async () => {
-  const { canvas, doc } = bootSimulate(responses);
-  await tick();
-  assert.ok(!canvas.classList.contains("panning"), "no pan — no class");
-  fire(canvas, "mousedown", { button: 2, clientX: 10, clientY: 10 });
-  assert.ok(canvas.classList.contains("panning"), "right-button drag marks panning");
-  fire(canvas, "mousedown", { button: 1, clientX: 10, clientY: 10 });
-  fire(doc, "mouseup", { button: 1 });
-  assert.ok(!canvas.classList.contains("panning"), "release clears panning");
 });
 
 // mousemove приходит чаще кадров дисплея: всплеск движений обязан дать одну
@@ -580,26 +568,6 @@ test("hop into the denying router stays green, segments beyond it turn red", asy
   assert.equal(mark({ type: "attach", net: { name: "MAIN" }, device: "sw1" }), "sim-flow-ok", "attach before the deny point");
   assert.equal(mark({ a: { device: "r2" }, b: { device: "sw2" } }), "sim-flow-deny", "wire beyond the deny point");
   assert.equal(mark({ type: "attach", net: { name: "OFFICE" }, device: "sw2" }), "sim-flow-deny", "attach beyond the deny point");
-});
-
-// Unions crossed by the traffic are highlighted just a little.
-test("unions crossed by the route get a subtle mark", async () => {
-  const topo = { ...switchedTopo, unions: [
-    { name: "side", devices: ["lone"] },
-    { name: "src", devices: ["sw1", "r1"], networks: ["MAIN"] },
-    { name: "dst", devices: ["r2", "sw2"], networks: ["OFFICE"] },
-  ] };
-  const { get } = bootSimulate({ ...responses, "/api/topology": topo });
-  await tick();
-  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
-  const marks = JSON.parse(get(
-    `JSON.stringify((Simulate.state.topology.unions || []).map((s) => [s.name, Simulate.flowMark(Simulate.state.flow)(s)]))`,
-  ));
-  assert.deepEqual(marks, [
-    ["side", ""],
-    ["src", "sim-flow-union"],
-    ["dst", "sim-flow-union"],
-  ], "only unions with route members are marked");
 });
 
 // переход потока анимируется через flowFade: старт прозрачный, финал — полный

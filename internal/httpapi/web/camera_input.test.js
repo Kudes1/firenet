@@ -1,7 +1,6 @@
 "use strict";
 
-// Unit-тесты ввода холста: CameraControls сам помечает канвас классом
-// .panning на время пана, чтобы страницы гасили дорогую отделку сцены.
+// Unit-тесты ввода холста: зум колесом и пан перетаскиванием.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -56,38 +55,15 @@ function boot() {
   return { doc, svg, wire, cam: () => cam };
 }
 
-test("pan drag marks the canvas with the panning class until release", () => {
-  const { doc, svg, wire } = boot();
-  wire([1, 2]);
-  assert.ok(!svg.classList.contains("panning"));
-  fire(svg, "mousedown", { button: 2, clientX: 10, clientY: 10 });
-  assert.ok(svg.classList.contains("panning"), "drag start sheds expensive styling");
-  fire(doc, "mousemove", { clientX: 40, clientY: 30 });
-  assert.ok(svg.classList.contains("panning"), "class persists while moving");
-  fire(doc, "mouseup", {});
-  assert.ok(!svg.classList.contains("panning"), "release restores styling");
-});
-
-test("non-pan buttons never mark the canvas as panning", () => {
-  const { doc, svg, wire } = boot();
-  wire([1, 2]);
-  fire(svg, "mousedown", { button: 0, clientX: 10, clientY: 10 });
-  assert.ok(!svg.classList.contains("panning"), "left click stays clean");
-  fire(doc, "mouseup", {});
-});
-
-// Стейдж-канва сдвинута и трансформирована относительно контейнера, поэтому
-// координаты указателя обязаны браться из прямоугольника контейнера (rectEl),
-// а не самого svg — иначе зум якорится не под курсором
-test("pointer coordinates come from rectEl when given", () => {
+// Координаты указателя берутся из прямоугольника холста: зум и пан
+// считаются относительно него, а не окна.
+test("pan applies the pointer delta relative to the canvas rect", () => {
   const { doc, svg, wire, cam } = boot();
-  const clip = makeEl("div");
-  clip.getBoundingClientRect = () => ({ left: 25, top: 50, width: 1200, height: 800 });
-  svg.getBoundingClientRect = () => ({ left: -100, top: -200, width: 3600, height: 3200 });
-  wire([1, 2], { rectEl: clip });
+  svg.getBoundingClientRect = () => ({ left: -100, top: -200, width: 1200, height: 800 });
+  wire([1, 2]);
   fire(svg, "mousedown", { button: 2, clientX: 125, clientY: 150 });
   fire(doc, "mousemove", { clientX: 175, clientY: 180 });
   fire(doc, "mouseup", {});
   const c = cam();
-  assert.deepEqual({ x: c.x, y: c.y, z: c.z }, { x: 50, y: 30, z: 1 }, "pan by pointer delta relative to the clip");
+  assert.deepEqual({ x: c.x, y: c.y, z: c.z }, { x: 50, y: 30, z: 1 }, "pan by pointer delta relative to the rect");
 });

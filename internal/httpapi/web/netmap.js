@@ -1,11 +1,10 @@
 "use strict";
 
 // NetMap — общие чистые помощники отрисовки топологии: константы геометрии
-// узлов и фабрика SVG-элементов. Используется интерактивной картой
-// (topology.js) и статической картой страницы симуляции (simulate.js).
+// узлов, глифы устройств и геометрия облаков. Используется интерактивной
+// картой (topology.js) и статической картой страницы симуляции (simulate.js).
 // Состояния страницы здесь нет.
 const NetMap = (() => {
-  const SVG_NS = "http://www.w3.org/2000/svg";
   const DEVICE_W = 140;
   const DEVICE_H = 60;
   const NET_W = 160;
@@ -21,13 +20,6 @@ const NetMap = (() => {
     router: { rx: 16, glyph: "M2.5 6a3.5 3.5 0 1 1 0 .01M9 3.5h3m0 0-1.4-1.4M12 3.5l-1.4 1.4M9 8.5h3m0 0-1.4-1.4M12 8.5l-1.4 1.4" },
     switch: { rx: 2, glyph: "M1 4h10m0 0-2-2m2 2-2 2M11 8H1m0 0 2-2m-2 2 2 2" },
   };
-
-  function el(tag, attrs, text) {
-    const e = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
-    if (text !== undefined) e.textContent = text;
-    return e;
-  }
 
   function center(map, name, w, h) {
     const pos = map[name];
@@ -81,5 +73,5 @@ const NetMap = (() => {
     return segs;
   }
 
-  return Object.freeze({ SVG_NS, DEVICE_W, DEVICE_H, NET_W, NET_H, UNION_COLORS, KINDS, el, center, linkOffsets, spreadOffset, pointAt, cloudSegs });
+  return Object.freeze({ DEVICE_W, DEVICE_H, NET_W, NET_H, UNION_COLORS, KINDS, center, linkOffsets, spreadOffset, pointAt, cloudSegs });
 })();

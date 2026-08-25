@@ -2,7 +2,7 @@
 
 // Camera is the infinite-canvas viewport: a pan offset plus a zoom factor
 // mapping world coordinates (node positions, stored in layout) to screen
-// coordinates of the SVG canvas. Pure math only, no DOM.
+// coordinates of the canvas. Pure math only, no DOM.
 const Camera = (() => {
   const MIN_ZOOM = 0.1;
   const MAX_ZOOM = 8;
@@ -22,14 +22,6 @@ const Camera = (() => {
 
   const screenToWorld = (cam, sx, sy) => ({ x: (sx - cam.x) / cam.z, y: (sy - cam.y) / cam.z });
   const worldToScreen = (cam, wx, wy) => ({ x: wx * cam.z + cam.x, y: wy * cam.z + cam.y });
-  const transform = (cam) => `translate(${cam.x} ${cam.y}) scale(${cam.z})`;
-
-  // Стейдж-модель: svg с запасом m по каждой стороне сдвинут на (-m,-m)
-  // относительно контейнера, сцена внутри нарисована в координатах мира со
-  // смещением o; камера применена CSS-трансформой и выполняется композитором
-  // без перерисовки сцены. Инвариант тот же: контейнерная точка = world*z+cam.
-  const stageTransform = (cam, o, m) =>
-    `translate(${cam.x + m - o.x * cam.z}px, ${cam.y + m - o.y * cam.z}px) scale(${cam.z})`;
 
   // fitView подбирает зум и центр так, чтобы bbox мира (с полем pad)
   // целиком поместился во вьюпорт; мелкие сцены центрируются без увеличения.
@@ -40,5 +32,5 @@ const Camera = (() => {
     return { x: vw / 2 - cx * z, y: vh / 2 - cy * z, z };
   }
 
-  return { MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, transform, stageTransform, fitView };
+  return { MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, fitView };
 })();

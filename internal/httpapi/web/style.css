@@ -2,6 +2,8 @@
   color-scheme: light dark;
   --bg: #ffffff;
   --fg: #1a1a1a;
+  /* псевдоним для CanvasTheme/тултипов: цвет текста на канве следует теме */
+  --text: var(--fg);
   --muted: #6b6b6b;
   --border: #d8d8dc;
   --accent: #2563eb;
@@ -280,7 +282,9 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
     radial-gradient(circle, var(--border) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--bg);
 }
-#topo-canvas { display: block; width: 100%; height: 100%; }
+#topo-canvas, #sim-canvas { display: block; width: 100%; height: 100%; }
+/* обе карты — интерактивный холст: жесты касания ведут камеру, а не скролл */
+#topo-canvas, #sim-canvas { touch-action: none; }
 
 /* floating toolbar (tldraw-style) */
 .topo-toolbar {
@@ -335,10 +339,6 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 }
 .node-popover form { display: flex; gap: var(--space-1); align-items: center; }
 .node-popover input { width: 9rem; }
-
-/* union frames (colors come as inline SVG attributes) */
-.union-frame { pointer-events: none; }
-.union-label { font-size: 12px; font-weight: 600; pointer-events: none; user-select: none; }
 
 /* floating network info window (subnet membership on network click) */
 .net-info {
@@ -424,11 +424,6 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .topo-tooltip[hidden],
 .sim-tooltip[hidden] { display: none; }
 
-/* canvas interaction affordances */
-.marquee { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; fill: rgba(37, 99, 235, 0.08); }
-.node-rect.selected, .subnet-rect.selected { stroke: var(--accent); stroke-width: 2.5; }
-.wire-preview { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 6 4; fill: none; pointer-events: none; }
-
 /* поиск по топологии: совпавшие узлы светятся, остальное слегка приглушено */
 #topo-search {
   width: 180px;
@@ -442,29 +437,6 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 }
 #topo-search:focus { outline: none; border-color: var(--accent); }
 #topo-search[hidden] { display: none; }
-.search-hit {
-  stroke: #d29922 !important;
-  stroke-width: 3 !important;
-  filter: drop-shadow(0 0 4px #d29922) drop-shadow(0 0 8px #d29922);
-}
-.viewport .search-dim { opacity: 0.35; }
-
-.node-rect { fill: var(--panel-bg); stroke: var(--border); stroke-width: 1.5; cursor: grab; }
-.node-rect.router { stroke: var(--kind-router); }
-.node-rect.switch { stroke: var(--kind-switch); }
-.node-rect.pending { stroke: var(--accent) !important; stroke-width: 3; }
-.subnet-rect { fill: var(--panel-bg); stroke: var(--kind-network); stroke-width: 1.5; cursor: grab; }
-.node-glyph { fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
-.node-glyph.router { stroke: var(--kind-router); }
-.node-glyph.switch { stroke: var(--kind-switch); }
-.node-label, .subnet-label { fill: var(--fg); font-size: 12px; user-select: none; pointer-events: none; }
-.wire { stroke: var(--muted); stroke-width: 1.5; fill: none; pointer-events: none; }
-.wire.selected { stroke: var(--accent); stroke-width: 2.5; }
-.wire-filtered { stroke: #d29922; stroke-dasharray: 6 4; }
-.wire-filtered.selected { stroke-dasharray: 6 4; }
-/* invisible wide twin of each wire that enlarges the clickable zone */
-.wire-hit { stroke: transparent; stroke-width: 14; fill: none; pointer-events: stroke; cursor: pointer; }
-.link-label-text { font-size: 9px; fill: var(--muted); pointer-events: none; user-select: none; }
 
 .zone {
   border: 1px solid var(--border);
@@ -901,9 +873,6 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .sim-splitter { width: 1rem; cursor: col-resize; position: relative; z-index: 1; }
 .sim-splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0.4375rem; right: 0.4375rem; background: transparent; }
 .sim-splitter:hover::after, .sim-splitter.dragging::after { background: var(--accent); opacity: 0.5; }
-/* стейдж-канва симуляции: больше вьюпорта на запас, позиционируется и
-   трансформируется инлайн из simulate.js; камера выполняется композитором */
-#sim-canvas { display: block; position: absolute; transform-origin: 0 0; will-change: transform; }
 .sim-form-panel form { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
 .sim-path { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-2); margin-bottom: var(--space-2); }
 .sim-path header { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-1); }
@@ -916,34 +885,6 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .badge-drop { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
 .badge-return { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
 .badge-default { background: rgba(148, 163, 184, 0.2); color: inherit; }
-.sim-dim { opacity: 0.25; }
-.sim-flow-ok { stroke: #10b981; }
-.sim-flow-deny { stroke: #ef4444; }
-/* путь трафика заметно толще обычных связей и подсвечен свечением; у точки
-   запрета свечение пульсирует, чтобы красный бросался в глаза. Пульсация
-   анимирует прозрачность: анимация самого drop-shadow заставляла бы
-   пересчитывать SVG-фильтр каждый кадр. */
-.wire.sim-flow-ok, .wire.sim-flow-deny { stroke-width: 4; }
-.node-rect.sim-flow-ok, .subnet-rect.sim-flow-ok,
-.sim-flow-deny.node-rect, .sim-flow-deny.subnet-rect { stroke-width: 2.5; }
-.sim-flow-ok.wire, .sim-flow-ok.node-rect, .sim-flow-ok.subnet-rect {
-  filter: drop-shadow(0 0 3px rgba(16, 185, 129, 0.65));
-}
-.sim-flow-deny.wire, .sim-flow-deny.node-rect, .sim-flow-deny.subnet-rect {
-  filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.65));
-  animation: sim-flow-pulse 1.2s ease-in-out infinite;
-}
-@keyframes sim-flow-pulse {
-  50% { opacity: 0.55; }
-}
-.sim-flow-union.union-frame { stroke-width: 2.5; }
-.sim-flow-union { filter: drop-shadow(0 0 4px rgba(148, 163, 184, 0.35)); }
-/* во время пана камеры смена transform инвалидирует растеризацию SVG-фильтров,
-   поэтому на время перетаскивания свечение и пульсация отключаются */
-.panning :is(.sim-flow-ok, .sim-flow-deny, .sim-flow-union) {
-  filter: none !important;
-  animation: none !important;
-}
 .sim-unreachable { color: #ef4444; }
 .sim-note { opacity: 0.75; font-size: 0.85em; }
 .sim-path details.sim-verdict { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-1) var(--space-2); margin: var(--space-1) 0; font-size: 0.9em; }

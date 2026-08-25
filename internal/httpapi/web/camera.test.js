@@ -54,30 +54,6 @@ test("zoomAt clamps zoom into bounds", () => {
   assert.equal(max.z, Camera.MAX_ZOOM);
 });
 
-test("transform renders translate+scale for SVG viewport group", () => {
-  const Camera = loadCamera();
-  assert.equal(Camera.transform({ x: 10, y: -20, z: 0.5 }), "translate(10 -20) scale(0.5)");
-});
-
-// Стейдж: svg с запасом (overscan m), сдвинутый на (-m,-m) относительно
-// контейнера; камера применяется CSS-трансформой и композитится GPU без
-// перерисовки сцены. Контракт: контейнерная точка = world*z + cam.
-test("stageTransform maps stage pixels so the container shows the camera view", () => {
-  const Camera = loadCamera();
-  const cam = { x: -40, y: 15, z: 2 };
-  const t = Camera.stageTransform(cam, { x: 0, y: 0 }, 100);
-  assert.equal(t, "translate(60px, 115px) scale(2)");
-});
-
-// Смещение сцены o (в мировых координатах) учитывается в трансформе:
-// контейнерная точка = (world + o)*z + T - m должна равняться world*z + cam
-test("stageTransform compensates the scene origin offset", () => {
-  const Camera = loadCamera();
-  const cam = { x: 0, y: 0, z: 1 };
-  const t = Camera.stageTransform(cam, { x: 300, y: -200 }, 100);
-  assert.equal(t, "translate(-200px, 300px) scale(1)");
-});
-
 test("fitView centers bounds with padding", () => {
   const Camera = loadCamera();
   const b = { minX: 0, minY: 0, maxX: 400, maxY: 200 };
