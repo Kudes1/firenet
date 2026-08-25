@@ -13,13 +13,14 @@ const Tween = (() => {
         const from = {};
         for (const k in props) from[k] = obj[k];
         // поздний твин вытесняет ранние твины тех же свойств того же объекта;
-        // твин стартует в нуле таймлайна, now в tick() — монотонное время
+        // твин якорится временем первого tick() — совместимо с performance.now()
         items = items.filter((it) => it.obj !== obj || Object.keys(props).every((k) => !(k in it.props)));
-        items.push({ obj, props, from, t0: 0, ms, ease });
+        items.push({ obj, props, from, t0: null, ms, ease });
       },
       active: () => items.length > 0,
       tick(now) {
         items = items.filter((it) => {
+          if (it.t0 === null) it.t0 = now;
           const p = Math.min(1, (now - it.t0) / it.ms);
           const e = it.ease(p);
           for (const k in it.props) it.obj[k] = it.from[k] + (it.props[k] - it.from[k]) * e;

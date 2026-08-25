@@ -14,6 +14,7 @@ test("tick interpolates numeric props and reports activity", () => {
   const tw = Tween.create();
   const o = { x: 0, y: 0 };
   tw.to(o, { x: 100, y: 50 }, 100, (t) => t);
+  assert.equal(tw.tick(0), true);
   assert.equal(tw.active(), true);
   assert.equal(tw.tick(50), true);
   assert.equal(o.x, 50);
@@ -27,6 +28,7 @@ test("later tween wins for repeated props", () => {
   const o = { x: 0 };
   tw.to(o, { x: 10 }, 100, (t) => t);
   tw.to(o, { x: 20 }, 100, (t) => t);
+  tw.tick(0);
   assert.equal(tw.tick(50), true, "starts on first tick");
   assert.equal(tw.tick(100), false, "finished");
   assert.equal(o.x, 20, "late tween displaced the earlier one");
@@ -35,4 +37,14 @@ test("later tween wins for repeated props", () => {
 test("easeOutCubic decelerates", () => {
   assert.ok(Tween.easeOutCubic(0.5) > 0.5);
   assert.equal(Tween.easeOutCubic(1), 1);
+});
+
+test("twin anchors to large monotonic clock values", () => {
+  const tw = Tween.create();
+  const o = { x: 0 };
+  tw.to(o, { x: 10 }, 100, (t) => t);
+  assert.equal(tw.tick(4950), true);
+  assert.equal(tw.tick(5000), true);
+  assert.equal(o.x, 5);
+  assert.equal(tw.tick(5100), false);
 });
