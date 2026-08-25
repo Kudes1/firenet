@@ -77,3 +77,21 @@ test("stageTransform compensates the scene origin offset", () => {
   const t = Camera.stageTransform(cam, { x: 300, y: -200 }, 100);
   assert.equal(t, "translate(-200px, 300px) scale(1)");
 });
+
+test("fitView centers bounds with padding", () => {
+  const Camera = loadCamera();
+  const b = { minX: 0, minY: 0, maxX: 400, maxY: 200 };
+  const cam = Camera.fitView(Camera.create(), b, 800, 400, 50);
+  // вписывание без увеличения: натянутый масштаб 1.5 ограничен единицей
+  assert.equal(cam.z, 1);
+  // центр мира (200,100) оказывается в центре вьюпорта
+  const c = pt(Camera.worldToScreen(cam, 200, 100));
+  assert.equal(c.x, 400);
+  assert.equal(c.y, 200);
+});
+
+test("fitView never zooms in beyond 1", () => {
+  const Camera = loadCamera();
+  const cam = Camera.fitView(Camera.create(), { minX: 0, minY: 0, maxX: 100, maxY: 50 }, 800, 400, 50);
+  assert.equal(cam.z, 1, "tiny scenes are centered, not magnified");
+});

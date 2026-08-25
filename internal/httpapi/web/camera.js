@@ -31,5 +31,14 @@ const Camera = (() => {
   const stageTransform = (cam, o, m) =>
     `translate(${cam.x + m - o.x * cam.z}px, ${cam.y + m - o.y * cam.z}px) scale(${cam.z})`;
 
-  return { MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, transform, stageTransform };
+  // fitView подбирает зум и центр так, чтобы bbox мира (с полем pad)
+  // целиком поместился во вьюпорт; мелкие сцены центрируются без увеличения.
+  function fitView(cam, b, vw, vh, pad) {
+    const w = Math.max(1, b.maxX - b.minX), h = Math.max(1, b.maxY - b.minY);
+    const z = clamp(Math.min((vw - 2 * pad) / w, (vh - 2 * pad) / h, 1));
+    const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
+    return { x: vw / 2 - cx * z, y: vh / 2 - cy * z, z };
+  }
+
+  return { MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, transform, stageTransform, fitView };
 })();
