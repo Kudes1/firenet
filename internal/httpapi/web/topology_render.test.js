@@ -365,6 +365,33 @@ test("clicking a network opens the subnet info window", async () => {
   assert.ok(page.ids["net-info"].hidden, "background click hides the window");
 });
 
+// полный клик браузера по сети: down → up (окно открылось) → click; окно
+// обязано пережить завершающий click, адресованный узлу, а не фону
+function fullClick(page, name) {
+  const p = AT[name];
+  fire(page.canvas, "mousedown", { button: 0, clientX: p.x, clientY: p.y });
+  fire(page.doc, "mouseup", {});
+  fire(page.canvas, "click", { clientX: p.x, clientY: p.y });
+}
+
+test("net info window survives the trailing click fired on its network", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fullClick(page, "net1");
+  assert.ok(!page.ids["net-info"].hidden, "info window stays open after the browser click");
+});
+
+test("full background click sequence closes the net info window", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fullClick(page, "net1");
+  assert.ok(!page.ids["net-info"].hidden, "window opened first");
+  fire(page.canvas, "mousedown", { button: 0, clientX: 900, clientY: 700 });
+  fire(page.doc, "mouseup", {});
+  fire(page.canvas, "click", { clientX: 900, clientY: 700 });
+  assert.ok(page.ids["net-info"].hidden, "background sequence hides the window");
+});
+
 test("marquee selects all intersecting nodes", async () => {
   const page = bootTopology(responses);
   await tick();

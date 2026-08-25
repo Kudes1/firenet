@@ -257,10 +257,10 @@ const Topology = (() => {
       document.getElementById("tool-" + t).addEventListener("click", () => setTool(t));
     });
     canvas().addEventListener("click", (e) => {
-      NetInfo.hide();
       if (marqueeEnded) { marqueeEnded = false; return; } // click trailing the marquee drag
       // клик по узлу/связи уже обработан их mousedown — фону он не адресован
       if (HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z)) return;
+      NetInfo.hide(); // окно состава сети закрывает только клик по фону
       clearSearch(); // клик по пустому фону сбрасывает активный поиск
       if (State.tool === "device" || State.tool === "network") openNodePopover(screenPoint(e), State.tool);
       else {
