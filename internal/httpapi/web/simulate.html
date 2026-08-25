@@ -11,6 +11,16 @@
 </script>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/style.css">
+<style>
+  #sim-canvas { inset: 0; width: 100%; height: 100%; }
+  #sim-fit { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 2; }
+  .sim-tooltip {
+    position: absolute; z-index: 3; pointer-events: none; max-width: 320px;
+    background: var(--panel-bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px 8px; font-size: 0.82rem;
+  }
+  .sim-tooltip[hidden] { display: none; }
+</style>
 </head>
 <body data-nav="simulate" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
 
@@ -43,8 +53,10 @@
     </section>
     <div class="sim-splitter" id="sim-splitter" title="Перетащите, чтобы изменить ширину; двойной клик — сброс"></div>
     <div class="canvas-wrap" id="sim-wrap">
-      <svg id="sim-canvas"></svg>
+      <canvas id="sim-canvas"></canvas>
       <div id="net-info" class="net-info" hidden></div>
+      <button id="sim-fit" title="Вписать карту">Вписать</button>
+      <div id="sim-tooltip" class="sim-tooltip" hidden></div>
     </div>
   </div>
 </main>
@@ -54,8 +66,12 @@
 <script src="/camera.js"></script>
 <script src="/camera_input.js"></script>
 <script src="/netmap.js"></script>
-<script src="/net_info.js"></script>
+<script src="/tween.js"></script>
+<script src="/canvas_theme.js"></script>
+<script src="/hit_test.js"></script>
+<script src="/canvas_view.js"></script>
 <script src="/topo_scene.js"></script>
+<script src="/net_info.js"></script>
 <script src="/simulate.js"></script>
 </body>
 </html>

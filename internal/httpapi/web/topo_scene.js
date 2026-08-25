@@ -213,7 +213,8 @@ const TopoScene = (() => {
     if (states.has("pending")) { st.stroke = theme.accent; st.lineWidth = 3; }
     if (states.has("search-hit")) st.glow = { color: theme.accent, blur: 8 };
     const flow = states.has("sim-flow-ok") ? theme.flowOk : states.has("sim-flow-deny") ? theme.flowDeny : null;
-    if (flow) {
+    // flow красит только контуры (как в SVG-версии); у подписей stroke нет
+    if (flow && base.stroke) {
       const k = fade?.flow ?? 1;
       st.stroke = theme.lerpHex(base.stroke, flow, k);
       st.lineWidth = base.lineWidth + ((base.wire ? 4 : 2.5) - base.lineWidth) * k;

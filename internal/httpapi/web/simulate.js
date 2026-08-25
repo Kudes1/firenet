@@ -1,19 +1,18 @@
 "use strict";
 
-// Simulate — статическая карта топологии с подсветкой путей и отчёт
+// Simulate — карта топологии на canvas с подсветкой путей и отчёт
 // симуляции трафика (POST /api/simulate). Карта только для чтения:
 // перетаскивание узлов и правка — на /ui/topology.
 const Simulate = (() => {
-  const { el, NET_W, NET_H, DEVICE_W, DEVICE_H } = NetMap;
-  // WORLD_PAD — запас вокруг bbox мира при подборе origin стейджа
-  const WORLD_PAD = 100;
+  const { NET_W } = NetMap;
   const state = {
     topology: null, subnets: [], layout: null, camera: Camera.create(), result: null,
-    origin: { x: 0, y: 0 }, // смещение сцены на стейдже (мировые координаты)
-    stageM: 0, // запас (overscan) стейджа вокруг вьюпорта
+    list: [], // display list канвы (TopoScene.buildScene)
+    hl: null, flow: null, flowFade: 0, // разметка потока и прогресс её проявления
   };
+  let theme = null, view = null;
 
-  const svgEl = () => document.getElementById("sim-canvas");
+  const canvasEl = () => document.getElementById("sim-canvas");
   const wrapEl = () => document.getElementById("sim-wrap");
 
   // buildAdj: симметричная смежность устройств и сетей — линки устройство–
@@ -153,6 +152,9 @@ const Simulate = (() => {
     return !names.every((n) => hl.has(n));
   };
 
+  // denyTooltip — текст тултипа точки срабатывания запрета
+  const denyTooltip = (info) => (info.rule ? `правило ${info.rule}: ` : "") + info.reason;
+
   // showNetInfo открывает окно состава сети у правого края её облака.
   function showNetInfo(n) {
     const pos = state.layout.networks[n.name];
@@ -161,97 +163,84 @@ const Simulate = (() => {
     NetInfo.show(n, state.subnets, Camera.worldToScreen(state.camera, pos.x + NET_W, pos.y), { w: r.width, h: r.height });
   }
 
-  // sizeStage превращает канвас в «стейдж» с запасом вокруг вьюпорта: камера
-  // применяется CSS-трансформой и выполняется композитором GPU, сцена не
-  // перерисовывается при пане. Запас m = большая сторона контейнера.
-  function sizeStage(svg) {
-    const r = wrapEl().getBoundingClientRect();
-    state.stageM = Math.ceil(Math.max(r.width, r.height));
-    const s = svg.style;
-    s.position = "absolute";
-    s.left = `${-state.stageM}px`;
-    s.top = `${-state.stageM}px`;
-    s.width = `${Math.round(r.width) + 2 * state.stageM}px`;
-    s.height = `${Math.round(r.height) + 2 * state.stageM}px`;
-    s.transformOrigin = "0 0";
+  // render пересобирает display list сцены и просит канву перерисоваться
+  function render() {
+    TopoScene.ensureLayout(state.topology, state.layout);
+    state.list = TopoScene.buildScene(state, {
+      theme,
+      dim: pathDim(state.hl),
+      mark: flowMark(state.flow),
+      fade: { flow: state.flowFade },
+      // item получает примитивный kind (rrect/path/…); узел опознаём по nodeType
+      item: (kind, it) => {
+        if (it.nodeType === "device" && state.flow && state.flow.deny.has(it.ref.name))
+          it.meta = { tooltip: denyTooltip(state.flow.deny.get(it.ref.name)) };
+      },
+    }).list;
+    view.invalidate();
   }
 
-  // applyCamera выносит камеру в CSS-трансформу стейджа (композиторский слой)
-  function applyCamera() {
-    svgEl().style.transform = Camera.stageTransform(state.camera, state.origin, state.stageM);
-  }
-
-  // worldBounds — bbox всей сцены в мировых координатах; null без раскладки
-  function worldBounds() {
-    const b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-    const grow = (p, w, h) => {
-      if (!p) return;
-      b.minX = Math.min(b.minX, p.x); b.minY = Math.min(b.minY, p.y);
-      b.maxX = Math.max(b.maxX, p.x + w); b.maxY = Math.max(b.maxY, p.y + h);
+  // animate гонит твин кадрами rAF, после каждого tick — перерисовка
+  function animate(tw, apply) {
+    const step = () => {
+      tw.tick(performance.now());
+      apply();
+      if (tw.active()) requestAnimationFrame(step);
     };
-    state.topology.devices.forEach((d) => grow(state.layout.devices[d.name], DEVICE_W, DEVICE_H));
-    state.topology.networks.forEach((n) => grow(state.layout.networks[n.name], NET_W, NET_H));
-    return b.minX === Infinity ? null : b;
+    requestAnimationFrame(step);
   }
 
-  // fitOrigin подбирает смещение сцены на стейдже так, что весь мир (с
-  // запасом WORLD_PAD) лежит в пределах канвы; точка отсчёта — вид камеры,
-  // поэтому при дрейфе камеры origin следует за ней, не обрезая мир.
-  function fitOrigin() {
-    const tx = Math.round(state.camera.x / state.camera.z);
-    const ty = Math.round(state.camera.y / state.camera.z);
-    const b = worldBounds();
-    if (!b) return { x: tx, y: ty };
-    const r = wrapEl().getBoundingClientRect();
-    const axis = (t, minV, maxV, view) => {
-      const span = Math.round(view) + 2 * state.stageM;
-      const lo = WORLD_PAD - minV;
-      const hi = span - WORLD_PAD - maxV;
-      if (lo > hi) return Math.round((lo + hi) / 2);
-      return Math.min(Math.max(t, lo), hi);
-    };
-    return {
-      x: axis(tx, b.minX, b.maxX, r.width),
-      y: axis(ty, b.minY, b.maxY, r.height),
-    };
+  const setCam = (c) => { state.camera = c; view.invalidate(); };
+
+  // flyCam плавно ведёт камеру к цели (кнопка «вписать карту»)
+  function flyCam(to, ms = 250) {
+    const cur = { ...state.camera };
+    const tw = Tween.create();
+    tw.to(cur, to, ms);
+    animate(tw, () => setCam({ ...cur }));
   }
 
-  // rebase перецентрирует сцену одной перерисовкой по окончании жеста
-  function rebase() {
-    const next = fitOrigin();
-    if (next.x === state.origin.x && next.y === state.origin.y) return;
-    renderMap();
-  }
-  let rebaseTimer = 0;
-  const scheduleRebase = () => {
-    clearTimeout(rebaseTimer);
-    rebaseTimer = setTimeout(rebase, 400);
+  // worldPoint переводит точку курсора в мировые координаты
+  const worldPoint = (e) => {
+    const r = canvasEl().getBoundingClientRect();
+    return Camera.screenToWorld(state.camera, e.clientX - r.left, e.clientY - r.top);
   };
 
-  function renderMap() {
+  // fitMap вписывает всю карту во вьюпорт анимацией камеры
+  function fitMap() {
     TopoScene.ensureLayout(state.topology, state.layout);
-    const svg = svgEl();
-    svg.innerHTML = "";
-    if (!state.stageM) sizeStage(svg);
-    state.origin = fitOrigin();
-    const viewportG = el("g", { class: "viewport", transform: `translate(${state.origin.x} ${state.origin.y})` });
-    svg.append(viewportG);
-    applyCamera();
-    const flow = expandFlow(state.result, state.topology);
-    TopoScene.render(viewportG, state, {
-      dim: pathDim(flow && flow.hl),
-      mark: flowMark(flow),
-      hook: (kind, elem, obj) => {
-        if (kind === "network") elem.onclick = () => showNetInfo(obj);
-        if (kind === "device" && flow && flow.deny.has(obj.name)) {
-          // нативный SVG-тултип с точкой срабатывания запрета
-          const info = flow.deny.get(obj.name);
-          const t = document.createElementNS(NetMap.SVG_NS, "title");
-          t.textContent = (info.rule ? `правило ${info.rule}: ` : "") + info.reason;
-          elem.append(t);
-        }
-      },
+    const b = TopoScene.bounds(state.topology, state.layout);
+    if (!b) return;
+    const r = wrapEl().getBoundingClientRect();
+    flyCam(Camera.fitView(state.camera, b, Math.round(r.width), Math.round(r.height), 60));
+  }
+
+  function wireInteractions() {
+    const cv = canvasEl();
+    cv.addEventListener("click", (e) => {
+      const it = HitTest.pick(state.list, worldPoint(e), state.camera.z);
+      if (it && it.nodeType === "network") showNetInfo(it.ref);
     });
+    // тултип (точка запрета, экспорт фильтров на связях): hover с задержкой
+    const tip = document.getElementById("sim-tooltip");
+    tip.hidden = true;
+    let tipTimer = 0;
+    const hideTip = () => { clearTimeout(tipTimer); tip.hidden = true; };
+    cv.addEventListener("mousemove", (e) => {
+      const it = HitTest.pick(state.list, worldPoint(e), state.camera.z);
+      clearTimeout(tipTimer);
+      if (!it || !it.meta || !it.meta.tooltip) return;
+      tipTimer = setTimeout(() => {
+        const r = cv.getBoundingClientRect();
+        tip.textContent = it.meta.tooltip;
+        tip.style.left = `${e.clientX - r.left + 14}px`;
+        tip.style.top = `${e.clientY - r.top + 14}px`;
+        tip.hidden = false;
+      }, 300);
+    });
+    cv.addEventListener("mouseleave", hideTip);
+    cv.addEventListener("mousedown", hideTip); // жест начался — подсказка ни к чему
+    document.getElementById("sim-fit").addEventListener("click", fitMap);
   }
 
   // — перетаскиваемый разделитель «форма ↔ карта» —
@@ -324,7 +313,18 @@ const Simulate = (() => {
     const summary = document.getElementById("sim-summary");
     summary.hidden = false;
     summary.textContent = `${report.srcSubnet} → ${report.dstSubnet}: путей ${report.paths.length}` + (report.note ? `. ${report.note}` : "");
-    if (state.topology) renderMap();
+    const flow = expandFlow(report, state.topology);
+    state.hl = flow && flow.hl;
+    state.flow = flow;
+    if (state.topology) {
+      state.flowFade = 0;
+      render();
+      if (flow) {
+        const tw = Tween.create();
+        tw.to(state, { flowFade: 1 }, 200);
+        animate(tw, render);
+      }
+    }
     if (!report.paths.length) {
       const p = document.createElement("p");
       p.className = "sim-unreachable";
@@ -414,17 +414,10 @@ const Simulate = (() => {
     // в /api/layout, чтобы не перезаписывать раскладку редактора топологии.
     // Кнопки пана — как в редакторе: средняя и правая; левая остаётся кликам
     // (состав сети), нативное меню ПКМ гасится внутри CameraControls.
-    const svg = svgEl();
-    CameraControls.wire(svg, {
+    CameraControls.wire(canvasEl(), {
       getCam: () => state.camera,
-      setCam: (c) => {
-        state.camera = c;
-        applyCamera();
-      },
+      setCam,
       buttons: [1, 2],
-      rectEl: wrapEl(),
-      onChange: scheduleRebase,
-      onDragEnd: rebase,
     });
   }
 
@@ -439,9 +432,16 @@ const Simulate = (() => {
       state.camera = layout.camera && layout.camera.z > 0
         ? { ...Camera.create(), ...layout.camera }
         : Camera.create();
-      renderMap();
+      theme = CanvasTheme.fromComputed(getComputedStyle(document.documentElement));
+      view = CanvasView.create(canvasEl(), {
+        getList: () => state.list,
+        getCam: () => state.camera,
+        getOverlay: () => [],
+      });
+      render();
       setupCamera();
-      NetInfo.attach(svgEl());
+      wireInteractions();
+      NetInfo.attach(canvasEl());
     } catch (e) {
       showBanner("Не удалось загрузить топологию: " + e.message);
     }

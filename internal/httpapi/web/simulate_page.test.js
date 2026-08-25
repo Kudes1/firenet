@@ -63,13 +63,19 @@ function fire(target, type, ev) {
   if (type === "click" && target.onclick) target.onclick(ev);
 }
 
-function texts(node) {
-  const out = [];
-  (function walk(n) {
-    if (n._text) out.push(String(n._text));
-    (n.children || []).forEach(walk);
-  })(node);
-  return out;
+// recorder: ctx-стаб, записывающий вызовы методов canvas 2d context
+function makeCtx() {
+  const calls = [];
+  const handler = {
+    get(t, prop) {
+      if (prop in t) return t[prop];
+      return (...args) => calls.push([prop, args]);
+    },
+    set(t, prop, v) { t[prop] = v; calls.push(["set:" + prop, [v]]); return true; },
+  };
+  const ctx = new Proxy({}, handler);
+  ctx.calls = calls;
+  return ctx;
 }
 
 const topoFixture = {
@@ -79,7 +85,12 @@ const topoFixture = {
 };
 
 function bootSimulate(responses, savedStore) {
-  const canvas = makeEl("svg");
+  const ctx = makeCtx();
+  const canvas = Object.assign(makeEl("canvas"), {
+    clientWidth: 1200,
+    clientHeight: 800,
+    getContext: () => ctx,
+  });
   const ids = {};
   const calls = [];
   const store = { ...savedStore };
@@ -98,6 +109,10 @@ function bootSimulate(responses, savedStore) {
       if (list) doc.listeners[t] = list.filter((f) => f !== fn);
     },
   };
+  // управляемые кадры: rAF-очередь + фейковые часы для твинов; кадр исполняет
+  // только колбэки, поставленные в очередь до него
+  let clock = 0;
+  const rafQueue = [];
   const sandbox = {
     document: doc,
     window: {
@@ -114,8 +129,10 @@ function bootSimulate(responses, savedStore) {
     dispatchEvent() {},
     confirm: () => false,
     FormData: class { get() { return ""; } },
-    // rAF через макротаск: как в браузере, колбэк исполняется «в следующем кадре»
-    requestAnimationFrame: (fn) => setTimeout(fn, 0),
+    Path2D: class {},               // стаб для kind:"glyph"
+    getComputedStyle: () => ({ getPropertyValue: () => "" }),
+    performance: { now: () => clock },
+    requestAnimationFrame: (fn) => rafQueue.push(fn),
     setTimeout,
     clearTimeout,
     Promise,
@@ -128,12 +145,23 @@ function bootSimulate(responses, savedStore) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  for (const f of ["common.js", "camera.js", "camera_input.js", "netmap.js", "net_info.js", "topo_scene.js", "simulate.js"]) {
+  for (const f of [
+    "common.js", "camera.js", "camera_input.js", "netmap.js", "tween.js",
+    "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
+    "net_info.js", "simulate.js",
+  ]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
+  const frame = () => {
+    clock += 50;
+    rafQueue.splice(0).forEach((fn) => fn(clock));
+  };
+  const frames = async (n) => {
+    for (let i = 0; i < n; i++) frame();
+  };
   const get = (expr) => vm.runInContext(expr, sandbox);
-  return { canvas, ids, calls, get, sandbox, doc, store };
+  return { canvas, ctx, ids, calls, get, sandbox, doc, store, frame, frames };
 }
 
 const responses = {
@@ -165,91 +193,64 @@ const sampleReport = {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 
-const viewport = (canvas) => canvas.children.find((c) => c.attrs.class === "viewport");
+// — карта: display list, камера, взаимодействие —
 
-// парсер CSS-трансформы камеры на стейдже: translate(Xpx, Ypx) scale(Z)
-const parseStage = (t) => {
-  const [, x, y, z] = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(t);
-  return { x: +x, y: +y, z: +z };
-};
-
-test("boot builds an overscanned stage driven by a CSS camera transform", async () => {
-  const { canvas } = bootSimulate(responses);
+test("boot builds the canvas display list and draws a frame", async () => {
+  const { ctx, frames, get } = bootSimulate(responses);
   await tick();
-  // контейнер 1200x800 → запас m = 1200, стейдж 3600x3200 со сдвигом (-m,-m)
-  assert.equal(canvas.style.position, "absolute");
-  assert.equal(canvas.style.left, "-1200px");
-  assert.equal(canvas.style.top, "-1200px");
-  assert.equal(canvas.style.width, "3600px");
-  assert.equal(canvas.style.height, "3200px");
-  // камера живёт в CSS-трансформе стейджа, группа сцены несёт только origin
-  // (мир дефолтной раскладки начинается с (40,40), паддинг 100 → origin 60)
-  const t = parseStage(canvas.style.transform);
-  assert.deepEqual({ x: t.x, y: t.y, z: t.z }, { x: 1140, y: 1140, z: 1 });
-  assert.equal(viewport(canvas).attrs.transform, "translate(60 60)");
-});
-
-// Мир с отрицательными координатами обязан целиком попадать на стейдж:
-// origin подбирается так, что bbox мира + паддинг лежит в пределах канвы.
-test("stage origin covers the whole world, including negative coordinates", async () => {
-  const topo = { devices: [{ name: "r0", kind: "router" }], links: [], networks: [] };
-  const { canvas } = bootSimulate({
-    ...responses,
-    "/api/topology": topo,
-    "/api/layout": { devices: { r0: { x: -60, y: -40 } }, networks: {} },
-  });
-  await tick();
-  // мир: x∈[-60,80], y∈[-40,20]; паддинг 100 → origin зажимается в (160,140)
-  assert.equal(viewport(canvas).attrs.transform, "translate(160 140)");
+  await frames(1);
+  const ids = get("Simulate.state.list.map((i) => i.id)");
+  for (const id of ["device:r1", "device:r2", "network:office", "network:office:label", "attach:office|r1", "link:r1|r2"]) {
+    assert.ok(ids.includes(id), `${id} in the display list`);
+  }
+  assert.ok(ctx.calls.some((c) => c[0] === "setTransform"), "frame drawn through the camera transform");
 });
 
 test("wheel zooms around the cursor", async () => {
-  const { canvas } = bootSimulate({
+  const { canvas, frames, get } = bootSimulate({
     ...responses,
     "/api/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
   });
   await tick();
-  const before = canvas.style.transform;
+  await frames(1);
+  const before = JSON.parse(get("JSON.stringify(Simulate.state.camera)"));
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
-  await tick();
-  const after = canvas.style.transform;
-  assert.notEqual(after, before, "zoom changed the stage transform");
-  // the world point under the cursor stays under the cursor:
-  // container = world*z + cam ⇔ cam = translate - m
-  const parse = (t) => {
-    const s = parseStage(t);
-    return { x: s.x - 1200, y: s.y - 1200, z: s.z };
-  };
+  await frames(1);
+  const after = JSON.parse(get("JSON.stringify(Simulate.state.camera)"));
+  assert.ok(after.z > before.z, "zoom changed the camera");
+  // the world point under the cursor stays under the cursor
   const worldAt = (cam) => ({ x: (300 - cam.x) / cam.z, y: (200 - cam.y) / cam.z });
-  const w0 = worldAt(parse(before));
-  const w1 = worldAt(parse(after));
+  const w0 = worldAt(before);
+  const w1 = worldAt(after);
   assert.ok(Math.abs(w1.x - w0.x) < 0.01 && Math.abs(w1.y - w0.y) < 0.01, "cursor-anchored zoom");
 });
 
 // same pan buttons as the topology editor: middle + right, left stays free
 test("middle- and right-button drags pan the read-only map", async () => {
-  const { canvas, doc } = bootSimulate(responses);
+  const { canvas, doc, frames, get } = bootSimulate(responses);
   await tick();
+  await frames(1);
   fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  await frames(1);
   fire(doc, "mouseup", {});
-  await tick();
-  assert.equal(canvas.style.transform, "translate(1200px, 1170px) scale(1)");
+  assert.deepEqual(JSON.parse(get("JSON.stringify(Simulate.state.camera)")), { x: 60, y: 30, z: 1 });
   fire(canvas, "mousedown", { button: 2, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 40, clientY: 80 });
+  await frames(1);
   fire(doc, "mouseup", { button: 2 });
-  await tick();
-  assert.equal(canvas.style.transform, "translate(1140px, 1150px) scale(1)");
+  assert.deepEqual(JSON.parse(get("JSON.stringify(Simulate.state.camera)")), { x: 0, y: 10, z: 1 });
 });
 
 test("left button stays free: dragging it does not pan the map", async () => {
-  const { canvas, doc } = bootSimulate(responses);
+  const { canvas, doc, frames, get } = bootSimulate(responses);
   await tick();
+  await frames(1);
   fire(canvas, "mousedown", { button: 0, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  await frames(1);
   fire(doc, "mouseup", {});
-  await tick();
-  assert.equal(canvas.style.transform, "translate(1140px, 1140px) scale(1)");
+  assert.deepEqual(JSON.parse(get("JSON.stringify(Simulate.state.camera)")), { x: 0, y: 0, z: 1 });
 });
 
 test("right-click on the canvas suppresses the native menu", async () => {
@@ -261,18 +262,19 @@ test("right-click on the canvas suppresses the native menu", async () => {
 });
 
 test("camera changes are not persisted to /api/layout", async () => {
-  const { canvas, doc, calls } = bootSimulate(responses);
+  const { canvas, doc, calls, frames } = bootSimulate(responses);
   await tick();
+  await frames(1);
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
   fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  await frames(1);
   fire(doc, "mouseup", {});
-  await tick();
   assert.ok(!calls.some((c) => c.path === "/api/layout" && c.method === "PUT"), "read-only page never writes layout");
 });
 
-test("map matches the topology editor: subnet names and union frames", async () => {
-  const { canvas } = bootSimulate({
+test("map shows subnet names, network labels and union frames", async () => {
+  const { frames, get } = bootSimulate({
     ...responses,
     "/api/topology": {
       devices: topoFixture.devices,
@@ -282,28 +284,27 @@ test("map matches the topology editor: subnet names and union frames", async () 
     },
   });
   await tick();
-  const html = JSON.stringify(canvas);
-  assert.doesNotMatch(html, /10\.0\.0\.0\/24/, "subnet names, not CIDRs");
-  assert.match(html, /union-frame/);
-  assert.match(html, /"data-union":"hq"/);
-  assert.match(html, /office/, "network label rendered");
+  await frames(1);
+  const byId = JSON.parse(get(
+    "JSON.stringify(Object.fromEntries(Simulate.state.list.map((i) => [i.id, i])))",
+  ));
+  assert.ok(byId["union:hq"], "union frame in the display list");
+  assert.equal(byId["union:hq:label"].text, "hq");
+  assert.equal(byId["network:office:label"].text, "office", "network label rendered");
+  const texts = get("Simulate.state.list.filter((i) => i.text).map((i) => i.text).join('|')");
+  assert.doesNotMatch(texts, /10\.0\.0\.0\/24/, "subnet names, not CIDRs");
+  assert.match(texts, /r1 \(router\)/, "device label rendered");
 });
 
-const firstByClass = (node, cls) => {
-  if (String(node.attrs.class || "").split(/\s+/).includes(cls)) return node;
-  for (const c of node.children || []) {
-    const hit = firstByClass(c, cls);
-    if (hit) return hit;
-  }
-  return null;
-};
-
 test("clicking a network on the read-only map shows its subnets", async () => {
-  const { canvas, ids } = bootSimulate(responses);
+  const { canvas, ids, frames } = bootSimulate(responses);
   await tick();
+  await frames(1);
   const info = (ids["net-info"] ||= makeEl("div"));
   info.hidden = true;
-  fire(firstByClass(canvas, "subnet-rect"), "click", {});
+  // облако office в дефолтной раскладке занимает (40,300)+(160x60); точка
+  // у верхней кромки — в пределах допуска обводки, мимо линий привязки
+  fire(canvas, "click", { clientX: 50, clientY: 305 });
   assert.ok(!info.hidden, "network click opens the info window");
   const html = JSON.stringify(info);
   assert.match(html, /office/, "window titled with the network name");
@@ -323,27 +324,40 @@ test("pan drag toggles the panning class that sheds expensive path styling", asy
   assert.ok(!canvas.classList.contains("panning"), "release clears panning");
 });
 
-// mousemove приходит чаще кадров дисплея, поэтому камера обязана применяться
-// не чаще одного раза на requestAnimationFrame, даже если событий было десять
-test("rapid pan moves coalesce into one camera update per frame", async () => {
-  const { canvas, doc } = bootSimulate(responses);
+// mousemove приходит чаще кадров дисплея: всплеск движений обязан дать одну
+// перерисовку (камера применяется одним setCam на кадр внутри CameraControls)
+test("rapid pan moves coalesce into one redraw per frame", async () => {
+  const { canvas, doc, ctx, frames } = bootSimulate(responses);
   await tick();
-  const vp = viewport(canvas);
-  assert.equal(vp.attrs.transform, "translate(60 60)", "camera lives on the stage, not the scene group");
-  let writes = 0;
-  Object.defineProperty(canvas.style, "transform", {
-    get() { return this._t || ""; },
-    set(v) { if (v) writes++; this._t = v; },
-    configurable: true,
-  });
+  await frames(1);
+  const draws = () => ctx.calls.filter((c) => c[0] === "clearRect").length;
+  const n0 = draws();
   fire(canvas, "mousedown", { button: 2, clientX: 100, clientY: 100 });
   for (let i = 1; i <= 10; i++) fire(doc, "mousemove", { clientX: 100 + i * 10, clientY: 100 });
-  assert.equal(writes, 0, "moves wait for the frame");
-  await tick();
-  assert.equal(writes, 1, "exactly one transform write per frame");
-  assert.equal(canvas.style.transform, "translate(1240px, 1140px) scale(1)", "all deltas applied in the single write");
+  assert.equal(draws(), n0, "moves wait for the frame");
+  await frames(2); // кадр камеры + запрошенная им перерисовка
+  assert.equal(draws(), n0 + 1, "exactly one redraw for the whole burst");
   fire(doc, "mouseup", {});
 });
+
+// — кнопка «вписать карту» —
+
+test("fit button flies the camera to frame the whole map", async () => {
+  const { ids, frames, get } = bootSimulate(responses);
+  await tick();
+  await frames(1);
+  fire(ids["sim-fit"], "click", {});
+  await frames(10); // 10×50мс покрывают анимацию целиком
+  const expected = JSON.parse(get(
+    "JSON.stringify(Camera.fitView(Camera.create(), TopoScene.bounds(Simulate.state.topology, Simulate.state.layout), 1200, 800, 60))",
+  ));
+  const cam = JSON.parse(get("JSON.stringify(Simulate.state.camera)"));
+  for (const k of ["x", "y", "z"]) {
+    assert.ok(Math.abs(cam[k] - expected[k]) < 1e-9, `camera.${k} settled on fitView (${cam[k]} ≈ ${expected[k]})`);
+  }
+});
+
+// — отчёт симуляции (DOM) —
 
 test("renderReport builds one card per path with verdict badges", async () => {
   const { ids, get } = bootSimulate(responses);
@@ -420,21 +434,21 @@ const switchedReport = {
 };
 
 test("highlight covers the full path: networks, switches, links and attaches", async () => {
-  const { canvas, ids, get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { get, frames } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
   await tick();
+  await frames(1);
   get(`Simulate.renderReport(${JSON.stringify(switchedReport)})`);
+  await frames(10);
   const hl = get("Simulate.expandHighlight(Simulate.state.result, Simulate.state.topology)");
   for (const name of ["MAIN", "OFFICE", "sw1", "sw2", "r1", "r2"]) {
     assert.ok(hl.has(name), `${name} belongs to the highlighted path`);
   }
   assert.ok(!hl.has("lone"), "devices off the path stay unhighlighted");
-  // DOM: only the lone switch, its wire and its labels remain dimmed
-  const kids = viewport(canvas).children;
-  const dimmed = kids.filter((c) => String(c.attrs.class || "").includes("sim-dim"));
-  assert.equal(dimmed.filter((c) => c.tag === "line").length, 0, "attaches are lit");
-  assert.equal(dimmed.filter((c) => String(c.attrs.class).startsWith("subnet-rect")).length, 0, "end networks are lit");
-  assert.equal(dimmed.filter((c) => String(c.attrs.class).startsWith("wire")).length, 1, "only the off-path link is dimmed");
-  assert.equal(dimmed.filter((c) => String(c.attrs.class).startsWith("node-rect")).length, 1, "only the off-path device is dimmed");
+  // канва: приглушены только одиночный свитч, его подписи и его связь
+  const dimmed = JSON.parse(get(
+    "JSON.stringify(Simulate.state.list.filter((i) => (i.style.alpha ?? 1) < 1).map((i) => i.id).sort())",
+  ));
+  assert.deepEqual(dimmed, ["device:lone", "device:lone:glyph", "device:lone:label", "link:lone|r1"]);
 });
 
 test("form submit posts to /api/simulate and renders the report", async () => {
@@ -520,16 +534,6 @@ const denyReport = {
   }],
 };
 
-const allByClass = (node, cls) => {
-  const out = [];
-  const has = (n) => String(n.attrs.class || "").split(/\s+/).includes(cls);
-  (function walk(n) {
-    if (has(n)) out.push(n);
-    (n.children || []).forEach(walk);
-  })(node);
-  return out;
-};
-
 test("expandFlow colors the route green up to the denying router", async () => {
   const { get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
   await tick();
@@ -585,27 +589,67 @@ test("unions crossed by the route get a subtle mark", async () => {
     { name: "src", devices: ["sw1", "r1"], networks: ["MAIN"] },
     { name: "dst", devices: ["r2", "sw2"], networks: ["OFFICE"] },
   ] };
-  const { canvas, get } = bootSimulate({ ...responses, "/api/topology": topo });
+  const { get } = bootSimulate({ ...responses, "/api/topology": topo });
   await tick();
   get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
-  const marked = allByClass(canvas, "sim-flow-union").filter((n) => n.tag === "rect");
-  assert.deepEqual(marked.map((n) => n.attrs["data-union"]).sort(), ["dst", "src"],
-    "only unions with route members are marked");
+  const marks = JSON.parse(get(
+    `JSON.stringify((Simulate.state.topology.unions || []).map((s) => [s.name, Simulate.flowMark(Simulate.state.flow)(s)]))`,
+  ));
+  assert.deepEqual(marks, [
+    ["side", ""],
+    ["src", "sim-flow-union"],
+    ["dst", "sim-flow-union"],
+  ], "only unions with route members are marked");
+});
+
+// переход потока анимируется через flowFade: старт прозрачный, финал — полный
+test("report flow fades in over animated frames", async () => {
+  const { get, frames } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  await frames(1);
+  get(`Simulate.renderReport(${JSON.stringify(switchedReport)})`);
+  assert.ok(get("Simulate.state.flowFade") < 1, "transition starts transparent");
+  await frames(10);
+  assert.equal(get("Simulate.state.flowFade"), 1, "transition completes");
 });
 
 test("map paints flow segments and marks the deny point with a tooltip", async () => {
-  const { canvas, get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { get, frames } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
   await tick();
+  await frames(1);
   get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
-  const okWires = allByClass(canvas, "sim-flow-ok");
-  assert.ok(okWires.some((w) => w.tag === "path"), "wires up to the deny point are green");
-  assert.ok(okWires.some((w) => w.tag === "line"), "attaches up to the deny point are green");
-  const denied = allByClass(canvas, "sim-flow-deny");
-  const rects = denied.filter((n) => n.tag === "rect");
-  assert.equal(rects.length, 1, "exactly one device carries the deny marker");
-  const title = (rects[0].children || []).find((c) => c.tag === "title");
-  assert.ok(title, "deny device has a tooltip");
-  assert.match(String(title._text || ""), /block-office/, "tooltip names the rule");
+  await frames(10); // дождались полного прогрева потока (flowFade = 1)
+  const theme = JSON.parse(get("JSON.stringify(CanvasTheme.create({}))"));
+  const byStroke = (color) => JSON.parse(get(
+    `JSON.stringify(Simulate.state.list.filter((i) => i.style.wire && i.style.stroke === ${JSON.stringify(color)}).map((i) => i.id).sort())`,
+  ));
+  assert.deepEqual(byStroke(theme.flowOk), ["attach:MAIN|sw1", "link:r1|r2", "link:r1|sw1"],
+    "wires and attaches up to the deny point are green");
+  assert.deepEqual(byStroke(theme.flowDeny), ["attach:OFFICE|sw2", "link:r2|sw2"],
+    "segments beyond the deny point are red");
+  const denied = JSON.parse(get(`JSON.stringify(Simulate.state.list.find((i) => i.id === "device:r2"))`));
+  assert.equal(denied.style.glow.color, theme.flowDeny, "deny device glows red");
+  assert.match(denied.meta.tooltip, /block-office/, "deny tooltip names the rule");
+  assert.match(denied.meta.tooltip, /правило запретило/, "deny tooltip carries the reason");
+});
+
+test("hovering the denying router shows a delayed tooltip", async () => {
+  const { canvas, ids, frames, get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  await tick();
+  await frames(1);
+  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
+  await frames(10);
+  const tip = ids["sim-tooltip"];
+  // r2 в дефолтной раскладке — второе устройство, (240,40)+(140x60)
+  fire(canvas, "mousemove", { clientX: 250, clientY: 50 });
+  assert.ok(tip.hidden, "tooltip waits out the delay");
+  await new Promise((r) => setTimeout(r, 350));
+  assert.ok(!tip.hidden, "tooltip appears after the delay");
+  assert.match(String(tip._text), /block-office/);
+  assert.equal(tip.style.left, "264px", "tooltip sits beside the cursor");
+  assert.equal(tip.style.top, "64px");
+  fire(canvas, "mouseleave", {});
+  assert.ok(tip.hidden, "leaving the canvas hides the tooltip");
 });
 
 // — разделитель «форма ↔ карта» —
