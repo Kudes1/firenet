@@ -13,6 +13,10 @@ devices:
       kind: router
     - name: core_office1
       kind: switch
+    - name: market-a
+      kind: router
+    - name: core-market-a
+      kind: switch
 links:
     - a:
         device: test1
@@ -39,6 +43,7 @@ links:
             - MARKET
         b-exports:
             - MAIN
+            - market-a
     - a:
         device: market
       b:
@@ -48,6 +53,7 @@ links:
             - MARKET
         b-exports:
             - MAIN
+            - market-a
     - a:
         device: test1
       b:
@@ -75,6 +81,28 @@ links:
             - MARKET
         b-exports:
             - OFFICE-NETWORK
+    - a:
+        device: market-a
+      b:
+        device: test1
+      filter:
+        a-exports:
+            - market-a
+        b-exports:
+            - MAIN
+    - a:
+        device: market-a
+      b:
+        device: core-market-a
+    - a:
+        device: market-a
+      b:
+        device: office1
+      filter:
+        a-exports:
+            - market-a
+        b-exports:
+            - OFFICE-NETWORK
 networks:
     - name: OFFICE-NETWORK
       subnets:
@@ -92,6 +120,11 @@ networks:
         - mr-1
       attach:
         - device: core2
+    - name: market-a
+      subnets:
+        - market1
+      attach:
+        - device: core-market-a
 sets: []
 unions:
     - name: Главный офис
@@ -113,3 +146,9 @@ unions:
         - market
       networks:
         - MARKET
+    - name: Магазин А
+      devices:
+        - core-market-a
+        - market-a
+      networks:
+        - market-a

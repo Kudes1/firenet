@@ -14,8 +14,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/rules"
-	"github.com/kudes1/firenet/internal/simulate"
 )
 
 const fixtureTopology = `
@@ -684,16 +684,46 @@ func TestPutTopology_RejectsUnknownExport(t *testing.T) {
 	}
 }
 
-func TestSimulateHandler(t *testing.T) {
+func TestGetLinkExports(t *testing.T) {
+	h, _ := newTestServer(t)
+
+	rec := doJSON(t, h, http.MethodGet, "/api/link-exports?link=0&side=a", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Entities []EntityDoc `json:"entities"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// The edited link itself is excluded from the graph: from r1 only its
+	// own network stays in reach.
+	want := []EntityDoc{{Name: "n-office"}, {Name: "office", CIDR: "10.0.0.0/24"}}
+	if !slices.EqualFunc(got.Entities, want, func(a, b EntityDoc) bool { return a == b }) {
+		t.Fatalf("entities = %+v, want %+v", got.Entities, want)
+	}
+
+	for _, q := range []string{"link=0&side=c", "link=x&side=a", "link=-1&side=a"} {
+		if rec := doJSON(t, h, http.MethodGet, "/api/link-exports?"+q, nil); rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("%s: want 422, got %d", q, rec.Code)
+		}
+	}
+	if rec := doJSON(t, h, http.MethodGet, "/api/link-exports?link=7&side=a", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("out-of-range link: want 404, got %d", rec.Code)
+	}
+}
+
+func TestDiagnoseHandler(t *testing.T) {
 	h, _ := newTestServer(t)
 
 	t.Run("allowed flow reports matched rule", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/simulate",
+		rec := doJSON(t, h, http.MethodPost, "/api/diagnose",
 			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"443"}})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 		}
-		var rep simulate.Report
+		var rep diagnose.Report
 		if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
@@ -709,7 +739,7 @@ func TestSimulateHandler(t *testing.T) {
 	})
 
 	t.Run("invalid IP is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/simulate", map[string]any{"src": "nonsense", "dst": "10.0.1.7"})
+		rec := doJSON(t, h, http.MethodPost, "/api/diagnose", map[string]any{"src": "nonsense", "dst": "10.0.1.7"})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", rec.Code)
 		}
@@ -719,7 +749,7 @@ func TestSimulateHandler(t *testing.T) {
 	})
 
 	t.Run("unknown IP is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/simulate", map[string]any{"src": "10.0.0.5", "dst": "192.168.99.99"})
+		rec := doJSON(t, h, http.MethodPost, "/api/diagnose", map[string]any{"src": "10.0.0.5", "dst": "192.168.99.99"})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", rec.Code)
 		}
@@ -729,14 +759,14 @@ func TestSimulateHandler(t *testing.T) {
 	})
 
 	t.Run("bad proto is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/simulate", map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "sctp"})
+		rec := doJSON(t, h, http.MethodPost, "/api/diagnose", map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "sctp"})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", rec.Code)
 		}
 	})
 
 	t.Run("invalid port string is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/simulate",
+		rec := doJSON(t, h, http.MethodPost, "/api/diagnose",
 			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"abc"}})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -747,7 +777,7 @@ func TestSimulateHandler(t *testing.T) {
 	})
 
 	t.Run("inverted port range is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/simulate",
+		rec := doJSON(t, h, http.MethodPost, "/api/diagnose",
 			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "srcPorts": []string{"2000:1000"}})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -755,7 +785,7 @@ func TestSimulateHandler(t *testing.T) {
 	})
 
 	t.Run("valid port range passes validation", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/simulate",
+		rec := doJSON(t, h, http.MethodPost, "/api/diagnose",
 			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"443", "1024:65535"}})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())

@@ -58,13 +58,15 @@ test("states resolve into resolved styles", () => {
   assert.equal(dev.style.lineWidth, 2.5);
 });
 
-test("filtered link carries dash and tooltip meta", () => {
+test("filtered link carries dash and filter meta", () => {
   const s = scene();
-  s.topology.links = [{ a: { device: "r1" }, b: { device: "r1" }, filter: { aExports: ["N1"], bExports: [] } }];
+  s.topology.devices.push({ name: "r2", kind: "router" });
+  s.layout.devices.r2 = { x: 200, y: 40 };
+  s.topology.links = [{ a: { device: "r1" }, b: { device: "r2" }, filter: { aExports: ["N1"], bExports: ["N2"] } }];
   const { list } = TopoScene.buildScene(s, { theme });
-  const link = list.find((i) => i.id === "link:r1|r1");
+  const link = list.find((i) => i.id === "link:r1|r2");
   assert.deepEqual([...link.style.dash], [6, 4]);
-  assert.match(link.meta.tooltip, /N1/);
+  assert.deepEqual(JSON.parse(JSON.stringify(link.meta.filter)), { a: "r1", b: "r2", aExports: ["N1"], bExports: ["N2"] });
 });
 
 test("fade.dim scales dimming progress", () => {

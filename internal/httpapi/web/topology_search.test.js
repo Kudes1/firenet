@@ -120,7 +120,7 @@ function bootTopology(responses) {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   for (const f of [
-    "common.js", "camera.js", "camera_input.js", "netmap.js", "tween.js",
+    "common.js", "camera.js", "minimap.js", "camera_input.js", "netmap.js", "tween.js",
     "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
     "net_info.js", "topology.js",
   ]) {

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Заменить SVG-рендер холстов топологии и симуляции на Canvas2D-движок в стиле tldraw (display list + полный redraw в rAF с culling, геометрический хит-тест, твины камеры и состояний).
+**Goal:** Заменить SVG-рендер холстов топологии и диагностики на Canvas2D-движок в стиле tldraw (display list + полный redraw в rAF с culling, геометрический хит-тест, твины камеры и состояний).
 
 **Architecture:** `TopoScene.buildScene` выдаёт чистый display list примитивов; `CanvasView` рисует его в `<canvas>` по invalidate через rAF; интерактив — один набор событий указателя + геометрический `HitTest`; стили резолвятся из `CanvasTheme`; анимации через мини-`Tween`. HTML-оверлеи (меню, popover, NetInfo, тултипы) остаются DOM.
 
@@ -22,7 +22,7 @@
 
 ## Интерпретации спеки (зафиксировано для ревью)
 
-- «Переходы состояний ~150 мс» реализуются как групповые факторы затухания: fade приглушения поиска и fade окраски потока симуляции (лерп цвета/толщины/alpha). Выделение — мгновенно (как в tldraw).
+- «Переходы состояний ~150 мс» реализуются как групповые факторы затухания: fade приглушения поиска и fade окраски потока диагностики (лерп цвета/толщины/alpha). Выделение — мгновенно (как в tldraw).
 - Появление нового узла — scale-fade («pop») через `opts.popOf`.
 - Кнопка «вписать» (fit view) добавляется на оба канваса.
 
@@ -69,8 +69,9 @@ test("later tween wins for repeated props", () => {
   const o = { x: 0 };
   tw.to(o, { x: 10 }, 100, (t) => t);
   tw.to(o, { x: 20 }, 100, (t) => t);
-  tw.tick(100);
-  assert.equal(o.x, 20);
+  assert.equal(tw.tick(50), true, "starts on first tick");
+  assert.equal(tw.tick(100), false, "finished");
+  assert.equal(o.x, 20, "late tween displaced the earlier one");
 });
 
 test("easeOutCubic decelerates", () => {
@@ -101,6 +102,8 @@ const Tween = (() => {
       to(obj, props, ms = 150, ease = easeOutCubic) {
         const from = {};
         for (const k in props) from[k] = obj[k];
+        // поздний твин вытесняет ранние твины тех же свойств того же объекта
+        items = items.filter((it) => it.obj !== obj || Object.keys(props).every((k) => !(k in it.props)));
         items.push({ obj, props, from, t0: null, ms, ease });
       },
       active: () => items.length > 0,
@@ -415,12 +418,12 @@ test("pick returns topmost pickable item under the point", () => {
     { kind: "rrect", geom: { x: 0, y: 0, w: 140, h: 60 }, pick: true, nodeType: "device", name: "back" },
     { kind: "path", geom: { segs: [{ x1: 0, y1: 0, cx: 70, cy: 0, x2: 300, y2: 0 }] }, pick: true, name: "wire" },
     { kind: "rrect", geom: { x: 0, y: 0, w: 140, h: 60 }, pick: true, nodeType: "device", name: "front" },
-    { kind: "text", geom: { x: 0, y: 0, w: 100 }, name: "label" },
+    { kind: "text", geom: { x: 400, y: 0, w: 100 }, name: "label" },
   ];
   assert.equal(HitTest.pick(list, { x: 70, y: 30 }, 1).name, "front", "nodes beat wires");
   assert.equal(HitTest.pick(list, { x: 250, y: 1 }, 1).name, "wire", "wire within hitWidth");
   assert.equal(HitTest.pick(list, { x: 250, y: 40 }, 1), null, "too far from the curve");
-  assert.equal(HitTest.pick(list, { x: 70, y: 5 }, 1), null, "text is never picked");
+  assert.equal(HitTest.pick(list, { x: 450, y: 5 }, 1), null, "text is never picked");
 });
 
 test("pick widens with zoom-out", () => {
@@ -455,6 +458,7 @@ const HitTest = (() => {
   function bbox(item) {
     const g = item.geom;
     if (g.segs) {
+      if (!g.segs.length) return { x: 0, y: 0, w: 0, h: 0 };
       let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
       g.segs.forEach((s) => {
         x1 = Math.min(x1, s.x1, s.cx, s.x2); y1 = Math.min(y1, s.y1, s.cy, s.y2);
@@ -566,7 +570,8 @@ Expected: новый тест FAIL (fitView не существует), стар
   // fitView подбирает зум и центр так, чтобы bbox мира (с полем pad)
   // целиком поместился во вьюпорт; мелкие сцены центрируются без увеличения.
   function fitView(cam, b, vw, vh, pad) {
-    const z = clamp(Math.min((vw - 2 * pad) / (b.maxX - b.minX), (vh - 2 * pad) / (b.maxY - b.minY), 1));
+    const w = Math.max(1, b.maxX - b.minX), h = Math.max(1, b.maxY - b.minY);
+    const z = clamp(Math.min((vw - 2 * pad) / w, (vh - 2 * pad) / h, 1));
     const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
     return { x: vw / 2 - cx * z, y: vh / 2 - cy * z, z };
   }
@@ -597,12 +602,13 @@ git commit -m "feat(web): Camera.fitView for fit-to-scene"
 **Interfaces:**
 - Consumes: `HitTest.bbox` (Task 4); примитивы видов `rrect|path|text|glyph` со `style` вида `{fill, fillAlpha, stroke, strokeAlpha, lineWidth, dash, alpha, glow:{color,blur}, font}`.
 - Produces:
-  - `CanvasView.create(canvas, { getList, getCam, getOverlay }) -> view`
-    - `getList() -> item[]` (мировые координаты), `getCam() -> {x,y,z}`, `getOverlay() -> item[] | undefined` (рисуется поверх)
+    - `CanvasView.create(canvas, { getList, getCam, getOverlay, textHideZoom? }) -> view`
+      - `getList() -> item[]` (мировые координаты), `getCam() -> {x,y,z}`, `getOverlay() -> item[] | undefined` (рисуется поверх)
+      - `textHideZoom` — порог скрытия подписей (по умолчанию 0.5; страница передаёт `theme.textHideZoom`)
     - `view.invalidate()` — запросить кадр (не более одного на rAF; при отсутствии `requestAnimationFrame` рисует синхронно — режим тестов)
     - `view.draw()` — принудительный кадр (для тестов)
     - ресайз: слушает `window.resize`; размер буфера = `clientWidth/clientHeight × devicePixelRatio`
-- Рендер: очистка → `ctx.setTransform(z*dpr,0,0,z*dpr,cam.x*dpr,cam.y*dpr)` → culling по `HitTest.bbox` против видимого мирового прямоугольника → отрисовка. При `z < theme.textHideZoom` тексты пропускаются (признак передаётся: элементы `text` имеют `text:true`).
+- Рендер: очистка → `ctx.setTransform(z*dpr,0,0,z*dpr,cam.x*dpr,cam.y*dpr)` → culling по `HitTest.bbox` против видимого мирового прямоугольника → отрисовка. При `z < textHideZoom` тексты пропускаются (признак передаётся: элементы `text` имеют `text:true`). Глифы — `kind:"glyph"`, `geom:{d,x,y}`: `ctx.translate(x,y)` + `ctx.stroke(new Path2D(d))`; в node-тестах в sandbox кладётся стаб `Path2D`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -639,6 +645,7 @@ function boot(list, cam, getOverlay) {
   const sandbox = {
     console, canvas,
     window: { addEventListener() {}, devicePixelRatio: 1 },
+    Path2D: class {},               // стаб для kind:"glyph"
     requestAnimationFrame: undefined, // синхронный режим тестов
   };
   vm.createContext(sandbox);
@@ -655,16 +662,19 @@ test("draw applies camera transform and paints primitives", () => {
   const list = [
     { kind: "rrect", geom: { x: 10, y: 10, w: 140, h: 60, r: 6 }, style: { stroke: "#111", lineWidth: 1.5, fill: "#fff" } },
     { kind: "path", geom: { segs: [{ x1: 0, y1: 0, cx: 50, cy: 0, x2: 100, y2: 0 }] }, style: { stroke: "#222", lineWidth: 1.5 } },
+    { kind: "glyph", geom: { d: "M2.5 6a3.5 3.5 0 1 1 0 .01", x: 20, y: 30 }, style: { stroke: "#111" } },
     { kind: "text", geom: { x: 10, y: 20, w: 90 }, text: "hello", text: true, style: { font: "12px x", fill: "#333" } },
   ];
   const { view, lastCtx } = boot(list, { x: 100, y: 50, z: 2 });
   view.draw();
   const calls = lastCtx().calls;
   const names = calls.map((c) => c[0]);
-  assert.ok(names.includes("setTransform"));
-  assert.deepEqual(calls.find((c) => c[0] === "setTransform")[1], [2, 0, 0, 2, 100, 50]);
+  // draw() вызывает setTransform дважды (сброс dpr + камера); проверяем последний
+  const tf = calls.filter((c) => c[0] === "setTransform").pop();
+  assert.deepEqual(tf[1], [2, 0, 0, 2, 100, 50], "camera transform is the final one");
   assert.ok(names.includes("roundRect") || names.includes("rect"), "shape traced");
   assert.ok(names.includes("quadraticCurveTo"), "curve traced");
+  assert.ok(calls.some((c) => c[0] === "stroke" && c[1][0] && typeof c[1][0] === "object"), "glyph stroked via Path2D");
   assert.ok(names.some((c) => c[0] === "fillText" && c[1][0] === "hello"), "text painted");
 });
 
@@ -731,6 +741,11 @@ const CanvasView = (() => {
       ctx.font = s.font;
       ctx.fillStyle = s.fill;
       ctx.fillText(item.text, item.geom.x, item.geom.y);
+    } else if (item.kind === "glyph") {
+      ctx.translate(item.geom.x, item.geom.y);
+      ctx.strokeStyle = s.stroke;
+      ctx.lineWidth = s.lineWidth || 1.6;
+      ctx.stroke(new Path2D(item.geom.d));
     } else {
       trace(ctx, item);
       if (s.fill) {
@@ -751,7 +766,7 @@ const CanvasView = (() => {
     ctx.restore();
   }
 
-  function create(canvas, { getList, getCam, getOverlay }) {
+  function create(canvas, { getList, getCam, getOverlay, textHideZoom = 0.5 }) {
     let dirty = true;
     let scheduled = false;
     let ctx = null;
@@ -776,7 +791,7 @@ const CanvasView = (() => {
       ctx.setTransform(cam.z * dpr, 0, 0, cam.z * dpr, cam.x * dpr, cam.y * dpr);
       // видимый мировой прямоугольник
       const view0 = { x: -cam.x / cam.z, y: -cam.y / cam.z, w: cw / cam.z, h: ch / cam.z };
-      const hideText = cam.z < 0.5;
+      const hideText = cam.z < textHideZoom;
       for (const it of [...(getList() || []), ...(getOverlay ? getOverlay() || [] : [])]) {
         if (it.text && hideText) continue;
         const b = HitTest.bbox(it);
@@ -832,7 +847,7 @@ git commit -m "feat(web): CanvasView renderer with culling and rAF scheduling"
 - Test: `internal/httpapi/web/topo_scene.test.js` (новый)
 
 **Interfaces:**
-- Consumes: `NetMap` константы и `cloudSegs`; `CanvasTheme` (структура из Task 2); классовые токены страниц: `"selected"`, `"pending"`, `"search-hit"`, `"search-dim"`, `"sim-flow-ok"`, `"sim-flow-deny"`, `"sim-dim"`.
+- Consumes: `NetMap` константы и `cloudSegs`; `CanvasTheme` (структура из Task 2); классовые токены страниц: `"selected"`, `"pending"`, `"search-hit"`, `"search-dim"`, `"diag-flow-ok"`, `"diag-flow-deny"`, `"diag-dim"`.
 - Produces:
   - `TopoScene.buildScene(scene, opts) -> { list }`
     - `scene = { topology, subnets, layout }` (как у `render`)
@@ -840,7 +855,7 @@ git commit -m "feat(web): CanvasView renderer with culling and rAF scheduling"
       - `classes(obj, part)` / `mark(obj)` / `dim(obj)` — те же колбэки, что у текущего `render`; их строки токенизируются в множество состояний
       - `fade` — `{ dim?: 0..1, flow?: 0..1 }` групповые коэффициенты переходов
       - `popOf(id) -> p|undefined` — прогресс появления узла (0..1), масштабирует геометрию вокруг центра
-      - `item(kind, it)` — хук обогащения (тултипы симуляции)
+      - `item(kind, it)` — хук обогащения (тултипы диагностики)
   - Элементы списка: `{kind, id, ref, pick?, nodeType?, geom, style, text?, meta?}`
     - union: `kind:"rrect"`, `id:"union:<name>"`, `ref:union`, `style:{fill, fillAlpha:.07, stroke, strokeAlpha:.5}`
     - link: `kind:"path"`, `id:"link:<min>|<max>"`, `ref:link`, `pick:true`, `geom:{segs}`, `meta:{tooltip}` для фильтрованных
@@ -852,7 +867,7 @@ git commit -m "feat(web): CanvasView renderer with culling and rAF scheduling"
 
 Правила стилей (резолв в `buildScene`, значения — из темы):
 - базово: устройство `fill:theme.panel, stroke:theme.kind[kind]||theme.border, lineWidth:1.5, r:theme.radius[kind]||default`; сеть — `fill:theme.panel, stroke:theme.kind.network`; связь/привязка — `stroke:theme.muted, lineWidth:1.5`; фильтрованная связь — `stroke:theme.filteredColor, dash:[6,4]` + `meta.tooltip`; глиф — `stroke:цвета вида, lineWidth:1.6`; union — цвет из `theme.unionColors[i%len]`; подписи — `fill:theme.text` / подзаголовок сети `fill:theme.muted`.
-- состояния: `selected → stroke:accent,width:2.5`; `pending → stroke:accent,width:3`; `search-hit → glow:{accent,8}` (на форме узла/связи); `sim-flow-ok/deny → лерп цвета/ширины (связь 1.5→4, узел 1.5→2.5) по fade.flow (по умолчанию 1) + мягкое свечение`; `search-dim|sim-dim → alpha *= lerp(1, theme.dimAlpha, fade.dim ?? 1)`.
+- состояния: `selected → stroke:accent,width:2.5`; `pending → stroke:accent,width:3`; `search-hit → glow:{accent,8}` (на форме узла/связи); `diag-flow-ok/deny → лерп цвета/ширины (связь 1.5→4, узел 1.5→2.5) по fade.flow (по умолчанию 1) + мягкое свечение`; `search-dim|diag-dim → alpha *= lerp(1, theme.dimAlpha, fade.dim ?? 1)`.
 - `popOf`: если `p<1`, геометрия rrect/облака масштабируется вокруг центра с `s = 0.7 + 0.3*easeOutCubic(p)` и `alpha *= p`.
 
 - [ ] **Step 1: Write the failing test**
@@ -927,13 +942,15 @@ test("filtered link carries dash and tooltip meta", () => {
   assert.match(link.meta.tooltip, /N1/);
 });
 
-test("fade.dim lowers alpha of dimmed items", () => {
-  const { list } = TopoScene.buildScene(scene(), { theme, mark: () => "search-dim" });
-  const dev = list.find((i) => i.id === "device:r1");
-  assert.equal(dev.style.alpha, 1, "full dim by default");
-  const faded = TopoScene.buildScene(scene(), { theme, mark: () => "search-dim", fade: { dim: 1 } }).list;
-  const dev2 = faded.find((i) => i.id === "device:r1");
-  assert.ok(dev2.style.alpha < 0.5, "dimmed alpha applied");
+test("fade.dim scales dimming progress", () => {
+  // дефолт fade.dim = 1: без переданного fade состояние применено полностью
+  // (та же семантика, что у flow — страницы без анимации не передают fade)
+  const full = TopoScene.buildScene(scene(), { theme, mark: () => "search-dim" }).list;
+  const dev = full.find((i) => i.id === "device:r1");
+  assert.ok(dev.style.alpha < 0.5, "no fade means fully dimmed");
+  const start = TopoScene.buildScene(scene(), { theme, mark: () => "search-dim", fade: { dim: 0 } }).list;
+  const dev2 = start.find((i) => i.id === "device:r1");
+  assert.equal(dev2.style.alpha, 1, "dim=0 keeps full alpha");
 });
 
 test("popOf scales node geometry around center", () => {
@@ -965,7 +982,7 @@ Expected: FAIL (buildScene/bounds отсутствуют)
   const statesOf = (opts) => (obj, part) => new Set([
     ...TOKENS(opts.classes && opts.classes(obj, part)),
     ...TOKENS(opts.mark && opts.mark(obj)),
-    ...(opts.dim && opts.dim(obj) ? ["sim-dim"] : []),
+    ...(opts.dim && opts.dim(obj) ? ["diag-dim"] : []),
   ]);
 
   // resolveStyles превращает базовый стиль + состояния в итоговый стиль
@@ -975,20 +992,22 @@ Expected: FAIL (buildScene/bounds отсутствуют)
     if (states.has("selected")) { st.stroke = theme.accent; st.lineWidth = 2.5; }
     if (states.has("pending")) { st.stroke = theme.accent; st.lineWidth = 3; }
     if (states.has("search-hit")) st.glow = { color: theme.accent, blur: 8 };
-    const flow = states.has("sim-flow-ok") ? theme.flowOk : states.has("sim-flow-deny") ? theme.flowDeny : null;
+    const flow = states.has("diag-flow-ok") ? theme.flowOk : states.has("diag-flow-deny") ? theme.flowDeny : null;
     if (flow) {
       const k = fade?.flow ?? 1;
       st.stroke = theme.lerpHex(base.stroke, flow, k);
       st.lineWidth = base.lineWidth + ((base.wire ? 4 : 2.5) - base.lineWidth) * k;
       if (k > 0.05) st.glow = { color: flow, blur: 4 * k };
     }
-    if (states.has("search-dim") || states.has("sim-dim"))
+    // дефолты fade.* = 1: если страница не анимирует переход, эффект
+    // состояния применён полностью; fade:{dim:0} — стартовая точка твина
+    if (states.has("search-dim") || states.has("diag-dim"))
       st.alpha = (st.alpha ?? 1) * (1 + (theme.dimAlpha - 1) * (fade?.dim ?? 1));
     return st;
   }
 ```
 
-Далее `buildScene` собирает список в порядке: unions → links → attaches → devices (+glyph+label) → networks (+labels), каждый элемент проходит через `styled(...)`, получает `id/ref/pick/nodeType/meta`, опционально масштабируется через `popOf`, и вызывает `opts.item && opts.item(kind, it)`. Геометрия связей — те же формулы, что в текущем `render` (`linkOffsets/spreadOffset/pointAt`, квадратичная кривая через mid), но в виде сегментов `{x1,y1,cx,cy,x2,y2}` вместо SVG-строки. Подписи получают `geom.w = text.length * 6.5` для culling. `bounds` переиспользует логику `worldBounds` из simulate.js (min/max по устройствам и сетям).
+Далее `buildScene` собирает список в порядке: unions → links → attaches → devices (+glyph+label) → networks (+labels), каждый элемент проходит через `styled(...)`, получает `id/ref/pick/nodeType/meta`, опционально масштабируется через `popOf`, и вызывает `opts.item && opts.item(kind, it)`. Геометрия связей — те же формулы, что в текущем `render` (`linkOffsets/spreadOffset/pointAt`, квадратичная кривая через mid), но в виде сегментов `{x1,y1,cx,cy,x2,y2}` вместо SVG-строки. Подписи получают `geom.w = text.length * 6.5` для culling. `bounds` переиспользует логику `worldBounds` из diagnose.js (min/max по устройствам и сетям).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1004,19 +1023,19 @@ git commit -m "feat(web): TopoScene.buildScene display list for canvas rendering
 
 ---
 
-### Task 8: Страница симуляции на Canvas
+### Task 8: Страница диагностики на Canvas
 
 **Files:**
-- Modify: `internal/httpapi/web/simulate.html` (svg → canvas, скрипты, кнопка fit)
-- Modify: `internal/httpapi/web/simulate.js` (view, удаление стейдж-модели, клик/тултипы, fly-анимация результата)
-- Test: адаптировать `internal/httpapi/web/simulate_page.test.js`
+- Modify: `internal/httpapi/web/diagnose.html` (svg → canvas, скрипты, кнопка fit)
+- Modify: `internal/httpapi/web/diagnose.js` (view, удаление стейдж-модели, клик/тултипы, fly-анимация результата)
+- Test: адаптировать `internal/httpapi/web/diagnose_page.test.js`
 
 **Interfaces:**
 - Consumes: `CanvasView.create/invalidate/draw`, `TopoScene.buildScene/bounds`, `HitTest.pick`, `CanvasTheme.fromComputed`, `Camera.fitView`, `Tween`.
-- Produces: страница `simulate` работает на `<canvas id="sim-canvas">`; экспортируемый API `Simulate` сохраняется (`boot/renderReport/run/state/expandHighlight/expandFlow/flowMark/clampFormWidth`).
+- Produces: страница `diagnose` работает на `<canvas id="diag-canvas">`; экспортируемый API `Diagnose` сохраняется (`boot/renderReport/run/state/expandHighlight/expandFlow/flowMark/clampFormWidth`).
 
-Изменения в `simulate.js`:
-1. Удалить: `sizeStage`, `applyCamera` (CSS-версию), `fitOrigin`, `rebase`, `scheduleRebase`, `WORLD_PAD`, `origin`, `stageM`, `worldBounds` (заменяется `TopoScene.bounds`). `svgEl()` → `canvasEl()` (тот же id `sim-canvas`). Убрать `rectEl` из CameraControls (канвас сам даёт правильный rect).
+Изменения в `diagnose.js`:
+1. Удалить: `sizeStage`, `applyCamera` (CSS-версию), `fitOrigin`, `rebase`, `scheduleRebase`, `WORLD_PAD`, `origin`, `stageM`, `worldBounds` (заменяется `TopoScene.bounds`). `svgEl()` → `canvasEl()` (тот же id `diag-canvas`). Убрать `rectEl` из CameraControls (канвас сам даёт правильный rect).
 2. Boot создаёт: `theme = CanvasTheme.fromComputed(getComputedStyle(document.documentElement))`; `view = CanvasView.create(canvas, { getList: () => state.list, getCam: () => state.camera, getOverlay: () => [] })`; `renderMap()` становится:
 
 ```js
@@ -1039,23 +1058,23 @@ git commit -m "feat(web): TopoScene.buildScene display list for canvas rendering
 (`denyTooltip(info)` — та же строка, что раньше в `<title>`: `(правило X: )reason`; `state.hl/flow/flowFade` заполняются в `renderReport` вместо локальной `flow`.)
 3. Переход потока: в `renderReport` после вычисления flow — `Tween.to(state, { flowFade: 1 }, 200)` с rAF-циклом `tw.tick(now); render();` до завершения; перед стартом `state.flowFade = 0`.
 4. Клики: обработчик `click` на канвасе — `HitTest.pick(state.list, toWorld(p), z)`; если `ref.type !== "attach" && ref.name && nodeType === "network"` → `showNetInfo(ref)` (позиция NetInfo считается как прежде через `Camera.worldToScreen`).
-5. Тултип deny: div `#sim-tooltip` в `simulate.html`; показ по hover (mousemove → pick → meta.tooltip, задержка 300 мс через таймер), позиция у курсора, скрытие на leave/pan.
-6. Кнопка fit: в `simulate.html` рядом с картой `<button id="sim-fit" title="Вписать карту">`; обработчик — `flyCam(Camera.fitView(camera, TopoScene.bounds(...), w, h, 60))`.
-7. `flyCam(to, ms=250)` — общий помощник страницы: твин копии камеры + `view.invalidate()` на каждый кадр (реализовать локально в simulate.js; topology получит свою копию в задаче 10 — дублирование ~12 строк осознанное, чтобы не создавать общий файл ради двух использований; при ревью можно вынести в camera.js).
+5. Тултип deny: div `#diag-tooltip` в `diagnose.html`; показ по hover (mousemove → pick → meta.tooltip, задержка 300 мс через таймер), позиция у курсора, скрытие на leave/pan.
+6. Кнопка fit: в `diagnose.html` рядом с картой `<button id="diag-fit" title="Вписать карту">`; обработчик — `flyCam(Camera.fitView(camera, TopoScene.bounds(...), w, h, 60))`.
+7. `flyCam(to, ms=250)` — общий помощник страницы: твин копии камеры + `view.invalidate()` на каждый кадр (реализовать локально в diagnose.js; topology получит свою копию в задаче 10 — дублирование ~12 строк осознанное, чтобы не создавать общий файл ради двух использований; при ревью можно вынести в camera.js).
 
-Адаптация `simulate_page.test.js`:
+Адаптация `diagnose_page.test.js`:
 - стаб `<canvas>`: `{ getContext: () => recorder, clientWidth: 1200, clientHeight: 800, style: {}, addEventListener, classList }`, `recorder` — Proxy-рекордер как в Task 6;
 - sandbox: `requestAnimationFrame: undefined` (синхронно), `performance` глобальный Node доступен внутри vm? Нет — прокинуть `performance` в sandbox явно;
-- загрузить скрипты: `common, camera, camera_input, netmap, net_info, tween, canvas_theme, hit_test, canvas_view, topo_scene, simulate`;
-- тесты рендера: вместо поиска SVG-элементов — ассерты по `Simulate.state.list` (после `renderReport` есть подсвеченные `sim-flow-ok` стили: `assert.equal(okWire.style.stroke, theme.flowOk)` — тему сравнивать через `vm.runInContext("CanvasTheme.create({...})")` с теми же vars);
+- загрузить скрипты: `common, camera, camera_input, netmap, net_info, tween, canvas_theme, hit_test, canvas_view, topo_scene, diagnose`;
+- тесты рендера: вместо поиска SVG-элементов — ассерты по `Diagnose.state.list` (после `renderReport` есть подсвеченные `diag-flow-ok` стили: `assert.equal(okWire.style.stroke, theme.flowOk)` — тему сравнивать через `vm.runInContext("CanvasTheme.create({...})")` с теми же vars);
 - тесты камеры (wheel/пан) — по аналогии со старыми: менять `state.camera`, проверять `Camera.screenToWorld`-инвариант, transform-строк больше нет;
 - тест splitter/формы — без изменений.
 
-- [ ] **Step 1:** Адаптировать стабы и первые 2–3 теста `simulate_page.test.js` под новый boot (ожидаемо падают).
-- [ ] **Step 2:** Запустить `node --test 'internal/httpapi/web/simulate_page.test.js'` — убедиться в падении по причине отсутствия нового кода.
-- [ ] **Step 3:** Реализовать правки `simulate.html`/`simulate.js` (перечислены выше; SVG-рендер `TopoScene.render` больше не вызывается этой страницей).
-- [ ] **Step 4:** `node --test 'internal/httpapi/web/simulate_page.test.js'` — PASS; `node --test 'internal/httpapi/web/*.test.js'` — остальные PASS (topology ещё на SVG).
-- [ ] **Step 5:** Commit: `git commit -m "feat(web): simulation map rendered on canvas"`
+- [ ] **Step 1:** Адаптировать стабы и первые 2–3 теста `diagnose_page.test.js` под новый boot (ожидаемо падают).
+- [ ] **Step 2:** Запустить `node --test 'internal/httpapi/web/diagnose_page.test.js'` — убедиться в падении по причине отсутствия нового кода.
+- [ ] **Step 3:** Реализовать правки `diagnose.html`/`diagnose.js` (перечислены выше; SVG-рендер `TopoScene.render` больше не вызывается этой страницей).
+- [ ] **Step 4:** `node --test 'internal/httpapi/web/diagnose_page.test.js'` — PASS; `node --test 'internal/httpapi/web/*.test.js'` — остальные PASS (topology ещё на SVG).
+- [ ] **Step 5:** Commit: `git commit -m "feat(web): diagnostic map rendered on canvas"`
 
 ---
 
@@ -1165,14 +1184,14 @@ git commit -m "feat(web): TopoScene.buildScene display list for canvas rendering
 ### Task 11: Анимация камеры и переходы состояний (сквозная полировка)
 
 **Files:**
-- Modify: `internal/httpapi/web/simulate.js`, `internal/httpapi/web/topology.js` (если что-то осталось за задачами 8–10), `internal/httpapi/web/style.css` (курсоры/тултипы)
+- Modify: `internal/httpapi/web/diagnose.js`, `internal/httpapi/web/topology.js` (если что-то осталось за задачами 8–10), `internal/httpapi/web/style.css` (курсоры/тултипы)
 
 Содержание (проверить наличие, доделать недостающее):
 - flyTo при наведении поиском и fit-кнопках (Tasks 8/10);
-- fade потока симуляции при новом отчёте (Task 8);
+- fade потока диагностики при новом отчёте (Task 8);
 - fade search-dim: в `updateSearch` — твин `state.searchFade` 0→1 (и обратно при очистке), `buildScene` получает `fade:{dim:searchFade}`;
 - pop новых узлов (Task 10);
-- курсоры и тултипы оформляются в CSS (`#topo-tooltip`, `#sim-tooltip` — позиционируются JS, стиль — CSS).
+- курсоры и тултипы оформляются в CSS (`#topo-tooltip`, `#diag-tooltip` — позиционируются JS, стиль — CSS).
 
 - [ ] **Step 1:** Проверочный прогон всех node-тестов; составить список незакрытых пунктов выше.
 - [ ] **Step 2:** Доделать каждый пункт минимальным дифом (каждый — с тестом там, где проверяемо чисто: например, `updateSearch` выставляет `state.searchFade` и запускает твин — ассерт по `state.searchFade > 0` после `tick`).
@@ -1186,14 +1205,14 @@ git commit -m "feat(web): TopoScene.buildScene display list for canvas rendering
 **Files:**
 - Modify: `internal/httpapi/web/topo_scene.js` (удалить `render`, `cloudPath`, `SVG-el`-хелперы)
 - Modify: `internal/httpapi/web/netmap.js` (удалить `SVG_NS`, `el`, `KINDS.glyph`-строки оставить — они нужны глифам; удалить только неиспользуемое)
-- Modify: `internal/httpapi/web/camera.js` (удалить `stageTransform`)
-- Modify: `internal/httpapi/web/style.css` (удалить мёртвые правила: `.wire`, `.wire-hit`, `.wire-preview`, `.wire-filtered`, `.node-rect*`, `.subnet-rect`, `.union-frame`, `.marquee`, `.search-hit/.search-dim`, `.sim-flow-*`, `.sim-flow-pulse`, `#sim-canvas` стейдж-правила, `.panning` правило; добавить `#topo-canvas,#sim-canvas { touch-action: none; }` и стили тултипов, если не добавлены)
+- Modify: `internal/httpapi/web/camera.js` (удалить `stageTransform` и ставший мёртвым `transform` — SVG-строка; проверить grep'ом)
+- Modify: `internal/httpapi/web/style.css` (удалить мёртвые правила: `.wire`, `.wire-hit`, `.wire-preview`, `.wire-filtered`, `.node-rect*`, `.subnet-rect`, `.union-frame`, `.marquee`, `.search-hit/.search-dim`, `.diag-flow-*`, `.diag-flow-pulse`, `#diag-canvas` стейдж-правила, `.panning` правило; добавить `#topo-canvas,#diag-canvas { touch-action: none; }` и стили тултипов, если не добавлены)
 - Modify: тесты, ссылавшиеся на удалённое (grep по `TopoScene.render`, `stageTransform`, `SVG_NS`)
 
-- [ ] **Step 1:** Grep: `grep -rn "TopoScene.render\|stageTransform\|SVG_NS\|cloudPath\|NetMap.el" internal/httpapi/web --include='*.js'` — все использования либо удалены, либо легитимны (глифы, тесты).
+- [ ] **Step 1:** Grep: `grep -rn "TopoScene.render\|stageTransform\|Camera.transform\|SVG_NS\|cloudPath\|NetMap.el" internal/httpapi/web --include='*.js'` — все использования либо удалены, либо легитимны (глифы, тесты).
 - [ ] **Step 2:** Удалить мёртвый код и CSS (см. список выше).
 - [ ] **Step 3:** Прогон: `go build ./... && go vet ./... && gofmt -l . && go test ./...` + `node --test 'internal/httpapi/web/*.test.js'` + `make build` (go:embed!).
-- [ ] **Step 4:** Ручная smoke-проверка `./bin/firenet serve` при желании: открыть `/ui/topology` и `/ui/simulate` (не автоматизируется playwright'ем по правилам проекта).
+- [ ] **Step 4:** Ручная smoke-проверка `./bin/firenet serve` при желании: открыть `/ui/topology` и `/ui/diagnose` (не автоматизируется playwright'ем по правилам проекта).
 - [ ] **Step 5:** Commit: `chore(web): drop svg canvas branches and dead styles`
 
 ---
@@ -1201,5 +1220,7 @@ git commit -m "feat(web): TopoScene.buildScene display list for canvas rendering
 ## Самопроверка плана
 
 - Спек-покрытие: display list (T7), рендер+culling+dpr+rAF (T6), хит-тест (T4), тема (T2), твины (T1), fitView/fly (T5,8,10,11), переходы состояний и pop (T7,10,11), обе страницы (T8,9,10), удаление стейджа (T8), зачистка (T12), тестовая стратегия — во всех задачах. Анимация потока по рёбрам — вне скоупа по спеке.
-- Типы/имена согласованы: `buildScene(scene, opts) -> {list}`, `HitTest.pick(list,p,z)`, `CanvasView.create(canvas,{getList,getCam,getOverlay})`, `CanvasTheme.create(vars)/fromComputed(style)`, `Tween.create()`, `Camera.fitView(cam,b,vw,vh,pad)`, `TopoScene.bounds(topology,layout)`.
-- Известные упрощения: `flyCam` дублируется в simulate.js/topology.js (~12 строк) вместо общего файла; marquee-overlay — `rrect`, а не path.
+- Типы/имена согласованы: `buildScene(scene, opts) -> {list}`, `HitTest.pick(list,p,z)`, `CanvasView.create(canvas,{getList,getCam,getOverlay,textHideZoom})`, `CanvasTheme.create(vars)/fromComputed(style)`, `Tween.create()`, `Camera.fitView(cam,b,vw,vh,pad)`, `TopoScene.bounds(topology,layout)`.
+- Известные упрощения: `flyCam` дублируется в diagnose.js/topology.js (~12 строк) вместо общего файла; marquee-overlay — `rrect`, а не path.
+- Глифы устройств рисуются через `new Path2D(KINDS.glyph)` (ветка `kind:"glyph"` в CanvasView); в node-тестах в sandbox кладётся стаб `class {}` — проверяется сам факт вызова stroke с объектом, не геометрия.
+- Дефолты `fade.* = 1`: без переданного fade эффект состояния применён полностью; анимация стартует с `fade:{dim:0}` / `flowFade = 0`.

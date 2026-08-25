@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-// Minimal DOM stub sufficient to boot simulate.js outside a browser and
+// Minimal DOM stub sufficient to boot diagnose.js outside a browser and
 // exercise the report rendering against a stubbed fetch.
 function makeEl(tag) {
   const el = {
@@ -43,6 +43,11 @@ function makeEl(tag) {
     add: (...cs) => cs.forEach((c) => el._classes.add(c)),
     remove: (...cs) => cs.forEach((c) => el._classes.delete(c)),
     contains: (c) => el._classes.has(c),
+    toggle: (c, force) => {
+      const on = force === undefined ? !el._classes.has(c) : force;
+      el._classes[on ? "add" : "delete"](c);
+      return on;
+    },
   };
   Object.defineProperty(el, "className", {
     get: () => [...el._classes].join(" "),
@@ -84,13 +89,14 @@ const topoFixture = {
   networks: [{ name: "office", subnets: ["a"], attach: [{ device: "r1" }] }],
 };
 
-function bootSimulate(responses, savedStore) {
+function bootDiagnose(responses, savedStore) {
   const ctx = makeCtx();
   const canvas = Object.assign(makeEl("canvas"), {
     clientWidth: 1200,
     clientHeight: 800,
     getContext: () => ctx,
   });
+  const minimap = Object.assign(makeEl("canvas"), { clientWidth: 200, clientHeight: 120, getContext: () => makeCtx() });
   const ids = {};
   const calls = [];
   const store = { ...savedStore };
@@ -101,7 +107,7 @@ function bootSimulate(responses, savedStore) {
     documentElement: { dataset: {} },
     createElement: (tag) => makeEl(tag),
     // stable registry: production code resolves widgets by id repeatedly
-    getElementById: (id) => (id === "sim-canvas" ? canvas : (ids[id] ||= makeEl("div"))),
+    getElementById: (id) => (id === "diag-canvas" ? canvas : id === "diag-minimap" ? minimap : (ids[id] ||= makeEl("div"))),
     addEventListener(t, fn) { (doc.listeners[t] ||= []).push(fn); },
     removeEventListener(t, fn) {
       const list = doc.listeners[t];
@@ -145,9 +151,9 @@ function bootSimulate(responses, savedStore) {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   for (const f of [
-    "common.js", "camera.js", "camera_input.js", "netmap.js", "tween.js",
+    "common.js", "camera.js", "minimap.js", "camera_input.js", "netmap.js", "tween.js",
     "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
-    "net_info.js", "simulate.js",
+    "net_info.js", "diagnose.js",
   ]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
@@ -160,7 +166,7 @@ function bootSimulate(responses, savedStore) {
     for (let i = 0; i < n; i++) frame();
   };
   const get = (expr) => vm.runInContext(expr, sandbox);
-  return { canvas, ctx, ids, calls, get, sandbox, doc, store, frame, frames };
+  return { canvas, ctx, minimap, ids, calls, get, sandbox, doc, store, frame, frames };
 }
 
 const responses = {
@@ -195,10 +201,10 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 // — карта: display list, камера, взаимодействие —
 
 test("boot builds the canvas display list and draws a frame", async () => {
-  const { ctx, frames, get } = bootSimulate(responses);
+  const { ctx, frames, get } = bootDiagnose(responses);
   await tick();
   await frames(1);
-  const ids = get("Simulate.state.list.map((i) => i.id)");
+  const ids = get("Diagnose.state.list.map((i) => i.id)");
   for (const id of ["device:r1", "device:r2", "network:office", "network:office:label", "attach:office|r1", "link:r1|r2"]) {
     assert.ok(ids.includes(id), `${id} in the display list`);
   }
@@ -206,16 +212,16 @@ test("boot builds the canvas display list and draws a frame", async () => {
 });
 
 test("wheel zooms around the cursor", async () => {
-  const { canvas, frames, get } = bootSimulate({
+  const { canvas, frames, get } = bootDiagnose({
     ...responses,
     "/api/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
   });
   await tick();
   await frames(1);
-  const before = JSON.parse(get("JSON.stringify(Simulate.state.camera)"));
+  const before = JSON.parse(get("JSON.stringify(Diagnose.state.camera)"));
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
   await frames(1);
-  const after = JSON.parse(get("JSON.stringify(Simulate.state.camera)"));
+  const after = JSON.parse(get("JSON.stringify(Diagnose.state.camera)"));
   assert.ok(after.z > before.z, "zoom changed the camera");
   // the world point under the cursor stays under the cursor
   const worldAt = (cam) => ({ x: (300 - cam.x) / cam.z, y: (200 - cam.y) / cam.z });
@@ -226,34 +232,34 @@ test("wheel zooms around the cursor", async () => {
 
 // same pan buttons as the topology editor: middle + right, left stays free
 test("middle- and right-button drags pan the read-only map", async () => {
-  const { canvas, doc, frames, get } = bootSimulate(responses);
+  const { canvas, doc, frames, get } = bootDiagnose(responses);
   await tick();
   await frames(1);
   fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
   await frames(1);
   fire(doc, "mouseup", {});
-  assert.deepEqual(JSON.parse(get("JSON.stringify(Simulate.state.camera)")), { x: 60, y: 30, z: 1 });
+  assert.deepEqual(JSON.parse(get("JSON.stringify(Diagnose.state.camera)")), { x: 60, y: 30, z: 1 });
   fire(canvas, "mousedown", { button: 2, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 40, clientY: 80 });
   await frames(1);
   fire(doc, "mouseup", { button: 2 });
-  assert.deepEqual(JSON.parse(get("JSON.stringify(Simulate.state.camera)")), { x: 0, y: 10, z: 1 });
+  assert.deepEqual(JSON.parse(get("JSON.stringify(Diagnose.state.camera)")), { x: 0, y: 10, z: 1 });
 });
 
 test("left button stays free: dragging it does not pan the map", async () => {
-  const { canvas, doc, frames, get } = bootSimulate(responses);
+  const { canvas, doc, frames, get } = bootDiagnose(responses);
   await tick();
   await frames(1);
   fire(canvas, "mousedown", { button: 0, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
   await frames(1);
   fire(doc, "mouseup", {});
-  assert.deepEqual(JSON.parse(get("JSON.stringify(Simulate.state.camera)")), { x: 0, y: 0, z: 1 });
+  assert.deepEqual(JSON.parse(get("JSON.stringify(Diagnose.state.camera)")), { x: 0, y: 0, z: 1 });
 });
 
 test("right-click on the canvas suppresses the native menu", async () => {
-  const { canvas } = bootSimulate(responses);
+  const { canvas } = bootDiagnose(responses);
   await tick();
   let prevented = false;
   fire(canvas, "contextmenu", { button: 2, preventDefault: () => { prevented = true; } });
@@ -261,7 +267,7 @@ test("right-click on the canvas suppresses the native menu", async () => {
 });
 
 test("camera changes are not persisted to /api/layout", async () => {
-  const { canvas, doc, calls, frames } = bootSimulate(responses);
+  const { canvas, doc, calls, frames } = bootDiagnose(responses);
   await tick();
   await frames(1);
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
@@ -273,7 +279,7 @@ test("camera changes are not persisted to /api/layout", async () => {
 });
 
 test("map shows subnet names, network labels and union frames", async () => {
-  const { frames, get } = bootSimulate({
+  const { frames, get } = bootDiagnose({
     ...responses,
     "/api/topology": {
       devices: topoFixture.devices,
@@ -285,18 +291,18 @@ test("map shows subnet names, network labels and union frames", async () => {
   await tick();
   await frames(1);
   const byId = JSON.parse(get(
-    "JSON.stringify(Object.fromEntries(Simulate.state.list.map((i) => [i.id, i])))",
+    "JSON.stringify(Object.fromEntries(Diagnose.state.list.map((i) => [i.id, i])))",
   ));
   assert.ok(byId["union:hq"], "union frame in the display list");
   assert.equal(byId["union:hq:label"].text, "hq");
   assert.equal(byId["network:office:label"].text, "office", "network label rendered");
-  const texts = get("Simulate.state.list.filter((i) => i.text).map((i) => i.text).join('|')");
+  const texts = get("Diagnose.state.list.filter((i) => i.text).map((i) => i.text).join('|')");
   assert.doesNotMatch(texts, /10\.0\.0\.0\/24/, "subnet names, not CIDRs");
   assert.match(texts, /r1 \(router\)/, "device label rendered");
 });
 
 test("clicking a network on the read-only map shows its subnets", async () => {
-  const { canvas, ids, frames } = bootSimulate(responses);
+  const { canvas, ids, frames } = bootDiagnose(responses);
   await tick();
   await frames(1);
   const info = (ids["net-info"] ||= makeEl("div"));
@@ -315,7 +321,7 @@ test("clicking a network on the read-only map shows its subnets", async () => {
 // mousemove приходит чаще кадров дисплея: всплеск движений обязан дать одну
 // перерисовку (камера применяется одним setCam на кадр внутри CameraControls)
 test("rapid pan moves coalesce into one redraw per frame", async () => {
-  const { canvas, doc, ctx, frames } = bootSimulate(responses);
+  const { canvas, doc, ctx, frames } = bootDiagnose(responses);
   await tick();
   await frames(1);
   const draws = () => ctx.calls.filter((c) => c[0] === "clearRect").length;
@@ -331,60 +337,60 @@ test("rapid pan moves coalesce into one redraw per frame", async () => {
 // — кнопка «вписать карту» —
 
 test("fit button flies the camera to frame the whole map", async () => {
-  const { ids, frames, get } = bootSimulate(responses);
+  const { ids, frames, get } = bootDiagnose(responses);
   await tick();
   await frames(1);
-  fire(ids["sim-fit"], "click", {});
+  fire(ids["diag-fit"], "click", {});
   await frames(10); // 10×50мс покрывают анимацию целиком
   const expected = JSON.parse(get(
-    "JSON.stringify(Camera.fitView(Camera.create(), TopoScene.bounds(Simulate.state.topology, Simulate.state.layout), 1200, 800, 60))",
+    "JSON.stringify(Camera.fitView(Camera.create(), TopoScene.bounds(Diagnose.state.topology, Diagnose.state.layout), 1200, 800, 60))",
   ));
-  const cam = JSON.parse(get("JSON.stringify(Simulate.state.camera)"));
+  const cam = JSON.parse(get("JSON.stringify(Diagnose.state.camera)"));
   for (const k of ["x", "y", "z"]) {
     assert.ok(Math.abs(cam[k] - expected[k]) < 1e-9, `camera.${k} settled on fitView (${cam[k]} ≈ ${expected[k]})`);
   }
 });
 
-// — отчёт симуляции (DOM) —
+// — отчёт диагностики (DOM) —
 
 test("renderReport builds one card per path with verdict badges", async () => {
-  const { ids, get } = bootSimulate(responses);
+  const { ids, get } = bootDiagnose(responses);
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify(sampleReport)})`);
-  const cards = ids["sim-paths"].children.filter((c) => c.className === "sim-path");
+  get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
+  const cards = ids["diag-paths"].children.filter((c) => c.className === "diag-path");
   assert.equal(cards.length, 1);
-  const html = JSON.stringify(ids["sim-paths"]);
+  const html = JSON.stringify(ids["diag-paths"]);
   assert.match(html, /badge-ok/);
   assert.match(html, /office-to-dmz/);
 });
 
 test("return verdict renders a neutral badge with FORWARD wording", async () => {
-  const { ids, get } = bootSimulate(responses);
+  const { ids, get } = bootDiagnose(responses);
   await tick();
   const rep = JSON.parse(JSON.stringify(sampleReport));
   rep.paths[0].verdict = "return";
   rep.paths[0].routers[0].action = "return";
   rep.paths[0].routers[0].matchedRule = "bypass";
-  get(`Simulate.renderReport(${JSON.stringify(rep)})`);
-  const html = JSON.stringify(ids["sim-paths"]);
+  get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
+  const html = JSON.stringify(ids["diag-paths"]);
   assert.match(html, /badge-return/);
   assert.match(html, /возврат в FORWARD/);
 });
 
 test("unreachable report renders explicit message", async () => {
-  const { ids, get } = bootSimulate(responses);
+  const { ids, get } = bootDiagnose(responses);
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify({ srcSubnet: "office", dstSubnet: "isolated", note: "", paths: [] })})`);
-  assert.match(JSON.stringify(ids["sim-paths"]), /недостижим/i);
-  assert.doesNotMatch(String(ids["sim-summary"]._text || ""), /\. $/);
+  get(`Diagnose.renderReport(${JSON.stringify({ srcSubnet: "office", dstSubnet: "isolated", note: "", paths: [] })})`);
+  assert.match(JSON.stringify(ids["diag-paths"]), /недостижим/i);
+  assert.doesNotMatch(String(ids["diag-summary"]._text || ""), /\. $/);
 });
 
 test("summary line reports source, destination and path count", async () => {
-  const { ids, get } = bootSimulate(responses);
+  const { ids, get } = bootDiagnose(responses);
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify(sampleReport)})`);
-  assert.ok(!ids["sim-summary"].hidden);
-  assert.match(String(ids["sim-summary"]._text || ""), /office.*dmz.*путей 1/s);
+  get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
+  assert.ok(!ids["diag-summary"].hidden);
+  assert.match(String(ids["diag-summary"]._text || ""), /office.*dmz.*путей 1/s);
 });
 
 // Topology where networks reach routers only through switches — the report
@@ -422,50 +428,86 @@ const switchedReport = {
 };
 
 test("highlight covers the full path: networks, switches, links and attaches", async () => {
-  const { get, frames } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { get, frames } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
   await tick();
   await frames(1);
-  get(`Simulate.renderReport(${JSON.stringify(switchedReport)})`);
+  get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
   await frames(10);
-  const hl = get("Simulate.expandHighlight(Simulate.state.result, Simulate.state.topology)");
+  const hl = get("Diagnose.expandHighlight(Diagnose.state.result, Diagnose.state.topology)");
   for (const name of ["MAIN", "OFFICE", "sw1", "sw2", "r1", "r2"]) {
     assert.ok(hl.has(name), `${name} belongs to the highlighted path`);
   }
   assert.ok(!hl.has("lone"), "devices off the path stay unhighlighted");
   // канва: приглушены только одиночный свитч, его подписи и его связь
   const dimmed = JSON.parse(get(
-    "JSON.stringify(Simulate.state.list.filter((i) => (i.style.alpha ?? 1) < 1).map((i) => i.id).sort())",
+    "JSON.stringify(Diagnose.state.list.filter((i) => (i.style.alpha ?? 1) < 1).map((i) => i.id).sort())",
   ));
   assert.deepEqual(dimmed, ["device:lone", "device:lone:glyph", "device:lone:label", "link:lone|r1"]);
 });
 
-test("form submit posts to /api/simulate and renders the report", async () => {
-  const { ids, calls } = bootSimulate({ ...responses, "/api/simulate": sampleReport });
+// Сеть и роутер с одинаковым именем: якоря подсети и роутера совпадают как
+// строки, но физическая цепочка «сеть ↔ свитч ↔ роутер» всё равно должна
+// попасть в подсветку.
+const collidingTopo = {
+  devices: [{ name: "r1", kind: "router" }, { name: "sw1", kind: "switch" }],
+  links: [{ a: { device: "sw1" }, b: { device: "r1" } }],
+  networks: [{ name: "r1", subnets: ["main"], attach: [{ device: "sw1" }] }],
+};
+
+const collidingReport = {
+  srcSubnet: "main",
+  dstSubnet: "main",
+  note: "",
+  paths: [{
+    nodes: [
+      { kind: 1, name: "main" }, { kind: 2, name: "sw1" }, { kind: 0, name: "r1" },
+    ],
+    routers: [],
+    verdict: "allow",
+  }],
+};
+
+test("a network and a router sharing one name still light the switch between them", async () => {
+  const { get, frames } = bootDiagnose({ ...responses, "/api/topology": collidingTopo });
+  await tick();
+  await frames(1);
+  get(`Diagnose.renderReport(${JSON.stringify(collidingReport)})`);
+  await frames(10);
+  const hl = get("Diagnose.expandHighlight(Diagnose.state.result, Diagnose.state.topology)");
+  for (const name of ["r1", "sw1"]) {
+    assert.ok(hl.has(name), `${name} belongs to the highlighted path`);
+  }
+  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
+  assert.ok(f.ok.has("sw1"), "switch on an allowed route is green");
+});
+
+test("form submit posts to /api/diagnose and renders the report", async () => {
+  const { ids, calls } = bootDiagnose({ ...responses, "/api/diagnose": sampleReport });
   await tick();
   // form inputs are resolved by id at submit time; seed the registry
-  for (const id of ["sim-src", "sim-dst", "sim-proto", "sim-dstports"]) ids[id] ||= makeEl("input");
-  ids["sim-src"].value = "10.0.0.5";
-  ids["sim-dst"].value = "10.0.1.7";
-  ids["sim-proto"].value = "tcp";
-  ids["sim-dstports"].value = "443, 8080";
-  fire(ids["sim-form"], "submit", {});
+  for (const id of ["diag-src", "diag-dst", "diag-proto", "diag-dstports"]) ids[id] ||= makeEl("input");
+  ids["diag-src"].value = "10.0.0.5";
+  ids["diag-dst"].value = "10.0.1.7";
+  ids["diag-proto"].value = "tcp";
+  ids["diag-dstports"].value = "443, 8080";
+  fire(ids["diag-form"], "submit", {});
   await tick();
-  const post = calls.find((c) => c.path === "/api/simulate");
+  const post = calls.find((c) => c.path === "/api/diagnose");
   assert.ok(post && post.method === "POST");
   assert.deepEqual(post.body, { src: "10.0.0.5", dst: "10.0.1.7", proto: "tcp", dstPorts: ["443", "8080"] });
-  const cards = ids["sim-paths"].children.filter((c) => c.className === "sim-path");
+  const cards = ids["diag-paths"].children.filter((c) => c.className === "diag-path");
   assert.equal(cards.length, 1, "report rendered after submit");
 });
 
 test("router verdict renders each rule-walk step as a numbered list item", async () => {
-  const { ids, get } = bootSimulate(responses);
+  const { ids, get } = bootDiagnose(responses);
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify(sampleReport)})`);
+  get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
   const lists = (function collect(n) {
-    const out = String(n.className || "").split(/\s+/).includes("sim-steps") ? [n] : [];
+    const out = String(n.className || "").split(/\s+/).includes("diag-steps") ? [n] : [];
     (n.children || []).forEach((c) => out.push(...collect(c)));
     return out;
-  })(ids["sim-paths"]);
+  })(ids["diag-paths"]);
   assert.equal(lists.length, 1, "only the verdict with steps becomes a list");
   const items = (lists[0].children || []).filter((c) => c.tag === "li");
   assert.equal(items.length, 2);
@@ -474,10 +516,10 @@ test("router verdict renders each rule-walk step as a numbered list item", async
 });
 
 test("verdict without steps falls back to the plain reason text", async () => {
-  const { ids, get } = bootSimulate(responses);
+  const { ids, get } = bootDiagnose(responses);
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify(sampleReport)})`);
-  const paras = ids["sim-paths"].children
+  get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
+  const paras = ids["diag-paths"].children
     .flatMap((c) => c.children)
     .filter((c) => c.tag === "details")
     .flatMap((d) => d.children)
@@ -487,18 +529,18 @@ test("verdict without steps falls back to the plain reason text", async () => {
 });
 
 test("verdict rows look expandable: button-like summary with chevron", async () => {
-  const { ids, get } = bootSimulate(responses);
+  const { ids, get } = bootDiagnose(responses);
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify(sampleReport)})`);
-  const details = ids["sim-paths"].children
+  get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
+  const details = ids["diag-paths"].children
     .flatMap((c) => c.children)
     .filter((c) => c.tag === "details");
   assert.ok(details.length >= 2, "both router verdicts rendered");
   for (const d of details) {
-    assert.match(String(d.className || ""), /sim-verdict/, "verdict row is marked as expandable");
+    assert.match(String(d.className || ""), /diag-verdict/, "verdict row is marked as expandable");
     const sum = (d.children || []).find((c) => c.tag === "summary");
     assert.ok(sum, "summary present");
-    assert.ok((sum.children || []).some((ch) => String(ch.className || "").includes("sim-chevron")),
+    assert.ok((sum.children || []).some((ch) => String(ch.className || "").includes("diag-chevron")),
       "summary carries a disclosure chevron");
   }
 });
@@ -523,10 +565,10 @@ const denyReport = {
 };
 
 test("expandFlow colors the route green up to the denying router", async () => {
-  const { get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
-  const f = get("Simulate.expandFlow(Simulate.state.result, Simulate.state.topology)");
+  get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
+  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
   for (const name of ["MAIN", "sw1", "r1"]) assert.ok(f.ok.has(name), `${name} is before the deny point`);
   assert.ok(!f.ok.has("r2"), "denying router itself is not green");
   assert.ok(!f.ok.has("OFFICE"), "destination beyond deny stays unlit");
@@ -535,10 +577,10 @@ test("expandFlow colors the route green up to the denying router", async () => {
 });
 
 test("allowed path lights the whole route including destination", async () => {
-  const { get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify(switchedReport)})`);
-  const f = get("Simulate.expandFlow(Simulate.state.result, Simulate.state.topology)");
+  get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
+  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
   for (const name of ["MAIN", "sw1", "r1", "r2", "sw2", "OFFICE"]) {
     assert.ok(f.ok.has(name), `${name} is on an allowed route`);
   }
@@ -548,10 +590,10 @@ test("allowed path lights the whole route including destination", async () => {
 test("a denying router never turns green, even via another allowed path", async () => {
   const rep = JSON.parse(JSON.stringify(denyReport));
   rep.paths.push(JSON.parse(JSON.stringify(switchedReport.paths[0])));
-  const { get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify(rep)})`);
-  const f = get("Simulate.expandFlow(Simulate.state.result, Simulate.state.topology)");
+  get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
+  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
   assert.ok(f.deny.has("r2"), "deny verdict wins on the shared route");
   assert.ok(!f.ok.has("r2") && !f.ok.has("OFFICE"), "denied elements are not green");
 });
@@ -559,57 +601,57 @@ test("a denying router never turns green, even via another allowed path", async 
 // The drop happens ON the denying router, so the hop leading into it has
 // been fully traversed and stays green; only segments past it turn red.
 test("hop into the denying router stays green, segments beyond it turn red", async () => {
-  const { get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
   await tick();
-  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
-  const mark = get("Simulate.flowMark(Simulate.expandFlow(Simulate.state.result, Simulate.state.topology))");
-  assert.equal(mark({ a: { device: "sw1" }, b: { device: "r1" } }), "sim-flow-ok", "wire before the deny point");
-  assert.equal(mark({ a: { device: "r1" }, b: { device: "r2" } }), "sim-flow-ok", "wire into the deny router is traversed");
-  assert.equal(mark({ type: "attach", net: { name: "MAIN" }, device: "sw1" }), "sim-flow-ok", "attach before the deny point");
-  assert.equal(mark({ a: { device: "r2" }, b: { device: "sw2" } }), "sim-flow-deny", "wire beyond the deny point");
-  assert.equal(mark({ type: "attach", net: { name: "OFFICE" }, device: "sw2" }), "sim-flow-deny", "attach beyond the deny point");
+  get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
+  const mark = get("Diagnose.flowMark(Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology))");
+  assert.equal(mark({ a: { device: "sw1" }, b: { device: "r1" } }), "diag-flow-ok", "wire before the deny point");
+  assert.equal(mark({ a: { device: "r1" }, b: { device: "r2" } }), "diag-flow-ok", "wire into the deny router is traversed");
+  assert.equal(mark({ type: "attach", net: { name: "MAIN" }, device: "sw1" }), "diag-flow-ok", "attach before the deny point");
+  assert.equal(mark({ a: { device: "r2" }, b: { device: "sw2" } }), "diag-flow-deny", "wire beyond the deny point");
+  assert.equal(mark({ type: "attach", net: { name: "OFFICE" }, device: "sw2" }), "diag-flow-deny", "attach beyond the deny point");
 });
 
 // переход потока анимируется через flowFade: старт прозрачный, финал — полный
 test("report flow fades in over animated frames", async () => {
-  const { get, frames } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { get, frames } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
   await tick();
   await frames(1);
-  get(`Simulate.renderReport(${JSON.stringify(switchedReport)})`);
-  assert.ok(get("Simulate.state.flowFade") < 1, "transition starts transparent");
+  get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
+  assert.ok(get("Diagnose.state.flowFade") < 1, "transition starts transparent");
   await frames(10);
-  assert.equal(get("Simulate.state.flowFade"), 1, "transition completes");
+  assert.equal(get("Diagnose.state.flowFade"), 1, "transition completes");
 });
 
 test("map paints flow segments and marks the deny point with a tooltip", async () => {
-  const { get, frames } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { get, frames } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
   await tick();
   await frames(1);
-  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
+  get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
   await frames(10); // дождались полного прогрева потока (flowFade = 1)
   const theme = JSON.parse(get("JSON.stringify(CanvasTheme.create({}))"));
   const byStroke = (color) => JSON.parse(get(
-    `JSON.stringify(Simulate.state.list.filter((i) => /^(link:|attach:)/.test(i.id) && i.style.stroke === ${JSON.stringify(color)}).map((i) => i.id).sort())`,
+    `JSON.stringify(Diagnose.state.list.filter((i) => /^(link:|attach:)/.test(i.id) && i.style.stroke === ${JSON.stringify(color)}).map((i) => i.id).sort())`,
   ));
-  assert.ok(get("Simulate.state.list.every((i) => !('wire' in (i.style || {})))"),
+  assert.ok(get("Diagnose.state.list.every((i) => !('wire' in (i.style || {})))"),
     "the internal wire flag never leaks into public styles");
   assert.deepEqual(byStroke(theme.flowOk), ["attach:MAIN|sw1", "link:r1|r2", "link:r1|sw1"],
     "wires and attaches up to the deny point are green");
   assert.deepEqual(byStroke(theme.flowDeny), ["attach:OFFICE|sw2", "link:r2|sw2"],
     "segments beyond the deny point are red");
-  const denied = JSON.parse(get(`JSON.stringify(Simulate.state.list.find((i) => i.id === "device:r2"))`));
+  const denied = JSON.parse(get(`JSON.stringify(Diagnose.state.list.find((i) => i.id === "device:r2"))`));
   assert.equal(denied.style.glow.color, theme.flowDeny, "deny device glows red");
   assert.match(denied.meta.tooltip, /block-office/, "deny tooltip names the rule");
   assert.match(denied.meta.tooltip, /правило запретило/, "deny tooltip carries the reason");
 });
 
 test("hovering the denying router shows a delayed tooltip", async () => {
-  const { canvas, ids, frames, get } = bootSimulate({ ...responses, "/api/topology": switchedTopo });
+  const { canvas, ids, frames, get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
   await tick();
   await frames(1);
-  get(`Simulate.renderReport(${JSON.stringify(denyReport)})`);
+  get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
   await frames(10);
-  const tip = ids["sim-tooltip"];
+  const tip = ids["diag-tooltip"];
   // r2 в дефолтной раскладке — второе устройство, (240,40)+(140x60)
   fire(canvas, "mousemove", { clientX: 250, clientY: 50 });
   assert.ok(tip.hidden, "tooltip waits out the delay");
@@ -628,37 +670,74 @@ test("hovering the denying router shows a delayed tooltip", async () => {
   assert.ok(tip.hidden, "moving onto empty space hides the shown tooltip");
 });
 
-// — разделитель «форма ↔ карта» —
+// — плавающее окно параметров —
 
-test("clampFormWidth keeps the panel between its bounds", async () => {
-  const { get } = bootSimulate(responses);
+test("panel opens by default and the toolbar toggle is active", async () => {
+  const { ids } = bootDiagnose(responses);
   await tick();
-  const clamp = (w, total) => get(`Simulate.clampFormWidth(${w}, ${total})`);
-  assert.equal(clamp(100, 1200), 320);
-  assert.equal(clamp(5000, 1200), 864);
-  assert.equal(clamp(420.6, 1200), 421);
+  assert.equal(ids["diag-panel"].hidden, false);
+  assert.ok(ids["diag-tool-path"].classList.contains("active"));
 });
 
-test("splitter drag resizes the form panel and persists the width", async () => {
-  const { ids, doc, store } = bootSimulate(responses);
+test("toolbar toggle closes and reopens the panel", async () => {
+  const { ids } = bootDiagnose(responses);
   await tick();
-  fire(ids["sim-splitter"], "mousedown", { button: 0, clientX: 600 });
-  fire(doc, "mousemove", { clientX: 700 });
+  fire(ids["diag-tool-path"], "click", {});
+  assert.equal(ids["diag-panel"].hidden, true);
+  assert.ok(!ids["diag-tool-path"].classList.contains("active"));
+  fire(ids["diag-tool-path"], "click", {});
+  assert.equal(ids["diag-panel"].hidden, false);
+  assert.ok(ids["diag-tool-path"].classList.contains("active"));
+});
+
+test("close button hides the panel and deactivates the toggle", async () => {
+  const { ids } = bootDiagnose(responses);
+  await tick();
+  fire(ids["diag-panel-close"], "click", {});
+  assert.equal(ids["diag-panel"].hidden, true);
+  assert.ok(!ids["diag-tool-path"].classList.contains("active"));
+});
+
+test("dragging the header moves the panel and persists its position", async () => {
+  const { ids, doc, store } = bootDiagnose(responses);
+  await tick();
+  fire(ids["diag-panel-header"], "mousedown", { button: 0, clientX: 100, clientY: 100 });
+  fire(doc, "mousemove", { clientX: 160, clientY: 130 });
   fire(doc, "mouseup", {});
-  assert.equal(ids["sim-layout"].style["--sim-form-w"], "520px");
-  assert.equal(JSON.parse(store["firenet-sim-split-v1"]), 520);
+  assert.equal(ids["diag-panel"].style.left, "60px");
+  assert.equal(ids["diag-panel"].style.top, "30px");
+  assert.deepEqual(JSON.parse(store["firenet-diag-panel-pos-v1"]), { left: 60, top: 30 });
 });
 
-test("saved panel width is restored on boot", async () => {
-  const { ids } = bootSimulate(responses, { "firenet-sim-split-v1": JSON.stringify(600) });
+test("saved panel position is restored on boot", async () => {
+  const { ids } = bootDiagnose(responses, { "firenet-diag-panel-pos-v1": JSON.stringify({ left: 200, top: 80 }) });
   await tick();
-  assert.equal(ids["sim-layout"].style["--sim-form-w"], "600px");
+  assert.equal(ids["diag-panel"].style.left, "200px");
+  assert.equal(ids["diag-panel"].style.top, "80px");
 });
 
-test("double click resets the splitter to the default width", async () => {
-  const { ids, store } = bootSimulate(responses, { "firenet-sim-split-v1": JSON.stringify(600) });
+// — запоминание введённых параметров формы —
+
+test("editing a form field persists all fields to localStorage", async () => {
+  const { ids, store } = bootDiagnose(responses);
   await tick();
-  fire(ids["sim-splitter"], "dblclick", {});
-  assert.equal(ids["sim-layout"].style["--sim-form-w"], "420px");
-  assert.ok(!("firenet-sim-split-v1" in store));
+  for (const id of ["diag-src", "diag-dst", "diag-proto", "diag-dstports"]) ids[id] ||= makeEl("input");
+  ids["diag-src"].value = "10.0.0.5";
+  ids["diag-dst"].value = "10.0.1.7";
+  ids["diag-proto"].value = "tcp";
+  ids["diag-dstports"].value = "443, 8080";
+  fire(ids["diag-src"], "input", {});
+  assert.deepEqual(JSON.parse(store["firenet-diag-form-v1"]), {
+    "diag-src": "10.0.0.5", "diag-dst": "10.0.1.7", "diag-proto": "tcp", "diag-dstports": "443, 8080",
+  });
+});
+
+test("saved form values are restored on boot", async () => {
+  const saved = { "diag-src": "10.0.0.5", "diag-dst": "10.0.1.7", "diag-proto": "udp", "diag-dstports": "53" };
+  const { ids } = bootDiagnose(responses, { "firenet-diag-form-v1": JSON.stringify(saved) });
+  await tick();
+  assert.equal(ids["diag-src"].value, "10.0.0.5");
+  assert.equal(ids["diag-dst"].value, "10.0.1.7");
+  assert.equal(ids["diag-proto"].value, "udp");
+  assert.equal(ids["diag-dstports"].value, "53");
 });

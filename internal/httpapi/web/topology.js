@@ -20,7 +20,7 @@ const Topology = (() => {
 
   let theme = null; // CanvasTheme страницы
   let view = null; // CanvasView поверх #topo-canvas
-  let pending = null; // {device} awaiting a network to attach to
+  let pending = null; // {device|network} — узел, ожидающий пару в режиме connect
   let saveLayoutTimer = null;
   let previewWire = null; // item оверлея: связь в процессе connect
   let marqueeRect = null; // рамка выделения в мировых координатах
@@ -28,6 +28,7 @@ const Topology = (() => {
   let popoverWorld = null; // world point the open popover is anchored to
   let ctxPending = null; // {items, at}: node menu awaiting a clean right-release
   let camControls = null; // CameraControls handle (isRightDown)
+  let minimap = null; // Minimap над #topo-minimap
   // поиск по канвасу: подсветка совпавших узлов, приглушение остальных,
   // камера центрируется на активном совпадении
   let searchQ = "";
@@ -47,6 +48,7 @@ const Topology = (() => {
   function applyCamera() {
     view.invalidate();
     movePopover();
+    minimap.update();
   }
 
   function ensureLayout() {
@@ -56,6 +58,11 @@ const Topology = (() => {
   const deviceCenter = (name) => {
     const pos = State.layout.devices[name];
     return pos ? { x: pos.x + DEVICE_W / 2, y: pos.y + DEVICE_H / 2 } : null;
+  };
+
+  const netCenter = (name) => {
+    const pos = State.layout.networks[name];
+    return pos ? { x: pos.x + NET_W / 2, y: pos.y + NET_H / 2 } : null;
   };
 
   // showNetInfo открывает окно состава сети у правого края её облака.
@@ -603,21 +610,21 @@ const Topology = (() => {
 
   // --- указатель: превью связи, курсор и тултипы ---
 
-  // setupPointer ведёт один mousemove канвы: пунктир от pending-устройства
+  // setupPointer ведёт mousemove канвы: пунктир от pending-устройства
   // к курсору в режиме connect; cursor grab над узлами и pointer над
-  // связями; тултип meta.tooltip (экспорт фильтрованной связи) с задержкой.
+  // связями. Клик по фильтрованной связи закрепляет тултип meta.tooltip;
+  // клик мимо или уход с канвы его снимает.
   function setupPointer() {
     const tip = document.getElementById("topo-tooltip");
     tip.hidden = true;
-    let tipTimer = 0;
-    const hideTip = () => { clearTimeout(tipTimer); tip.hidden = true; };
+    const hideTip = () => { tip.hidden = true; };
     canvas().addEventListener("mousemove", (e) => {
       const p = screenPoint(e);
       const hit = HitTest.pick(State.list, toWorld(p), State.camera.z);
       canvas().style.cursor = hit ? (hit.nodeType ? "grab" : "pointer") : "default";
       previewWire = null;
       if (pending && State.tool === "connect") {
-        const from = deviceCenter(pending.device);
+        const from = pending.device ? deviceCenter(pending.device) : netCenter(pending.network);
         if (from) {
           const to = toWorld(p);
           previewWire = {
@@ -628,18 +635,37 @@ const Topology = (() => {
         }
       }
       view.invalidate();
-      clearTimeout(tipTimer);
-      if (hit && hit.meta && hit.meta.tooltip) {
-        tipTimer = setTimeout(() => {
-          tip.textContent = hit.meta.tooltip;
-          tip.style.left = p.x + 14 + "px";
-          tip.style.top = p.y + 14 + "px";
-          tip.hidden = false;
-        }, 300);
-      } else hideTip();
+    });
+    canvas().addEventListener("click", (e) => {
+      const p = screenPoint(e);
+      const hit = HitTest.pick(State.list, toWorld(p), State.camera.z);
+      if (!hit || !hit.meta || !hit.meta.filter) return hideTip();
+      const f = hit.meta.filter;
+      const route = (from, to, xs) =>
+        `<div class="tip-route"><b>${from}</b> → <b>${to}</b></div>` +
+        (xs.length
+          ? `<div>${xs.map((x) => `<span class="owner-badge">${x}</span>`).join("")}</div>`
+          : `<div class="hint">ничего</div>`);
+      tip.innerHTML = route(f.a, f.b, f.aExports) + route(f.b, f.a, f.bExports);
+      tip.style.left = p.x + 14 + "px";
+      tip.style.top = p.y + 14 + "px";
+      tip.hidden = false;
     });
     canvas().addEventListener("mouseleave", hideTip);
     canvas().addEventListener("mousedown", hideTip); // жест начался — подсказка ни к чему
+  }
+
+  // attachDevice — общий хвост connect «сеть–устройство» в обе стороны.
+  function attachDevice(netName, device) {
+    const net = State.topology.networks.find((n) => n.name === netName);
+    net.attach = net.attach || [];
+    if (net.attach.some((a) => a.device === device)) {
+      showBanner(`Сеть ${netName} уже подключена к ${device}`);
+      cancelPending();
+      return;
+    }
+    net.attach.push({ device });
+    cancelPending();
   }
 
   function onDeviceConnect(device) {
@@ -650,6 +676,10 @@ const Topology = (() => {
     }
     if (pending.device === device) {
       cancelPending();
+      return;
+    }
+    if (pending.network) {
+      attachDevice(pending.network, device);
       return;
     }
     const [a, b] = [pending.device, device].sort();
@@ -663,15 +693,20 @@ const Topology = (() => {
   }
 
   function onNetworkClick(netName) {
-    if (!pending) return;
-    const net = State.topology.networks.find((n) => n.name === netName);
-    net.attach = net.attach || [];
-    if (net.attach.some((a) => a.device === pending.device)) {
-      showBanner(`Сеть ${netName} уже подключена к ${pending.device}`);
+    if (!pending) {
+      pending = { network: netName };
+      render();
+      return;
+    }
+    if (!pending.network) {
+      attachDevice(netName, pending.device);
+      return;
+    }
+    if (pending.network === netName) {
       cancelPending();
       return;
     }
-    net.attach.push({ device: pending.device });
+    showBanner(`Сети ${[pending.network, netName].sort().join(" и ")} не могут быть соединены напрямую`);
     cancelPending();
   }
 
@@ -694,7 +729,7 @@ const Topology = (() => {
     }
     if (part === "shape") {
       return (State.selection.has(obj) ? " selected" : "")
-        + (pending && pending.device === obj.name ? " pending" : "")
+        + (pending && (pending.device === obj.name || pending.network === obj.name) ? " pending" : "")
         + mark(searchSet.has(obj));
     }
     return shade(searchSet.has(obj));
@@ -719,6 +754,7 @@ const Topology = (() => {
       fade: { dim: State.searchFade },
     }).list;
     view.invalidate();
+    minimap.update();
     // trash button mirrors the selection state
     document.getElementById("topo-delete").disabled = !State.selection.size;
   }
@@ -771,6 +807,17 @@ const Topology = (() => {
       getCam: () => State.camera,
       getOverlay,
       textHideZoom: theme.textHideZoom,
+    });
+    minimap = Minimap.create(document.getElementById("topo-minimap"), {
+      getBounds: () => TopoScene.bounds(State.topology, State.layout),
+      getPoints: () => [
+        ...State.topology.devices.map((d) => deviceCenter(d.name)),
+        ...State.topology.networks.map((n) => netCenter(n.name)),
+      ].filter(Boolean),
+      getCam: () => State.camera,
+      setCam: (c) => { State.camera = c; applyCamera(); scheduleLayoutSave(); },
+      getViewport: () => { const r = canvas().getBoundingClientRect(); return { w: r.width, h: r.height }; },
+      getTheme: () => theme,
     });
     setupForms();
     setupCamera();

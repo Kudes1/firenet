@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/rules"
-	"github.com/kudes1/firenet/internal/simulate"
 )
 
-const simAppTopology = `
+const diagAppTopology = `
 devices:
   - {name: r1, kind: router}
   - {name: r2, kind: router}
@@ -21,13 +21,13 @@ networks:
   - {name: n-dmz, subnets: [dmz], attach: [{device: r2}]}
 `
 
-const simAppSubnets = `
+const diagAppSubnets = `
 subnets:
   - {name: office, cidr: 10.0.0.0/24}
   - {name: dmz, cidr: 10.0.1.0/24}
 `
 
-const simAppRules = `
+const diagAppRules = `
 defaultAction: deny
 chainName: FIRENET-FWD
 chainPosition: top
@@ -35,12 +35,12 @@ rules:
   - {name: office-to-dmz, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: allow}
 `
 
-func TestSimulate_MatchesCompileVerdicts(t *testing.T) {
-	rep, err := Simulate(context.Background(), discardLogger(), SimulateOptions{
-		TopologyYAML: []byte(simAppTopology),
-		SubnetsYAML:  []byte(simAppSubnets),
-		RulesYAML:    []byte(simAppRules),
-		Flow: simulate.Flow{
+func TestDiagnose_MatchesCompileVerdicts(t *testing.T) {
+	rep, err := Diagnose(context.Background(), discardLogger(), DiagnoseOptions{
+		TopologyYAML: []byte(diagAppTopology),
+		SubnetsYAML:  []byte(diagAppSubnets),
+		RulesYAML:    []byte(diagAppRules),
+		Flow: diagnose.Flow{
 			Src:      netip.MustParseAddr("10.0.0.5"),
 			Dst:      netip.MustParseAddr("10.0.1.7"),
 			Proto:    rules.ProtoTCP,
@@ -48,7 +48,7 @@ func TestSimulate_MatchesCompileVerdicts(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("simulate: %v", err)
+		t.Fatalf("diagnose: %v", err)
 	}
 	if rep.SrcSubnet != "office" || rep.DstSubnet != "dmz" || len(rep.Paths) != 1 {
 		t.Fatalf("unexpected report: %+v", rep)
@@ -62,12 +62,12 @@ func TestSimulate_MatchesCompileVerdicts(t *testing.T) {
 	}
 }
 
-func TestSimulate_UnknownIPErrors(t *testing.T) {
-	_, err := Simulate(context.Background(), discardLogger(), SimulateOptions{
-		TopologyYAML: []byte(simAppTopology),
-		SubnetsYAML:  []byte(simAppSubnets),
-		RulesYAML:    []byte(simAppRules),
-		Flow: simulate.Flow{
+func TestDiagnose_UnknownIPErrors(t *testing.T) {
+	_, err := Diagnose(context.Background(), discardLogger(), DiagnoseOptions{
+		TopologyYAML: []byte(diagAppTopology),
+		SubnetsYAML:  []byte(diagAppSubnets),
+		RulesYAML:    []byte(diagAppRules),
+		Flow: diagnose.Flow{
 			Src: netip.MustParseAddr("10.0.0.5"),
 			Dst: netip.MustParseAddr("192.168.99.99"),
 		},

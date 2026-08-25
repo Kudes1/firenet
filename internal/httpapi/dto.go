@@ -86,6 +86,13 @@ type TopologyDoc struct {
 	Unions   []UnionDoc   `json:"unions" yaml:"unions"`
 }
 
+// EntityDoc is one export candidate for a link filter combo: a network or
+// bare subnet, with its CIDR filled in for subnets.
+type EntityDoc struct {
+	Name string `json:"name"`
+	CIDR string `json:"cidr,omitempty"`
+}
+
 // RuleDoc matches traffic between named subnets/zones (or "any").
 type RuleDoc struct {
 	Name     string   `json:"name" yaml:"name"`

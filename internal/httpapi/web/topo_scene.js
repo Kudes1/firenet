@@ -2,7 +2,7 @@
 
 // TopoScene — сборка display list сцены топологии: рамки объединений, связи,
 // привязки сетей, устройства и сети-облака. Используется редактором
-// (topology.js) и read-only картой симуляции (simulate.js). Взаимодействие
+// (topology.js) и read-only картой диагностики (diagnose.js). Взаимодействие
 // (drag/select/context) страница подключает сама через opts.hook, классы
 // оформления — через opts.classes, приглушение элементов — через opts.dim.
 const TopoScene = (() => {
@@ -62,8 +62,8 @@ const TopoScene = (() => {
   const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
   // styled применяет состояния к базовому стилю по правилам спецификации:
-  // selected/pending → accent; search-hit → glow; sim-flow-* → лерп цвета и
-  // ширины по fade.flow; search-dim|sim-dim → alpha по fade.dim.
+  // selected/pending → accent; search-hit → glow; diag-flow-* → лерп цвета и
+  // ширины по fade.flow; search-dim|diag-dim → alpha по fade.dim.
   // Служебный признак связи (base.wire) тратится на ширину flow-подсветки
   // и в итоговый стиль не выходит.
   function styled(base, states, theme, fade) {
@@ -72,7 +72,7 @@ const TopoScene = (() => {
     if (states.has("selected")) { st.stroke = theme.accent; st.lineWidth = 2.5; }
     if (states.has("pending")) { st.stroke = theme.accent; st.lineWidth = 3; }
     if (states.has("search-hit")) st.glow = { color: theme.accent, blur: 8 };
-    const flow = states.has("sim-flow-ok") ? theme.flowOk : states.has("sim-flow-deny") ? theme.flowDeny : null;
+    const flow = states.has("diag-flow-ok") ? theme.flowOk : states.has("diag-flow-deny") ? theme.flowDeny : null;
     // flow красит только контуры; у подписей stroke нет
     if (flow && base.stroke) {
       const k = fade?.flow ?? 1;
@@ -82,7 +82,7 @@ const TopoScene = (() => {
     }
     // дефолты fade.* = 1: если страница не анимирует переход, эффект
     // состояния применён полностью; fade:{dim:0} — стартовая точка твина
-    if (states.has("search-dim") || states.has("sim-dim"))
+    if (states.has("search-dim") || states.has("diag-dim"))
       st.alpha = (st.alpha ?? 1) * (1 + (theme.dimAlpha - 1) * (fade?.dim ?? 1));
     return st;
   }
@@ -98,7 +98,7 @@ const TopoScene = (() => {
       const it = { kind, id, ref, geom, style: styled(base, new Set([
         ...TOKENS(opts.classes && opts.classes(ref, part)),
         ...TOKENS(opts.mark && opts.mark(ref)),
-        ...(opts.dim && opts.dim(ref) ? ["sim-dim"] : []),
+        ...(opts.dim && opts.dim(ref) ? ["diag-dim"] : []),
       ]), theme, fade), ...fields };
       if (opts.item) opts.item(kind, it);
       list.push(it);
@@ -124,7 +124,6 @@ const TopoScene = (() => {
     });
 
     const offsets = linkOffsets(topology.links);
-    const side = (xs) => (xs || []).join(", ") || "ничего";
     topology.links.forEach((l, i) => {
       const pa = deviceCenter(l.a.device);
       const pb = deviceCenter(l.b.device);
@@ -134,7 +133,12 @@ const TopoScene = (() => {
       if (l.filter) base.dash = [6, 4];
       emit("path", `link:${[l.a.device, l.b.device].sort().join("|")}`, l,
         { segs: [{ x1: pa.x, y1: pa.y, cx: mid.x, cy: mid.y, x2: pb.x, y2: pb.y }] }, base,
-        { pick: true, ...(l.filter ? { meta: { tooltip: `${side(l.filter.aExports)} → ${side(l.filter.bExports)}` } } : {}) });
+        { pick: true, ...(l.filter ? { meta: {
+          filter: {
+            a: l.a.device, b: l.b.device,
+            aExports: [...(l.filter.aExports || [])], bExports: [...(l.filter.bExports || [])],
+          },
+        } } : {}) });
     });
 
     topology.networks.forEach((n) => {
@@ -205,7 +209,7 @@ const TopoScene = (() => {
     return { list };
   }
 
-  // bounds — bbox всей сцены по раскладке (как worldBounds в simulate.js),
+  // bounds — bbox всей сцены по раскладке (как worldBounds в diagnose.js),
   // null без позиций.
   function bounds(topology, layout) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

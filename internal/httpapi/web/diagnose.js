@@ -1,30 +1,34 @@
 "use strict";
 
-// Simulate — карта топологии на canvas с подсветкой путей и отчёт
-// симуляции трафика (POST /api/simulate). Карта только для чтения:
+// Diagnose — карта топологии на canvas с подсветкой путей и отчёт
+// диагностики трафика (POST /api/diagnose). Карта только для чтения:
 // перетаскивание узлов и правка — на /ui/topology.
-const Simulate = (() => {
-  const { NET_W } = NetMap;
+const Diagnose = (() => {
+  const { DEVICE_W, DEVICE_H, NET_W, NET_H } = NetMap;
   const state = {
     topology: null, subnets: [], layout: null, camera: Camera.create(), result: null,
     list: [], // display list канвы (TopoScene.buildScene)
     hl: null, flow: null, flowFade: 0, // разметка потока и прогресс её проявления
   };
-  let theme = null, view = null;
+  let theme = null, view = null, minimap = null;
 
-  const canvasEl = () => document.getElementById("sim-canvas");
-  const wrapEl = () => document.getElementById("sim-wrap");
+  const canvasEl = () => document.getElementById("diag-canvas");
+  const wrapEl = () => document.getElementById("diag-wrap");
 
   // buildAdj: симметричная смежность устройств и сетей — линки устройство–
-  // устройство плюс привязки «сеть ↔ устройство».
+  // устройство плюс привязки «сеть ↔ устройство». Ключи квалифицированы
+  // префиксом пространства имён («d:»/«n:»), чтобы сеть и устройство с
+  // одинаковым именем не сливались в один узел графа.
+  const DEV = "d:", NET = "n:";
+  const bare = (k) => k.slice(DEV.length);
   function buildAdj(topology) {
     const adj = new Map();
     const link = (a, b) => {
       if (!adj.has(a)) adj.set(a, []);
       adj.get(a).push(b);
     };
-    topology.links.forEach((l) => { link(l.a.device, l.b.device); link(l.b.device, l.a.device); });
-    topology.networks.forEach((n) => (n.attach || []).forEach((a) => { link(n.name, a.device); link(a.device, n.name); }));
+    topology.links.forEach((l) => { link(DEV + l.a.device, DEV + l.b.device); link(DEV + l.b.device, DEV + l.a.device); });
+    topology.networks.forEach((n) => (n.attach || []).forEach((a) => { link(NET + n.name, DEV + a.device); link(DEV + a.device, NET + n.name); }));
     return adj;
   }
 
@@ -49,9 +53,13 @@ const Simulate = (() => {
     return null;
   }
 
-  // узел отчёта без близнеца на карте (l2-bus) даёт null и просто пропускается
-  const anchorOf = (topology) => (n) => n.kind === 0 ? n.name
-    : (topology.networks.find((w) => (w.subnets || []).includes(n.name)) || {}).name || null;
+  // узел отчёта без близнеца на карте (l2-bus) даёт null и просто пропускается;
+  // якорь — квалифицированный ключ (роутер-устройство или сеть)
+  const anchorOf = (topology) => (n) => {
+    if (n.kind === 0) return DEV + n.name;
+    const w = topology.networks.find((w) => (w.subnets || []).includes(n.name));
+    return w ? NET + w.name : null;
+  };
 
   // expandHighlight переводит путь отчёта в имена элементов карты. Узлы
   // отчёта — подсети, роутеры и синтетические l2-bus, поэтому каждая пара
@@ -64,13 +72,14 @@ const Simulate = (() => {
     const anchor = anchorOf(topology);
     const hl = new Set();
     report.paths.forEach((p) => {
-      // l2-bus не имеет близнеца на карте; стыки ищем по соседним якорям
+      // l2-bus не имеет близнеца на карте; стыки ищем по соседним якорям.
+      // В hl имена без префикса: подсветке не нужно различать пространства имён.
       const anchors = p.nodes.map(anchor).filter(Boolean);
-      anchors.forEach((a) => hl.add(a));
+      anchors.forEach((a) => hl.add(bare(a)));
       for (let i = 0; i + 1 < anchors.length; i++) {
         if (anchors[i] === anchors[i + 1]) continue;
         const chain = shortestPath(adj, anchors[i], anchors[i + 1]);
-        if (chain) chain.forEach((x) => hl.add(x));
+        if (chain) chain.forEach((x) => hl.add(bare(x)));
       }
     });
     return hl;
@@ -99,12 +108,12 @@ const Simulate = (() => {
     report.paths.forEach((p) => {
       const anchors = p.nodes.map(anchor).filter(Boolean);
       const di = p.routers.findIndex((rv) => rv.action === "deny");
-      const cut = di >= 0 ? anchors.indexOf(p.routers[di].router) : anchors.length;
+      const cut = di >= 0 ? anchors.indexOf(DEV + p.routers[di].router) : anchors.length;
       if (cut < 0) return; // запрет вне якорей карты — маршрут не размечаем
       const rv = di >= 0 ? p.routers[di] : null;
       for (let i = 0; i + 1 < anchors.length; i++) {
         if (anchors[i] === anchors[i + 1]) continue;
-        const seg = shortestPath(adj, anchors[i], anchors[i + 1]);
+        const seg = (shortestPath(adj, anchors[i], anchors[i + 1]) || []).map(bare);
         if (!seg) continue;
         const edges = seg.slice(1).map((x, j) => edgeKey(seg[j], x));
         if (rv && i + 1 > cut) {
@@ -131,10 +140,10 @@ const Simulate = (() => {
   const flowMark = (flow) => (obj) => {
     if (!flow || obj.devices) return "";
     if (!obj.a && obj.type !== "attach")
-      return flow.deny.has(obj.name) ? "sim-flow-deny" : flow.ok.has(obj.name) ? "sim-flow-ok" : "";
+      return flow.deny.has(obj.name) ? "diag-flow-deny" : flow.ok.has(obj.name) ? "diag-flow-ok" : "";
     const names = obj.type === "attach" ? [obj.net.name, obj.device] : [obj.a.device, obj.b.device];
     const k = edgeKey(names[0], names[1]);
-    return flow.denyE.has(k) ? "sim-flow-deny" : flow.okE.has(k) ? "sim-flow-ok" : "";
+    return flow.denyE.has(k) ? "diag-flow-deny" : flow.okE.has(k) ? "diag-flow-ok" : "";
   };
 
   // pathDim приглушает всё, что не принадлежит подсвеченному пути:
@@ -174,6 +183,7 @@ const Simulate = (() => {
       },
     }).list;
     view.invalidate();
+    minimap.update();
   }
 
   // animate гонит твин кадрами rAF; повторный запуск того же канала
@@ -190,7 +200,7 @@ const Simulate = (() => {
     requestAnimationFrame(step);
   }
 
-  const setCam = (c) => { state.camera = c; view.invalidate(); };
+  const setCam = (c) => { state.camera = c; view.invalidate(); minimap.update(); };
 
   // flyCam плавно ведёт камеру к цели (кнопка «вписать карту»)
   function flyCam(to, ms = 250) {
@@ -222,7 +232,7 @@ const Simulate = (() => {
       if (it && it.nodeType === "network") showNetInfo(it.ref);
     });
     // тултип (точка запрета, экспорт фильтров на связях): hover с задержкой
-    const tip = document.getElementById("sim-tooltip");
+    const tip = document.getElementById("diag-tooltip");
     tip.hidden = true;
     let tipTimer = 0;
     const hideTip = () => { clearTimeout(tipTimer); tip.hidden = true; };
@@ -240,52 +250,75 @@ const Simulate = (() => {
     });
     cv.addEventListener("mouseleave", hideTip);
     cv.addEventListener("mousedown", hideTip); // жест начался — подсказка ни к чему
-    document.getElementById("sim-fit").addEventListener("click", fitMap);
+    document.getElementById("diag-fit").addEventListener("click", fitMap);
   }
 
-  // — перетаскиваемый разделитель «форма ↔ карта» —
-  const FORM_MIN = 320, MAP_MIN = 320, SPLIT_W = 16, FORM_DEFAULT = 420;
-  const SIM_SPLIT_KEY = "firenet-sim-split-v1";
+  // — плавающее окно параметров: тумблер тулбара, перетаскивание, позиция —
+  const DIAG_PANEL_POS_KEY = "firenet-diag-panel-pos-v1";
 
-  function clampFormWidth(px, total) {
-    return Math.min(Math.max(Math.round(px), FORM_MIN), Math.max(FORM_MIN, total - MAP_MIN - SPLIT_W));
+  function setPanelOpen(open) {
+    document.getElementById("diag-panel").hidden = !open;
+    document.getElementById("diag-tool-path").classList.toggle("active", open);
   }
 
-  function applyFormWidth(w) {
-    document.getElementById("sim-layout").style.setProperty("--sim-form-w", `${w}px`);
-  }
-
-  function wireSplitter() {
-    const layout = document.getElementById("sim-layout");
-    const handle = document.getElementById("sim-splitter");
-    const apply = (w) => {
-      state.formWidth = clampFormWidth(w, layout.getBoundingClientRect().width);
-      applyFormWidth(state.formWidth);
-    };
-    handle.addEventListener("mousedown", (ev) => {
+  function wirePanel() {
+    const panel = document.getElementById("diag-panel");
+    const header = document.getElementById("diag-panel-header");
+    document.getElementById("diag-tool-path").addEventListener("click", () => setPanelOpen(panel.hidden));
+    document.getElementById("diag-panel-close").addEventListener("click", () => setPanelOpen(false));
+    header.addEventListener("mousedown", (ev) => {
       ev.preventDefault();
-      handle.classList.add("dragging");
-      const startX = ev.clientX;
-      const start = state.formWidth ?? FORM_DEFAULT;
-      const onMove = (e) => apply(start + e.clientX - startX);
+      const wrap = wrapEl().getBoundingClientRect();
+      const rect = panel.getBoundingClientRect();
+      const startX = ev.clientX, startY = ev.clientY;
+      const startLeft = rect.left - wrap.left, startTop = rect.top - wrap.top;
+      const move = (left, top) => { panel.style.left = `${left}px`; panel.style.top = `${top}px`; };
+      const onMove = (e) => move(startLeft + e.clientX - startX, startTop + e.clientY - startY);
       const onUp = () => {
-        handle.classList.remove("dragging");
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
-        localStorage.setItem(SIM_SPLIT_KEY, JSON.stringify(state.formWidth));
+        localStorage.setItem(DIAG_PANEL_POS_KEY, JSON.stringify({ left: parseFloat(panel.style.left), top: parseFloat(panel.style.top) }));
       };
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
     });
-    handle.addEventListener("dblclick", () => {
-      localStorage.removeItem(SIM_SPLIT_KEY);
-      state.formWidth = FORM_DEFAULT;
-      applyFormWidth(FORM_DEFAULT);
-    });
+    setPanelOpen(true);
     try {
-      const saved = JSON.parse(localStorage.getItem(SIM_SPLIT_KEY));
-      if (Number.isFinite(saved)) apply(saved);
+      const saved = JSON.parse(localStorage.getItem(DIAG_PANEL_POS_KEY));
+      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+        panel.style.left = `${saved.left}px`;
+        panel.style.top = `${saved.top}px`;
+      }
     } catch {}
+  }
+
+  // — запоминание введённых параметров формы —
+  const DIAG_FORM_KEY = "firenet-diag-form-v1";
+  const FORM_FIELDS = ["diag-src", "diag-dst", "diag-proto", "diag-dstports"];
+
+  function saveFormState() {
+    const data = {};
+    FORM_FIELDS.forEach((id) => { data[id] = document.getElementById(id).value; });
+    localStorage.setItem(DIAG_FORM_KEY, JSON.stringify(data));
+  }
+
+  function restoreFormState() {
+    try {
+      const data = JSON.parse(localStorage.getItem(DIAG_FORM_KEY));
+      if (!data) return;
+      FORM_FIELDS.forEach((id) => {
+        if (typeof data[id] === "string") document.getElementById(id).value = data[id];
+      });
+    } catch {}
+  }
+
+  function wireFormPersistence() {
+    restoreFormState();
+    FORM_FIELDS.forEach((id) => {
+      const el = document.getElementById(id);
+      el.addEventListener("input", saveFormState);
+      el.addEventListener("change", saveFormState);
+    });
   }
 
   const BADGE = { allow: "badge-ok", deny: "badge-drop", return: "badge-return" };
@@ -301,16 +334,16 @@ const Simulate = (() => {
 
   function chip(node) {
     const span = document.createElement("span");
-    span.className = node.kind === 0 ? "sim-chip sim-chip-router" : "sim-chip"; // kind 0 = router
+    span.className = node.kind === 0 ? "diag-chip diag-chip-router" : "diag-chip"; // kind 0 = router
     span.textContent = node.name;
     return span;
   }
 
   function renderReport(report) {
-    const host = document.getElementById("sim-paths");
+    const host = document.getElementById("diag-paths");
     host.innerHTML = "";
     state.result = report;
-    const summary = document.getElementById("sim-summary");
+    const summary = document.getElementById("diag-summary");
     summary.hidden = false;
     summary.textContent = `${report.srcSubnet} → ${report.dstSubnet}: путей ${report.paths.length}` + (report.note ? `. ${report.note}` : "");
     const flow = expandFlow(report, state.topology);
@@ -327,14 +360,14 @@ const Simulate = (() => {
     }
     if (!report.paths.length) {
       const p = document.createElement("p");
-      p.className = "sim-unreachable";
+      p.className = "diag-unreachable";
       p.textContent = "Недостижимо: путей между подсетями нет.";
       host.append(p);
       return;
     }
     report.paths.forEach((path, i) => {
       const card = document.createElement("article");
-      card.className = "sim-path";
+      card.className = "diag-path";
       const head = document.createElement("header");
       const verdict = document.createElement("span");
       verdict.className = "badge " + badgeClass(path.verdict);
@@ -346,20 +379,20 @@ const Simulate = (() => {
       card.append(head);
       if (path.note) {
         const note = document.createElement("p");
-        note.className = "sim-note";
+        note.className = "diag-note";
         note.textContent = path.note;
         card.append(note);
       }
       const chain = document.createElement("p");
-      chain.className = "sim-chain";
+      chain.className = "diag-chain";
       path.nodes.forEach((n, j) => {
-        if (j) chain.append(Object.assign(document.createElement("span"), { className: "sim-arrow", textContent: "→" }));
+        if (j) chain.append(Object.assign(document.createElement("span"), { className: "diag-arrow", textContent: "→" }));
         chain.append(chip(n));
       });
       card.append(chain);
       path.routers.forEach((rv) => {
         const row = document.createElement("details");
-        row.className = "sim-verdict";
+        row.className = "diag-verdict";
         const sum = document.createElement("summary");
         const b = document.createElement("span");
         b.className = "badge " + badgeClass(rv.action);
@@ -367,7 +400,7 @@ const Simulate = (() => {
         sum.append(b, Object.assign(document.createElement("span"), { textContent: ` ${rv.router}` }));
         // шеврон вместо убранного display:flex нативного маркера summary
         const chev = document.createElement("span");
-        chev.className = "sim-chevron";
+        chev.className = "diag-chevron";
         chev.innerHTML =
           '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" ' +
           'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
@@ -375,7 +408,7 @@ const Simulate = (() => {
         row.append(sum);
         if (rv.steps && rv.steps.length) {
           const ol = document.createElement("ol");
-          ol.className = "sim-steps";
+          ol.className = "diag-steps";
           rv.steps.forEach((s) => {
             const li = document.createElement("li");
             li.textContent = s;
@@ -395,17 +428,17 @@ const Simulate = (() => {
 
   async function run(ev) {
     ev.preventDefault();
-    const ports = document.getElementById("sim-dstports").value.split(",").map((s) => s.trim()).filter(Boolean);
+    const ports = document.getElementById("diag-dstports").value.split(",").map((s) => s.trim()).filter(Boolean);
     try {
-      const report = await Api.post("/api/simulate", {
-        src: document.getElementById("sim-src").value.trim(),
-        dst: document.getElementById("sim-dst").value.trim(),
-        proto: document.getElementById("sim-proto").value,
+      const report = await Api.post("/api/diagnose", {
+        src: document.getElementById("diag-src").value.trim(),
+        dst: document.getElementById("diag-dst").value.trim(),
+        proto: document.getElementById("diag-proto").value,
         dstPorts: ports,
       });
       renderReport(report);
     } catch (e) {
-      showBanner("Ошибка симуляции: " + e.message);
+      showBanner("Ошибка диагностики: " + e.message);
     }
   }
 
@@ -439,6 +472,17 @@ const Simulate = (() => {
         getOverlay: () => [],
         textHideZoom: theme.textHideZoom,
       });
+      minimap = Minimap.create(document.getElementById("diag-minimap"), {
+        getBounds: () => TopoScene.bounds(state.topology, state.layout),
+        getPoints: () => [
+          ...state.topology.devices.map((d) => NetMap.center(state.layout.devices, d.name, DEVICE_W, DEVICE_H)),
+          ...state.topology.networks.map((n) => NetMap.center(state.layout.networks, n.name, NET_W, NET_H)),
+        ].filter(Boolean),
+        getCam: () => state.camera,
+        setCam,
+        getViewport: () => { const r = wrapEl().getBoundingClientRect(); return { w: r.width, h: r.height }; },
+        getTheme: () => theme,
+      });
       render();
       setupCamera();
       wireInteractions();
@@ -446,15 +490,16 @@ const Simulate = (() => {
     } catch (e) {
       showBanner("Не удалось загрузить топологию: " + e.message);
     }
-    wireSplitter();
-    document.getElementById("sim-form").addEventListener("submit", run);
+    wirePanel();
+    wireFormPersistence();
+    document.getElementById("diag-form").addEventListener("submit", run);
   }
 
-  return { boot, renderReport, run, state, expandHighlight, expandFlow, flowMark, clampFormWidth };
+  return { boot, renderReport, run, state, expandHighlight, expandFlow, flowMark };
 })();
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", Simulate.boot);
+  document.addEventListener("DOMContentLoaded", Diagnose.boot);
 } else {
-  Simulate.boot();
+  Diagnose.boot();
 }

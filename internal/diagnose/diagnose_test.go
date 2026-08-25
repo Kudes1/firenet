@@ -1,4 +1,4 @@
-package simulate_test
+package diagnose_test
 
 import (
 	"encoding/json"
@@ -7,13 +7,13 @@ import (
 	"testing"
 
 	"github.com/kudes1/firenet/internal/compiler"
+	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/graph"
 	"github.com/kudes1/firenet/internal/rules"
-	"github.com/kudes1/firenet/internal/simulate"
 	"github.com/kudes1/firenet/internal/topology"
 )
 
-const simTopology = `
+const diagTopology = `
 devices:
   - {name: r1, kind: router}
   - {name: r2, kind: router}
@@ -24,14 +24,14 @@ networks:
   - {name: n-dmz, subnets: [dmz], attach: [{device: r2}]}
 `
 
-const simSubnets = `
+const diagSubnets = `
 subnets:
   - {name: office, cidr: 10.0.0.0/24}
   - {name: dmz, cidr: 10.0.1.0/24}
   - {name: isolated, cidr: 10.0.2.0/24}
 `
 
-const simRulesAllow = `
+const diagRulesAllow = `
 defaultAction: deny
 chainName: FIRENET-FWD
 chainPosition: top
@@ -39,7 +39,7 @@ rules:
   - {name: office-to-dmz, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: allow}
 `
 
-const simRulesDeny = `
+const diagRulesDeny = `
 defaultAction: allow
 chainName: FIRENET-FWD
 chainPosition: top
@@ -47,7 +47,7 @@ rules:
   - {name: block-dmz, src: [office], dst: [dmz], action: deny}
 `
 
-const simRulesReturnRule = `
+const diagRulesReturnRule = `
 defaultAction: deny
 chainName: MY-CHAIN
 chainPosition: top
@@ -55,7 +55,7 @@ rules:
   - {name: bypass-office-dmz, src: [office], dst: [dmz], action: return}
 `
 
-const simRulesDefaultReturn = `
+const diagRulesDefaultReturn = `
 defaultAction: return
 chainName: MY-CHAIN
 chainPosition: top
@@ -65,11 +65,11 @@ rules:
 
 func loadTopo(t *testing.T) (*topology.Topology, *graph.Graph) {
 	t.Helper()
-	topo, err := topology.Load(strings.NewReader(simTopology))
+	topo, err := topology.Load(strings.NewReader(diagTopology))
 	if err != nil {
 		t.Fatalf("load topology: %v", err)
 	}
-	subs, err := topology.LoadSubnets(strings.NewReader(simSubnets))
+	subs, err := topology.LoadSubnets(strings.NewReader(diagSubnets))
 	if err != nil {
 		t.Fatalf("load subnets: %v", err)
 	}
@@ -100,36 +100,36 @@ func compilePolicy(t *testing.T, topo *topology.Topology, g *graph.Graph, policy
 	return sets
 }
 
-func runSim(t *testing.T, policyYAML string, src, dst string, proto rules.Proto, dstPorts ...string) *simulate.Report {
+func runDiag(t *testing.T, policyYAML string, src, dst string, proto rules.Proto, dstPorts ...string) *diagnose.Report {
 	t.Helper()
 	topo, g := loadTopo(t)
 	sets := compilePolicy(t, topo, g, policyYAML)
-	flow := simulate.Flow{
+	flow := diagnose.Flow{
 		Src:      netip.MustParseAddr(src),
 		Dst:      netip.MustParseAddr(dst),
 		Proto:    proto,
 		DstPorts: dstPorts,
 	}
-	rep, err := simulate.Run(topo, sets, g, graph.DefaultLimits(), flow)
+	rep, err := diagnose.Run(topo, sets, g, graph.DefaultLimits(), flow)
 	if err != nil {
-		t.Fatalf("simulate.Run: %v", err)
+		t.Fatalf("diagnose.Run: %v", err)
 	}
 	return rep
 }
 
 func TestResolveIP_SubnetAndError(t *testing.T) {
 	topo, _ := loadTopo(t)
-	name, err := simulate.ResolveIP(topo, netip.MustParseAddr("10.0.0.5"))
+	name, err := diagnose.ResolveIP(topo, netip.MustParseAddr("10.0.0.5"))
 	if err != nil || name != "office" {
 		t.Fatalf("want office, got %q, %v", name, err)
 	}
-	if _, err := simulate.ResolveIP(topo, netip.MustParseAddr("192.168.99.99")); err == nil {
+	if _, err := diagnose.ResolveIP(topo, netip.MustParseAddr("192.168.99.99")); err == nil {
 		t.Fatal("unknown IP must fail")
 	}
 }
 
 func TestRun_AllowedPath(t *testing.T) {
-	rep := runSim(t, simRulesAllow, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
+	rep := runDiag(t, diagRulesAllow, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
 	if rep.SrcSubnet != "office" || rep.DstSubnet != "dmz" {
 		t.Fatalf("endpoint resolution wrong: %+v", rep)
 	}
@@ -151,7 +151,7 @@ func TestRun_AllowedPath(t *testing.T) {
 }
 
 func TestRun_DeniedPathOverridesDefault(t *testing.T) {
-	rep := runSim(t, simRulesDeny, "10.0.0.5", "10.0.1.7", "")
+	rep := runDiag(t, diagRulesDeny, "10.0.0.5", "10.0.1.7", "")
 	if len(rep.Paths) != 1 || rep.Paths[0].Verdict != rules.ActionDeny {
 		t.Fatalf("want denied path, got %+v", rep.Paths)
 	}
@@ -163,7 +163,7 @@ func TestRun_DeniedPathOverridesDefault(t *testing.T) {
 }
 
 func TestRun_UnspecifiedPortFallsToDefault(t *testing.T) {
-	rep := runSim(t, simRulesAllow, "10.0.0.5", "10.0.1.7", "")
+	rep := runDiag(t, diagRulesAllow, "10.0.0.5", "10.0.1.7", "")
 	if len(rep.Paths) != 1 || rep.Paths[0].Verdict != rules.ActionDeny {
 		t.Fatalf("unspecified ports must fall to default deny, got %+v", rep.Paths)
 	}
@@ -174,7 +174,7 @@ func TestRun_UnspecifiedPortFallsToDefault(t *testing.T) {
 }
 
 func TestRun_NoMatchingRuleFallsToDefault(t *testing.T) {
-	rep := runSim(t, simRulesAllow, "10.0.0.5", "10.0.1.7", rules.ProtoUDP)
+	rep := runDiag(t, diagRulesAllow, "10.0.0.5", "10.0.1.7", rules.ProtoUDP)
 	if len(rep.Paths) != 1 || rep.Paths[0].Verdict != rules.ActionDeny {
 		t.Fatalf("udp must fall to default deny, got %+v", rep.Paths)
 	}
@@ -185,7 +185,7 @@ func TestRun_NoMatchingRuleFallsToDefault(t *testing.T) {
 }
 
 func TestRun_ReturnRuleYieldsReturnVerdict(t *testing.T) {
-	rep := runSim(t, simRulesReturnRule, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
+	rep := runDiag(t, diagRulesReturnRule, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
 	if len(rep.Paths) != 1 {
 		t.Fatalf("want 1 path, got %d", len(rep.Paths))
 	}
@@ -204,7 +204,7 @@ func TestRun_ReturnRuleYieldsReturnVerdict(t *testing.T) {
 }
 
 func TestRun_DefaultReturnWhenNoMatch(t *testing.T) {
-	rep := runSim(t, simRulesDefaultReturn, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
+	rep := runDiag(t, diagRulesDefaultReturn, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
 	p := rep.Paths[0]
 	if p.Verdict != rules.ActionReturn {
 		t.Fatalf("want return path verdict, got %q (routers %+v)", p.Verdict, p.Routers)
@@ -220,14 +220,14 @@ func TestRun_DefaultReturnWhenNoMatch(t *testing.T) {
 }
 
 func TestRun_DenyOverridesReturnOnPath(t *testing.T) {
-	rep := runSim(t, simRulesDeny, "10.0.0.5", "10.0.1.7", "")
+	rep := runDiag(t, diagRulesDeny, "10.0.0.5", "10.0.1.7", "")
 	if rep.Paths[0].Verdict != rules.ActionDeny {
 		t.Fatalf("deny must override return on path verdict, got %+v", rep.Paths[0])
 	}
 }
 
 func TestRun_UnreachableIsEmptyNotError(t *testing.T) {
-	rep := runSim(t, simRulesAllow, "10.0.0.5", "10.0.2.7", "")
+	rep := runDiag(t, diagRulesAllow, "10.0.0.5", "10.0.2.7", "")
 	if len(rep.Paths) != 0 {
 		t.Fatalf("isolated subnet must yield zero paths, got %+v", rep.Paths)
 	}
@@ -238,10 +238,10 @@ func TestRun_UnreachableIsEmptyNotError(t *testing.T) {
 func TestRun_JSONNeverNullArrays(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		rep  *simulate.Report
+		rep  *diagnose.Report
 	}{
-		{"unreachable", runSim(t, simRulesAllow, "10.0.0.5", "10.0.2.7", "")},
-		{"same-subnet", runSim(t, simRulesAllow, "10.0.0.1", "10.0.0.200", "")},
+		{"unreachable", runDiag(t, diagRulesAllow, "10.0.0.5", "10.0.2.7", "")},
+		{"same-subnet", runDiag(t, diagRulesAllow, "10.0.0.1", "10.0.0.200", "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b, err := json.Marshal(tc.rep)
@@ -257,7 +257,7 @@ func TestRun_JSONNeverNullArrays(t *testing.T) {
 }
 
 func TestRun_SameSubnetIsL2(t *testing.T) {
-	rep := runSim(t, simRulesAllow, "10.0.0.1", "10.0.0.200", "")
+	rep := runDiag(t, diagRulesAllow, "10.0.0.1", "10.0.0.200", "")
 	if len(rep.Paths) != 1 {
 		t.Fatalf("same-subnet must yield one degenerate path, got %+v", rep.Paths)
 	}

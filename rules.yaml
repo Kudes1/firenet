@@ -1,7 +1,7 @@
 chains:
     - name: FIRENET-FWD
       defaultAction: return
-      chainPosition: top
+      chainPosition: bottom
       rules:
         - name: UNTRUSTED
           src:
@@ -11,7 +11,7 @@ chains:
           proto: any
           action: jump
           jumpTo: UNTRUSTED
-        - name: test
+        - name: main-to-market
           comment: AI-55432
           src:
             - main

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/kudes1/firenet/internal/graph"
 	"github.com/kudes1/firenet/internal/topology"
 )
 
@@ -18,6 +19,11 @@ func LoadProject(topologyYAML, subnetsYAML []byte) (*topology.Topology, error) {
 		return nil, err
 	}
 	if err := topo.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid project: %w", err)
+	}
+	// Filtered-link exports must name entities the side can reach without
+	// that link; otherwise the filter silently announces nothing.
+	if err := graph.ValidateFilterExports(topo); err != nil {
 		return nil, fmt.Errorf("invalid project: %w", err)
 	}
 	return topo, nil

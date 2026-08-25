@@ -14,6 +14,9 @@ document.addEventListener("alpine:init", () => {
     saving: false,
     draft: { index: -1, aExports: [], bExports: [] },
     combo: { side: "", search: "", cursor: 0 },
+    // Export candidates per side, served by /api/link-exports with the
+    // edited link excluded: only entities reachable from that device.
+    candidates: { a: [], b: [] },
     filters: { devices: "", mode: "", aExports: "", bExports: "" },
     searchOpen: false,
 
@@ -85,16 +88,23 @@ document.addEventListener("alpine:init", () => {
       return s ? s.cidr : "";
     },
 
-    // availableEntities lists networks then subnets as combo candidates for
-    // one side: already exported names are hidden and the search box, if
-    // active, filters by name or CIDR substring (case-insensitive).
+    // availableEntities lists the reachable candidates for one side:
+    // already exported names are hidden and the search box, if active,
+    // filters by name or CIDR substring (case-insensitive).
     availableEntities(side) {
       const q = this.combo.search.trim().toLowerCase();
       const taken = this.draft[side + "Exports"];
-      return [
-        ...this.networks.map((n) => ({ name: n.name })),
-        ...this.subnets.map((s) => ({ name: s.name, cidr: s.cidr || "" })),
-      ].filter((e) => !taken.includes(e.name) && (!q || e.name.toLowerCase().includes(q) || (e.cidr || "").toLowerCase().includes(q)));
+      return this.candidates[side].filter((e) => !taken.includes(e.name) && (!q || e.name.toLowerCase().includes(q) || (e.cidr || "").toLowerCase().includes(q)));
+    },
+
+    async loadCandidates(i) {
+      try {
+        const [a, b] = await Promise.all([Api.get(`/api/link-exports?link=${i}&side=a`), Api.get(`/api/link-exports?link=${i}&side=b`)]);
+        this.candidates = { a: a.entities || [], b: b.entities || [] };
+      } catch (e) {
+        this.candidates = { a: [], b: [] };
+        showBanner("Не удалось загрузить доступные сети: " + e.message);
+      }
     },
 
     openCombo(side) {
@@ -134,11 +144,12 @@ document.addEventListener("alpine:init", () => {
       this.draft[key] = this.draft[key].filter((n) => n !== name);
     },
 
-    openEdit(i) {
+    async openEdit(i) {
       const f = this.links[i].filter;
       this.draft = { index: i, aExports: f ? [...f.aExports] : [], bExports: f ? [...f.bExports] : [] };
       this.closeCombo();
       this.$refs.dialog.showModal();
+      await this.loadCandidates(i);
     },
 
     closeModal() {

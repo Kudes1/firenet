@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>firenet — симуляция</title>
+<title>firenet — диагностика</title>
 <script>
   try {
     var saved = localStorage.getItem("firenet-theme");
@@ -12,45 +12,59 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/style.css">
 <style>
-  #sim-canvas { inset: 0; width: 100%; height: 100%; }
-  #sim-fit { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 2; }
+  #diag-canvas { inset: 0; width: 100%; height: 100%; }
+  #diag-fit { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 2; }
 </style>
 </head>
-<body data-nav="simulate" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
+<body data-nav="diagnose" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
 
 <main>
-  <div class="sim-layout" id="sim-layout">
-    <section class="sim-form-panel">
-      <h1>Симуляция трафика</h1>
-      <form id="sim-form">
-        <label>Источник (IP)
-          <input id="sim-src" placeholder="10.0.0.5" autocomplete="off" spellcheck="false" required>
-        </label>
-        <label>Назначение (IP)
-          <input id="sim-dst" placeholder="10.0.1.7" autocomplete="off" spellcheck="false" required>
-        </label>
-        <label>Протокол
-          <select id="sim-proto">
-            <option value="">любой</option>
-            <option value="tcp">tcp</option>
-            <option value="udp">udp</option>
-            <option value="icmp">icmp</option>
-          </select>
-        </label>
-        <label>Порты назначения (через запятую)
-          <input id="sim-dstports" placeholder="443, 8080" autocomplete="off" spellcheck="false">
-        </label>
-        <button type="submit" class="primary">Симулировать</button>
-      </form>
-      <section id="sim-summary" hidden></section>
-      <section id="sim-paths"></section>
-    </section>
-    <div class="sim-splitter" id="sim-splitter" title="Перетащите, чтобы изменить ширину; двойной клик — сброс"></div>
-    <div class="canvas-wrap" id="sim-wrap">
-      <canvas id="sim-canvas"></canvas>
+  <div class="topology-layout">
+    <div class="canvas-wrap" id="diag-wrap">
+      <canvas id="diag-canvas"></canvas>
+      <div class="topo-toolbar">
+        <button id="diag-tool-path" class="tool" title="Диагностика пути" aria-label="Диагностика пути">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5" cy="6" r="2"/>
+            <circle cx="19" cy="18" r="2"/>
+            <path d="M7 6h6a4 4 0 0 1 4 4v2a4 4 0 0 0 4 4h-2"/>
+          </svg>
+        </button>
+      </div>
+      <div id="diag-panel" class="diag-panel">
+        <header id="diag-panel-header" class="diag-panel-header">
+          <strong>Диагностика пути</strong>
+          <button type="button" id="diag-panel-close" class="diag-panel-close" title="Закрыть" aria-label="Закрыть">&times;</button>
+        </header>
+        <div class="diag-panel-body">
+          <form id="diag-form">
+            <label>Источник (IP)
+              <input id="diag-src" placeholder="10.0.0.5" autocomplete="off" spellcheck="false" required>
+            </label>
+            <label>Назначение (IP)
+              <input id="diag-dst" placeholder="10.0.1.7" autocomplete="off" spellcheck="false" required>
+            </label>
+            <label>Протокол
+              <select id="diag-proto">
+                <option value="">любой</option>
+                <option value="tcp">tcp</option>
+                <option value="udp">udp</option>
+                <option value="icmp">icmp</option>
+              </select>
+            </label>
+            <label>Порты назначения (через запятую)
+              <input id="diag-dstports" placeholder="443, 8080" autocomplete="off" spellcheck="false">
+            </label>
+            <button type="submit" class="primary">Диагностировать</button>
+          </form>
+          <section id="diag-summary" hidden></section>
+          <section id="diag-paths"></section>
+        </div>
+      </div>
       <div id="net-info" class="net-info" hidden></div>
-      <button id="sim-fit" title="Вписать карту">Вписать</button>
-      <div id="sim-tooltip" class="sim-tooltip" hidden></div>
+      <button id="diag-fit" title="Вписать карту">Вписать</button>
+      <div id="diag-tooltip" class="diag-tooltip" hidden></div>
+      <canvas id="diag-minimap" class="diag-minimap" hidden></canvas>
     </div>
   </div>
 </main>
@@ -58,6 +72,7 @@
 <script src="/alpine.min.js" defer></script>
 <script src="/common.js"></script>
 <script src="/camera.js"></script>
+<script src="/minimap.js"></script>
 <script src="/camera_input.js"></script>
 <script src="/netmap.js"></script>
 <script src="/tween.js"></script>
@@ -66,6 +81,6 @@
 <script src="/canvas_view.js"></script>
 <script src="/topo_scene.js"></script>
 <script src="/net_info.js"></script>
-<script src="/simulate.js"></script>
+<script src="/diagnose.js"></script>
 </body>
 </html>

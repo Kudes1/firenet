@@ -1,4 +1,4 @@
-package simulate
+package diagnose
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ import (
 	"github.com/kudes1/firenet/internal/topology"
 )
 
-// Flow describes the simulated traffic: endpoints as IP addresses plus an
+// Flow describes the diagnosed traffic: endpoints as IP addresses plus an
 // optional protocol/port filter. Empty proto or empty port lists mean "any".
 type Flow struct {
 	Src, Dst netip.Addr
@@ -22,10 +22,10 @@ type Flow struct {
 	DstPorts []string
 }
 
-// StatelessNote accompanies every report: the simulation evaluates the first
-// packet of a new connection, so the conntrack ESTABLISHED,RELATED accept
-// present on every device is deliberately out of scope.
-const StatelessNote = "симуляция рассматривает первый пакет нового соединения; conntrack ESTABLISHED,RELATED не учитывается"
+// StatelessNote accompanies every report: the diagnostic run evaluates the
+// first packet of a new connection, so the conntrack ESTABLISHED,RELATED
+// accept present on every device is deliberately out of scope.
+const StatelessNote = "диагностика рассматривает первый пакет нового соединения; conntrack ESTABLISHED,RELATED не учитывается"
 
 type Report struct {
 	SrcSubnet string       `json:"srcSubnet"`

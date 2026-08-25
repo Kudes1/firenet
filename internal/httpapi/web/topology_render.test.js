@@ -78,6 +78,13 @@ function bootTopology(responses) {
     clientHeight: 800,
     getContext: () => ctx,
   });
+  const minimapCtx = makeCtx();
+  const minimapCanvas = Object.assign(makeEl("canvas"), {
+    clientWidth: 180,
+    clientHeight: 120,
+    getContext: () => minimapCtx,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 180, height: 120 }),
+  });
   const ids = {};
   const doc = {
     readyState: "loading",
@@ -85,7 +92,8 @@ function bootTopology(responses) {
     body: makeEl("body"),
     documentElement: { dataset: {} },
     // stable registry: production code resolves widgets by id repeatedly
-    getElementById: (id) => (id === "topo-canvas" ? canvas : (ids[id] ||= makeEl("div"))),
+    getElementById: (id) =>
+      id === "topo-canvas" ? canvas : id === "topo-minimap" ? minimapCanvas : (ids[id] ||= makeEl("div")),
     createElement: (tag) => makeEl(tag),
     addEventListener(t, fn) { (doc.listeners[t] ||= []).push(fn); },
     removeEventListener(t, fn) {
@@ -123,7 +131,7 @@ function bootTopology(responses) {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   for (const f of [
-    "common.js", "camera.js", "camera_input.js", "netmap.js", "tween.js",
+    "common.js", "camera.js", "minimap.js", "camera_input.js", "netmap.js", "tween.js",
     "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
     "net_info.js", "topology.js",
   ]) {
@@ -139,7 +147,7 @@ function bootTopology(responses) {
       rafQueue.splice(0).forEach((fn) => fn(clock));
     }
   };
-  return { canvas, ctx, doc, ids, get, sandbox, pump };
+  return { canvas, ctx, doc, ids, get, sandbox, pump, minimapCanvas, minimapCtx };
 }
 
 const texts = (get) => get("State.list.filter((i) => i.text).map((i) => i.text)");
@@ -449,6 +457,69 @@ test("connect tool shows a preview wire while connecting", async () => {
     page.ctx.calls.some((c) => c[0] === "setLineDash" && String(c[1][0]) === "6,4"),
     "dashed preview wire painted",
   );
+});
+
+test("connect tool links network-first: net click then device click attaches", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/topology": {
+      ...responses["/api/topology"],
+      networks: [{ name: "net1", subnets: ["a"], attach: [] }],
+    },
+  });
+  await tick();
+  fire(page.ids["tool-connect"], "click", {});
+  clickNode(page, "net1");
+  clickNode(page, "r2");
+  assert.ok(byId(page.get, "attach:net1|r2"), "attach created from the network-first sequence");
+});
+
+test("connect tool rejects network-to-network with an explicit banner", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/topology": {
+      ...responses["/api/topology"],
+      links: [],
+      networks: [
+        { name: "net1", subnets: ["a"], attach: [] },
+        { name: "net2", subnets: [], attach: [] },
+      ],
+    },
+  });
+  await tick();
+  // перехват баннеров: showBanner шлёт событие notify через window
+  page.sandbox.CustomEvent = class { constructor(type, opts) { this.detail = opts && opts.detail; } };
+  const banners = [];
+  page.sandbox.__banners = banners;
+  page.get("window.dispatchEvent = (e) => __banners.push(e.detail.message)");
+  fire(page.ids["tool-connect"], "click", {});
+  clickNode(page, "net1");
+  fire(page.canvas, "mousedown", { button: 0, clientX: 320, clientY: 330 }); // net2: второе облако (240..400, 300..360)
+  fire(page.doc, "mouseup", {});
+  assert.deepEqual(banners, ["Сети net1 и net2 не могут быть соединены напрямую"], "explicit error shown");
+  assert.equal(page.get("State.topology.links.length"), 0, "no link between networks");
+  // pending сброшен: новое движение мыши не рисует превью связи
+  const dashes = () => page.ctx.calls.filter((c) => c[0] === "setLineDash" && String(c[1][0]) === "6,4").length;
+  const before = dashes();
+  fire(page.canvas, "mousemove", { clientX: 500, clientY: 300 });
+  page.pump();
+  assert.equal(dashes(), before, "no dashed preview after the rejection");
+});
+
+test("connect tool previews from a network and cancels on repeated click", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.ids["tool-connect"], "click", {});
+  clickNode(page, "net1"); // pending = net1
+  fire(page.canvas, "mousemove", { clientX: 500, clientY: 300 });
+  page.pump();
+  const dashes = () => page.ctx.calls.filter((c) => c[0] === "setLineDash" && String(c[1][0]) === "6,4").length;
+  assert.ok(dashes() > 0, "dashed preview painted from the network");
+  const before = dashes();
+  clickNode(page, "net1"); // повторный клик отменяет pending
+  fire(page.canvas, "mousemove", { clientX: 520, clientY: 310 });
+  page.pump();
+  assert.equal(dashes(), before, "no new preview dash after cancel");
 });
 
 // контекстное меню: правый клик по канве в режиме select открывает меню
@@ -859,7 +930,7 @@ test("hover sets the cursor by target kind", async () => {
   assert.equal(page.canvas.style.cursor, "pointer", "pointer over a wire");
 });
 
-test("hovering a filtered wire shows a delayed exports tooltip", async () => {
+test("clicking a filtered wire pins a both-direction exports tooltip", async () => {
   const page = bootTopology(filteredResponses);
   await tick();
   page.pump();
@@ -869,13 +940,17 @@ test("hovering a filtered wire shows a delayed exports tooltip", async () => {
   })())`));
   const tip = page.ids["topo-tooltip"];
   fire(page.canvas, "mousemove", { clientX: mid.x, clientY: mid.y });
-  assert.ok(tip.hidden, "tooltip waits out the delay");
-  await new Promise((r) => setTimeout(r, 320));
-  assert.ok(!tip.hidden, "tooltip appears after the delay");
-  assert.match(String(tip.textContent), /office/, "tooltip names the a-side exports");
-  assert.match(String(tip.textContent), /→/, "tooltip separates the sides");
+  assert.ok(tip.hidden, "hover alone keeps the tooltip hidden");
+  fire(page.canvas, "click", { clientX: mid.x, clientY: mid.y });
+  assert.ok(!tip.hidden, "click pins the tooltip");
+  const html = tip.innerHTML;
+  assert.match(html, /<b>r1<\/b> → <b>r2<\/b>/, "a-side route header");
+  assert.match(html, /<b>r2<\/b> → <b>r1<\/b>/, "b-side route header");
+  assert.match(html, /owner-badge">office</, "a-side exports as badges");
+  assert.match(html, /owner-badge">dmz</, "b-side exports as badges");
+  assert.ok(!/<div class="hint">ничего</.test(html), "both sides have exports");
   fire(page.canvas, "mouseleave", {});
-  assert.ok(tip.hidden, "leaving the canvas hides the tooltip");
+  assert.ok(tip.hidden, "leaving the canvas unpins the tooltip");
 });
 
 // --- кнопка «вписать карту» и pop появления узлов ---
@@ -889,6 +964,40 @@ test("fit button flies the camera to the scene bounds", async () => {
   ));
   fire(page.ids["topo-fit"], "click", {});
   page.pump(); // камера долетает твином
+  assert.deepEqual(JSON.parse(page.get("JSON.stringify(State.camera)")), expected);
+});
+
+// --- миникарта ---
+
+test("minimap stays hidden when the scene fits the viewport", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  page.pump();
+  assert.equal(page.minimapCanvas.hidden, true);
+});
+
+test("minimap appears when the scene overflows the viewport", async () => {
+  const page = bootTopology({ ...responses, "/api/layout": { camera: { x: 0, y: 0, z: 5 } } });
+  await tick();
+  page.pump();
+  assert.equal(page.minimapCanvas.hidden, false);
+});
+
+test("clicking the minimap recenters the page camera on the clicked point, keeping zoom", async () => {
+  const page = bootTopology({ ...responses, "/api/layout": { camera: { x: 0, y: 0, z: 5 } } });
+  await tick();
+  page.pump();
+  const expected = JSON.parse(page.get(`
+    JSON.stringify((() => {
+      const b = TopoScene.bounds(State.topology, State.layout);
+      const map = Minimap.layout(b, 180, 120, 10);
+      const w = Camera.screenToWorld(map, 90, 60);
+      const r = document.getElementById("topo-canvas").getBoundingClientRect();
+      return { x: r.width / 2 - w.x * State.camera.z, y: r.height / 2 - w.y * State.camera.z, z: State.camera.z };
+    })())
+  `));
+  fire(page.minimapCanvas, "mousedown", { button: 0, clientX: 90, clientY: 60 });
+  page.pump();
   assert.deepEqual(JSON.parse(page.get("JSON.stringify(State.camera)")), expected);
 });
 

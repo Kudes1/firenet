@@ -282,9 +282,9 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
     radial-gradient(circle, var(--border) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--bg);
 }
-#topo-canvas, #sim-canvas { display: block; width: 100%; height: 100%; }
+#topo-canvas, #diag-canvas { display: block; width: 100%; height: 100%; }
 /* обе карты — интерактивный холст: жесты касания ведут камеру, а не скролл */
-#topo-canvas, #sim-canvas { touch-action: none; }
+#topo-canvas, #diag-canvas { touch-action: none; }
 
 /* floating toolbar (tldraw-style) */
 .topo-toolbar {
@@ -326,6 +326,24 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .tool.danger:hover { filter: brightness(1.1); }
 .tool.danger:disabled { opacity: 0.45; cursor: default; }
 .tool.danger:disabled:hover { filter: none; }
+
+/* overview of the whole scene, shown only once it no longer fits the viewport */
+.topo-minimap,
+.diag-minimap {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 10;
+  width: 180px;
+  height: 120px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.topo-minimap[hidden],
+.diag-minimap[hidden] { display: none; }
 
 /* inline node-naming popover */
 .node-popover {
@@ -407,9 +425,9 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 }
 .ctx-sub:hover .submenu, .ctx-sub:focus-within .submenu { display: flex; }
 
-/* canvas hover tooltip (filtered wire exports, simulation deny point) */
+/* canvas tooltip (filtered wire exports, diagnostic deny point) */
 .topo-tooltip,
-.sim-tooltip {
+.diag-tooltip {
   position: absolute;
   z-index: 3;
   pointer-events: none;
@@ -422,7 +440,13 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   font-size: 0.82rem;
 }
 .topo-tooltip[hidden],
-.sim-tooltip[hidden] { display: none; }
+.diag-tooltip[hidden] { display: none; }
+
+/* structured link-filter tooltip: one route block per direction */
+.topo-tooltip .tip-route { margin-top: 5px; white-space: nowrap; }
+.topo-tooltip .tip-route:first-child { margin-top: 0; }
+.topo-tooltip .owner-badge { margin: 3px var(--space-1) 0 0; }
+.topo-tooltip .hint { padding-top: 2px; }
 
 /* поиск по топологии: совпавшие узлы светятся, остальное слегка приглушено */
 #topo-search {
@@ -868,32 +892,65 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .member-suggestion.active, .member-suggestion:hover { background: var(--panel-bg-hover); }
 .member-suggestion.literal-add { color: var(--accent); }
 
-/* — симуляция трафика — */
-.sim-layout { display: grid; grid-template-columns: clamp(320px, var(--sim-form-w, 420px), calc(100% - 336px)) auto 1fr; flex: 1; min-height: 0; }
-.sim-splitter { width: 1rem; cursor: col-resize; position: relative; z-index: 1; }
-.sim-splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0.4375rem; right: 0.4375rem; background: transparent; }
-.sim-splitter:hover::after, .sim-splitter.dragging::after { background: var(--accent); opacity: 0.5; }
-.sim-form-panel form { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
-.sim-path { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-2); margin-bottom: var(--space-2); }
-.sim-path header { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-1); }
-.sim-chain { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
-.sim-chip { border: 1px solid var(--border); border-radius: 999px; padding: 0 var(--space-2); font-size: 0.85em; }
-.sim-chip-router { background: color-mix(in srgb, var(--accent) 15%, transparent); }
-.sim-arrow { opacity: 0.5; }
+/* — диагностика пути: плавающее окно параметров и отчёта — */
+.diag-panel {
+  position: absolute;
+  z-index: 10;
+  left: var(--space-3);
+  top: var(--space-3);
+  width: 380px;
+  max-width: calc(100% - 2 * var(--space-3));
+  max-height: calc(100% - 2 * var(--space-3));
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+.diag-panel[hidden] { display: none; }
+.diag-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  user-select: none;
+}
+.diag-panel-close {
+  border: none;
+  background: none;
+  color: var(--fg);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 var(--space-1);
+}
+.diag-panel-close:hover { color: var(--accent); }
+.diag-panel-body { padding: var(--space-3); overflow-y: auto; }
+.diag-panel-body form { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
+.diag-path { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-2); margin-bottom: var(--space-2); }
+.diag-path header { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-1); }
+.diag-chain { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+.diag-chip { border: 1px solid var(--border); border-radius: 999px; padding: 0 var(--space-2); font-size: 0.85em; }
+.diag-chip-router { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.diag-arrow { opacity: 0.5; }
 .badge { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 0.8em; }
 .badge-ok { background: rgba(16, 185, 129, 0.18); color: #10b981; }
 .badge-drop { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
 .badge-return { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
 .badge-default { background: rgba(148, 163, 184, 0.2); color: inherit; }
-.sim-unreachable { color: #ef4444; }
-.sim-note { opacity: 0.75; font-size: 0.85em; }
-.sim-path details.sim-verdict { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-1) var(--space-2); margin: var(--space-1) 0; font-size: 0.9em; }
-.sim-path details.sim-verdict summary { list-style: none; cursor: pointer; display: flex; gap: var(--space-2); align-items: center; padding: 2px var(--space-1); border-radius: 6px; }
-.sim-path details.sim-verdict summary::-webkit-details-marker { display: none; }
-.sim-path details.sim-verdict summary:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.sim-chevron { margin-left: auto; display: inline-flex; width: 1em; height: 1em; opacity: 0.6; transition: transform 0.15s ease; }
-.sim-chevron svg { width: 100%; height: 100%; }
-.sim-path details[open] .sim-chevron { transform: rotate(180deg); }
-.sim-steps { margin: var(--space-1) 0 0; padding-left: var(--space-4); opacity: 0.85; }
-.sim-steps li { margin-top: var(--space-1); }
-.sim-steps li::marker { color: var(--accent); font-size: 0.85em; }
+.diag-unreachable { color: #ef4444; }
+.diag-note { opacity: 0.75; font-size: 0.85em; }
+.diag-path details.diag-verdict { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-1) var(--space-2); margin: var(--space-1) 0; font-size: 0.9em; }
+.diag-path details.diag-verdict summary { list-style: none; cursor: pointer; display: flex; gap: var(--space-2); align-items: center; padding: 2px var(--space-1); border-radius: 6px; }
+.diag-path details.diag-verdict summary::-webkit-details-marker { display: none; }
+.diag-path details.diag-verdict summary:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.diag-chevron { margin-left: auto; display: inline-flex; width: 1em; height: 1em; opacity: 0.6; transition: transform 0.15s ease; }
+.diag-chevron svg { width: 100%; height: 100%; }
+.diag-path details[open] .diag-chevron { transform: rotate(180deg); }
+.diag-steps { margin: var(--space-1) 0 0; padding-left: var(--space-4); opacity: 0.85; }
+.diag-steps li { margin-top: var(--space-1); }
+.diag-steps li::marker { color: var(--accent); font-size: 0.85em; }

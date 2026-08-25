@@ -14,8 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/kudes1/firenet/internal/app"
+	"github.com/kudes1/firenet/internal/diagnose"
+	"github.com/kudes1/firenet/internal/graph"
 	"github.com/kudes1/firenet/internal/rules"
-	"github.com/kudes1/firenet/internal/simulate"
 	"github.com/kudes1/firenet/internal/topology"
 )
 
@@ -77,6 +78,47 @@ func (h *handlers) putTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, doc)
+}
+
+// getLinkExports serves the reachable export candidates for one side of a
+// link: networks and subnets the side's device can reach when that very
+// link is excluded from the graph (GET /api/link-exports?link=N&side=a|b).
+func (h *handlers) getLinkExports(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	idx, err := strconv.Atoi(q.Get("link"))
+	side := q.Get("side")
+	if err != nil || idx < 0 || (side != "a" && side != "b") {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("invalid link index or side"))
+		return
+	}
+	topo, err := h.loadTopology()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if idx >= len(topo.Links) {
+		writeError(w, http.StatusNotFound, fmt.Errorf("no link %d", idx))
+		return
+	}
+	l := topo.Links[idx]
+	dev := l.A.Device
+	if side == "b" {
+		dev = l.B.Device
+	}
+	names, err := graph.ReachableEntities(topo, dev, idx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]EntityDoc, 0, len(names))
+	for _, n := range names {
+		cidr := ""
+		if s, ok := topo.Subnets[n]; ok {
+			cidr = s.CIDR.String()
+		}
+		out = append(out, EntityDoc{Name: n, CIDR: cidr})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entities": out})
 }
 
 func (h *handlers) getSubnets(w http.ResponseWriter, r *http.Request) {
@@ -294,7 +336,7 @@ func (h *handlers) compile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, devices)
 }
 
-type simulateRequest struct {
+type diagnoseRequest struct {
 	Src      string   `json:"src"`
 	Dst      string   `json:"dst"`
 	Proto    string   `json:"proto"`
@@ -302,7 +344,7 @@ type simulateRequest struct {
 	DstPorts []string `json:"dstPorts"`
 }
 
-var simulateProtos = map[string]bool{"": true, "tcp": true, "udp": true, "icmp": true}
+var diagnoseProtos = map[string]bool{"": true, "tcp": true, "udp": true, "icmp": true}
 
 // validatePortSpec accepts a single port number or a "lo:hi" range,
 // mirroring the compiled-rule port syntax MatchFlow compares against.
@@ -331,13 +373,13 @@ func validatePortList(ports []string) error {
 	return nil
 }
 
-func (h *handlers) simulate(w http.ResponseWriter, r *http.Request) {
-	var req simulateRequest
+func (h *handlers) diagnose(w http.ResponseWriter, r *http.Request) {
+	var req diagnoseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid body: %w", err))
 		return
 	}
-	if !simulateProtos[req.Proto] {
+	if !diagnoseProtos[req.Proto] {
 		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid proto %q", req.Proto))
 		return
 	}
@@ -376,11 +418,11 @@ func (h *handlers) simulate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rep, err := app.Simulate(r.Context(), h.log, app.SimulateOptions{
+	rep, err := app.Diagnose(r.Context(), h.log, app.DiagnoseOptions{
 		TopologyYAML: topoRaw,
 		SubnetsYAML:  subnetsRaw,
 		RulesYAML:    rulesRaw,
-		Flow: simulate.Flow{
+		Flow: diagnose.Flow{
 			Src:      src,
 			Dst:      dst,
 			Proto:    rules.Proto(req.Proto),

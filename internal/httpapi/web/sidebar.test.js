@@ -99,7 +99,7 @@ test("buildNav renders an aside.sidebar with brand, groups and nav links", () =>
   const groupLinks = (g) => links(g).map(label);
   assert.deepEqual(groupLinks(groups[0]), ["Схема", "Сети", "Объединения", "Связи"]);
   assert.deepEqual(groupLinks(groups[1]), ["Подсети", "Наборы", "Правила", "Компиляция"]);
-  assert.equal(label(navLinks[navLinks.length - 1]), "Симуляция", "standalone link after the groups");
+  assert.equal(label(navLinks[navLinks.length - 1]), "Диагностика", "standalone link after the groups");
 
   assert.equal(
     label(navLinks.find((a) => String(a.className).split(" ").includes("active"))),

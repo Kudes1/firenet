@@ -44,6 +44,21 @@ function bootPage(failPut = false) {
       if (path_ === "/api/subnets") {
         return { ok: true, status: 200, json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }] }) };
       }
+      if (path_?.startsWith("/api/link-exports")) {
+        const q = new URLSearchParams(path_.split("?")[1]);
+        const i = Number(q.get("link"));
+        if (failPut && i === 0) return { ok: false, status: 500, json: async () => ({ error: "x" }) };
+        // Reachability with the edited link excluded from the fixture
+        // topology: link m-o removed leaves plain m-d, and vice versa.
+        const side = q.get("side");
+        const na = [{ name: "NA" }, { name: "a", cidr: "10.0.0.0/24" }];
+        const entities = i === 0
+          ? side === "a" ? na : [{ name: "NB" }, { name: "b" }]
+          : side === "a"
+            ? [...na, { name: "NB" }, { name: "b" }]
+            : [{ name: "NC" }, { name: "c" }];
+        return { ok: true, status: 200, json: async () => ({ entities }) };
+      }
       return { ok: false, status: 404, json: async () => ({}) };
     },
     Alpine: { data: (name, factory) => (factories[name] = factory) },
@@ -126,11 +141,13 @@ test("filteredLinks matches exports by name and semantically by IP/CIDR", async 
   page.filters.aExports = "";
 });
 
-test("openEdit copies current exports into the draft", async () => {
+test("openEdit copies current exports into the draft and fetches candidates", async () => {
   const { page, calls } = await bootLoadedPage();
-  page.openEdit(1);
+  await page.openEdit(1);
   assert.deepEqual(plain(page.draft), { index: 1, aExports: ["NA"], bExports: ["NC"] });
-  page.openEdit(0);
+  assert.ok(calls.some((c) => c.path === "/api/link-exports?link=1&side=a"), "candidates fetched for side a");
+  assert.ok(calls.some((c) => c.path === "/api/link-exports?link=1&side=b"), "candidates fetched for side b");
+  await page.openEdit(0);
   assert.deepEqual(plain(page.draft), { index: 0, aExports: [], bExports: [] });
 });
 
@@ -183,26 +200,24 @@ test("makePlain removes the filter key entirely", async () => {
   assert.deepEqual(put.body.devices.length, 3);
 });
 
-test("availableEntities lists networks then subnets minus already exported on that side", async () => {
+test("availableEntities lists only reachable candidates minus already exported on that side", async () => {
   const { page } = await bootLoadedPage();
-  page.openEdit(1); // aExports: ["NA"], bExports: ["NC"]
+  await page.openEdit(1); // aExports: ["NA"], bExports: ["NC"]; link excluded -> m sees NA+NB, o sees NC
   assert.deepEqual(plain(page.availableEntities("a")), [
-    { name: "NC" },
     { name: "a", cidr: "10.0.0.0/24" },
+    { name: "NB" },
+    { name: "b" },
   ]);
-  assert.deepEqual(plain(page.availableEntities("b")), [
-    { name: "NA" },
-    { name: "a", cidr: "10.0.0.0/24" },
-  ]);
+  assert.deepEqual(plain(page.availableEntities("b")), [{ name: "c" }]);
 });
 
 test("availableEntities filters candidates by search over name and cidr", async () => {
   const { page } = await bootLoadedPage();
-  page.openEdit(0);
+  await page.openEdit(0);
   page.combo.search = "10.0";
   assert.deepEqual(plain(page.availableEntities("a")), [{ name: "a", cidr: "10.0.0.0/24" }]);
-  page.combo.search = "nc";
-  assert.deepEqual(plain(page.availableEntities("a")), [{ name: "NC" }]);
+  page.combo.search = "na";
+  assert.deepEqual(plain(page.availableEntities("a")), [{ name: "NA" }]);
   page.combo.search = "zzz";
   assert.deepEqual(plain(page.availableEntities("a")), []);
 });
@@ -228,14 +243,21 @@ test("removeExport deletes from the given side", async () => {
 
 test("moveCursor and pickEntity navigate the candidate list", async () => {
   const { page } = await bootLoadedPage();
-  page.openEdit(0);
+  await page.openEdit(0); // side a has 2 reachable candidates
   page.combo.side = "a";
   page.moveCursor(5);
-  assert.equal(page.combo.cursor, 2, "cursor clamps to last candidate");
+  assert.equal(page.combo.cursor, 1, "cursor clamps to last candidate");
   page.moveCursor(-99);
   assert.equal(page.combo.cursor, 0);
   page.pickEntity();
   assert.deepEqual(plain(page.draft.aExports), ["NA"], "picks the entity under the cursor");
+});
+
+test("candidate fetch failure shows a banner and empties the combos", async () => {
+  const { page, banners } = await bootLoadedPage(true);
+  await page.openEdit(0);
+  assert.deepEqual(plain(page.availableEntities("a")), []);
+  assert.ok(banners.some((b) => b.message.includes("доступные сети")), "error banner shown");
 });
 
 test("closeOther only closes its own combo", async () => {
@@ -251,12 +273,12 @@ test("closeOther only closes its own combo", async () => {
 
 test("openCombo keeps search when the same side reopens", async () => {
   const { page } = await bootLoadedPage();
-  page.openEdit(0);
+  await page.openEdit(0);
   page.openCombo("a");
-  page.combo.search = "n";
+  page.combo.search = "a";
   page.moveCursor(1);
   page.openCombo("a"); // refocus/click on the already-open input
-  assert.equal(page.combo.search, "n", "typed query survives refocus");
+  assert.equal(page.combo.search, "a", "typed query survives refocus");
   assert.equal(page.combo.cursor, 1, "cursor survives refocus");
   page.openCombo("b"); // switching sides resets
   assert.deepEqual(plain(page.combo), { side: "b", search: "", cursor: 0 });

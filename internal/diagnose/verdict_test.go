@@ -1,4 +1,4 @@
-package simulate
+package diagnose
 
 import (
 	"net/netip"

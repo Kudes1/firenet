@@ -22,12 +22,13 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /api/topology", h.getTopology)
 	mux.HandleFunc("PUT /api/topology", h.putTopology)
 	mux.HandleFunc("GET /api/subnets", h.getSubnets)
+	mux.HandleFunc("GET /api/link-exports", h.getLinkExports)
 	mux.HandleFunc("PUT /api/subnets", h.putSubnets)
 	mux.HandleFunc("GET /api/rules", h.getRules)
 	mux.HandleFunc("PUT /api/rules", h.putRules)
 	mux.HandleFunc("POST /api/validate", h.validate)
 	mux.HandleFunc("POST /api/compile", h.compile)
-	mux.HandleFunc("POST /api/simulate", h.simulate)
+	mux.HandleFunc("POST /api/diagnose", h.diagnose)
 	mux.HandleFunc("GET /api/layout", h.getLayout)
 	mux.HandleFunc("PUT /api/layout", h.putLayout)
 
@@ -45,7 +46,7 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /ui/links", servePage("links.html"))
 	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
 	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
-	mux.HandleFunc("GET /ui/simulate", servePage("simulate.html"))
+	mux.HandleFunc("GET /ui/diagnose", servePage("diagnose.html"))
 
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {

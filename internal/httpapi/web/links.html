@@ -88,9 +88,9 @@
             </div>
             <div class="member-add">
               <div class="member-combo" @click.outside="closeOther(side)">
-                <input x-model.trim="combo.search"
-                       placeholder="сети и подсети — начните вводить для поиска"
-                       title="Список всех сетей и подсетей; ввод фильтрует его по имени или CIDR"
+                 <input x-model.trim="combo.search"
+                        placeholder="сети и подсети — начните вводить для поиска"
+                        title="Только сети и подсети, достижимые с этого устройства без текущей связи; ввод фильтрует по имени или CIDR"
                        @focus="openCombo(side)"
                        @click="openCombo(side)"
                        @input="openCombo(side)"
