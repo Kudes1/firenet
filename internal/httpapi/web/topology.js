@@ -7,24 +7,24 @@ const State = {
   camera: Camera.create(),
   tool: "select",
   selection: new Set(), // device/network/link objects
+  list: [], // display list канвы (TopoScene.buildScene)
 };
 
-// Topology renders devices/links/networks as an SVG canvas the user builds
+// Topology renders devices/links/networks on a canvas the user builds
 // the network on directly. A network is one L2 segment: click a device,
 // then a network node, to attach the segment to that device. Subnet
 // membership of networks is edited on /ui/subnets and /ui/networks.
 const Topology = (() => {
-  const { el, DEVICE_W, DEVICE_H, NET_W, NET_H } = NetMap;
+  const { DEVICE_W, DEVICE_H, NET_W, NET_H } = NetMap;
 
+  let theme = null; // CanvasTheme страницы
+  let view = null; // CanvasView поверх #topo-canvas
   let pending = null; // {device} awaiting a network to attach to
   let saveLayoutTimer = null;
-  let viewportG = null;
-  let previewWire = null;
+  let previewWire = null; // item оверлея: связь в процессе connect
+  let marqueeRect = null; // рамка выделения в мировых координатах
   let popoverCreate = null; // callback awaiting a name from the popover
   let popoverWorld = null; // world point the open popover is anchored to
-  let ctxPending = null; // {items, at}: node menu awaiting a clean right-release
-  let camControls = null; // CameraControls handle (isRightDown)
-
   // поиск по канвасу: подсветка совпавших узлов, приглушение остальных,
   // камера центрируется на активном совпадении
   let searchQ = "";
@@ -42,7 +42,7 @@ const Topology = (() => {
   const toWorld = (p) => Camera.screenToWorld(State.camera, p.x, p.y);
 
   function applyCamera() {
-    if (viewportG) viewportG.setAttribute("transform", Camera.transform(State.camera));
+    view.invalidate();
     movePopover();
   }
 
@@ -75,128 +75,15 @@ const Topology = (() => {
   // setupCamera wires wheel zoom (anchored at the cursor) and pan by
   // middle/right-button drag via the shared CameraControls; both persist
   // through the debounced layout save. Left button stays free for selection
-  // and node dragging.
+  // and node dragging (setupSelection).
   function setupCamera() {
-    camControls = CameraControls.wire(canvas(), {
+    CameraControls.wire(canvas(), {
       getCam: () => State.camera,
       setCam: (c) => { State.camera = c; applyCamera(); },
       buttons: [1, 2],
       onChange: scheduleLayoutSave,
-      onDragEnd: (moved, button) => {
-        if (button === 2 && !moved && ctxPending) showContextMenu(ctxPending.at, ctxPending.items);
-        ctxPending = null;
-      },
     });
   }
-
-  // --- context menu ---
-
-  function hideContextMenu() {
-    const menu = document.getElementById("topo-context-menu");
-    if (menu) menu.hidden = true;
-  }
-
-  // Элемент меню — [label, action, cls?] либо {label, children} для подменю.
-  // action === null рендерит неактивный пункт.
-  function showContextMenu(at, items) {
-    const menu = document.getElementById("topo-context-menu");
-    menu.innerHTML = "";
-    // mkItem: action === null рендерит неактивный пункт, если не передан active
-    const mkItem = (label, action, cls, active = !!action) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = label;
-      if (action) {
-        if (cls) btn.setAttribute("class", cls);
-        btn.onclick = (e) => {
-          e.stopPropagation();
-          hideContextMenu();
-          action();
-        };
-      }
-      if (!active) btn.disabled = true;
-      return btn;
-    };
-    const fill = (parent, entries) => {
-      entries.forEach((it) => {
-        if (it.children) {
-          const wrap = document.createElement("div");
-          wrap.setAttribute("class", "ctx-sub");
-          const sub = document.createElement("div");
-          sub.setAttribute("class", "submenu");
-          wrap.append(mkItem(it.label, null, null, true), sub);
-          fill(sub, it.children);
-          parent.append(wrap);
-        } else {
-          const [label, action, cls] = it;
-          parent.append(mkItem(label, action, cls));
-        }
-      });
-    };
-    fill(menu, items);
-    menu.hidden = false;
-    menu.style.left = at.x + "px";
-    menu.style.top = at.y + "px";
-  }
-
-  // contextDelete wires right-click on a node element to a menu with the
-  // delete action plus union assignment items. The menu opens on a clean
-  // right-click; a right-drag (camera pan) suppresses it. Platforms differ
-  // in when contextmenu fires: Linux at right-press (button still down,
-  // defer), Windows/macOS after release (open immediately).
-  function contextDelete(elem, obj, label, kind) {
-    elem.addEventListener("contextmenu", (e) => {
-      if (State.tool !== "select") return;
-      e.preventDefault();
-      e.stopPropagation();
-      const key = kind ? memberKey(kind) : null;
-      const items = [];
-      if (key && unionIndex(obj.name, key) >= 0) {
-        items.push(["Убрать из объединения", () => setUnion(obj.name, key, -1)]);
-      }
-      if (key) {
-        const candidates = (State.topology.unions || [])
-          .map((s, i) => [s, i])
-          .filter(([s]) => !(s[key] || []).includes(obj.name))
-          .map(([s, i]) => ["В объединение «" + s.name + "»", () => setUnion(obj.name, key, i)]);
-        items.push({
-          label: "Добавить в объединение",
-          children: candidates.length ? candidates : [["(нет доступных объединений)", null]],
-        });
-      }
-      items.push(["Удалить " + label, () => {
-        State.selection.clear();
-        State.selection.add(obj);
-        deleteSelection();
-        scheduleLayoutSave();
-      }, "danger"]);
-      const at = screenPoint(e);
-      if (camControls && camControls.isRightDown()) ctxPending = { items, at };
-      else showContextMenu(at, items);
-    });
-  }
-
-  const memberKey = (kind) => (kind === "device" ? "devices" : "networks");
-
-  function unionIndex(name, key) {
-    return (State.topology.unions || []).findIndex((s) => (s[key] || []).includes(name));
-  }
-
-  // setUnion перемещает объект в объединение idx (или из всех объединений при idx < 0).
-  function setUnion(name, key, idx) {
-    State.topology.unions.forEach((s) => { s[key] = (s[key] || []).filter((n) => n !== name); });
-    if (idx >= 0) {
-      const s = State.topology.unions[idx];
-      s[key] = [...(s[key] || []), name];
-    }
-    render();
-  }
-
-  // dropMember вычищает имя удалённого объекта из членства объединений.
-  function dropMember(name, key) {
-    (State.topology.unions || []).forEach((s) => { s[key] = (s[key] || []).filter((n) => n !== name); });
-  }
-
 
   const clearSelection = () => {
     State.selection.clear();
@@ -212,18 +99,10 @@ const Topology = (() => {
     render();
   }
 
-  // marqueeSelect selects every node whose bbox intersects the screen rect.
-  function marqueeSelect(a, b, extend) {
-    const x1 = Math.min(a.x, b.x), x2 = Math.max(a.x, b.x);
-    const y1 = Math.min(a.y, b.y), y2 = Math.max(a.y, b.y);
-    const hit = (pos, w, h) => pos.x < x2 && pos.x + w > x1 && pos.y < y2 && pos.y + h > y1;
+  // marqueeSelect выбирает узлы, чьи bbox пересекают мировой прямоугольник.
+  function marqueeSelect(rect, extend) {
     if (!extend) State.selection.clear();
-    State.topology.devices.forEach((d) => {
-      if (hit(State.layout.devices[d.name], DEVICE_W, DEVICE_H)) State.selection.add(d);
-    });
-    State.topology.networks.forEach((n) => {
-      if (hit(State.layout.networks[n.name], NET_W, NET_H)) State.selection.add(n);
-    });
+    HitTest.pickNodes(State.list, rect).forEach((it) => State.selection.add(it.ref));
     render();
   }
 
@@ -254,37 +133,104 @@ const Topology = (() => {
     clearSelection();
   }
 
-  // setupSelection wires background marquee drag and Del deletion.
+  // dropMember вычищает имя удалённого объекта из членства объединений.
+  function dropMember(name, key) {
+    (State.topology.unions || []).forEach((s) => { s[key] = (s[key] || []).filter((n) => n !== name); });
+  }
+
+  // --- выбор, рамка и перетаскивание: единый mousedown на канвасе ---
+
   let marqueeEnded = false; // swallows the click a browser fires after a drag
+
+  // startMarquee тянет рамку в мировых координатах; отрисовка — оверлеем
+  // канвы. Рамка без движения мышью выделением не считается.
+  function startMarquee(e) {
+    marqueeEnded = false;
+    let start = null;
+    function onMove(ev) {
+      const p = toWorld(screenPoint(ev));
+      if (!start) start = toWorld(screenPoint(e));
+      marqueeRect = {
+        x: Math.min(start.x, p.x),
+        y: Math.min(start.y, p.y),
+        w: Math.abs(p.x - start.x),
+        h: Math.abs(p.y - start.y),
+      };
+      view.invalidate();
+    }
+    function onUp(ev) {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      if (!start) return; // клик без движения — не рамка
+      const rect = marqueeRect;
+      marqueeRect = null;
+      marqueeEnded = true;
+      marqueeSelect(rect, ev.shiftKey);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  // startNodeDrag переносит всю selection (или один узел) группой;
+  // порог 3px отличает перетаскивание от клика.
+  function startNodeDrag(obj, e) {
+    const start = screenPoint(e);
+    const group = [];
+    const addObj = (o) => {
+      if (State.topology.devices.includes(o)) {
+        const pos = State.layout.devices[o.name];
+        if (pos) group.push({ map: State.layout.devices, name: o.name, pos: { ...pos } });
+      } else if (State.topology.networks.includes(o)) {
+        const pos = State.layout.networks[o.name];
+        if (pos) group.push({ map: State.layout.networks, name: o.name, pos: { ...pos } });
+      }
+    };
+    if (State.selection.has(obj)) State.selection.forEach(addObj);
+    else addObj(obj);
+    let moved = false;
+
+    function onMove(ev) {
+      const p = screenPoint(ev);
+      const w = toWorld(p);
+      const o = toWorld(start);
+      const dx = w.x - o.x;
+      const dy = w.y - o.y;
+      if (Math.abs(p.x - start.x) > 3 || Math.abs(p.y - start.y) > 3) { moved = true; NetInfo.hide(); }
+      group.forEach((g) => { g.map[g.name] = { x: g.pos.x + dx, y: g.pos.y + dy }; });
+      render();
+    }
+    function onUp(ev) {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      if (moved) scheduleLayoutSave();
+      else onPlainClick(obj, ev);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  // onPlainClick: клик по узлу без движения — connect/select/NetInfo.
+  function onPlainClick(obj, ev) {
+    const isDev = State.topology.devices.includes(obj);
+    if (State.tool === "connect") isDev ? onDeviceConnect(obj.name) : onNetworkClick(obj.name);
+    else if (State.tool === "select") {
+      selectNode(obj, ev.shiftKey);
+      isDev ? NetInfo.hide() : showNetInfo(obj);
+    }
+  }
+
+  // setupSelection: левая кнопка выбирает/тащит узлы, выделяет связи и
+  // привязки, на пустом месте в режиме select тянет рамку.
   function setupSelection() {
-    const svg = canvas();
-    svg.addEventListener("mousedown", (e) => {
-      if (e.button !== 0 || e.target !== svg || State.tool !== "select") return;
-      marqueeEnded = false;
-      let start = screenPoint(e);
-      let rect = null;
-      function onMove(ev) {
-        const p = screenPoint(ev);
-        if (!rect) {
-          rect = el("rect", { class: "marquee", fill: "none" });
-          svg.append(rect);
-        }
-        rect.setAttribute("x", Math.min(start.x, p.x));
-        rect.setAttribute("y", Math.min(start.y, p.y));
-        rect.setAttribute("width", Math.abs(p.x - start.x));
-        rect.setAttribute("height", Math.abs(p.y - start.y));
+    canvas().addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || State.tool === "device" || State.tool === "network") return;
+      const hit = HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z);
+      if (!hit) {
+        if (State.tool === "select") startMarquee(e);
+        return;
       }
-      function onUp(ev) {
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-        if (rect) {
-          rect.remove();
-          marqueeEnded = true;
-          marqueeSelect(toWorld(start), toWorld(screenPoint(ev)), ev.shiftKey);
-        }
-      }
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
+      if (hit.nodeType) startNodeDrag(hit.ref, e);
+      else if (hit.id.startsWith("link:") || hit.id.startsWith("attach:")) selectNode(hit.ref, e.shiftKey);
     });
     document.addEventListener("keydown", (e) => {
       const tag = e.target && e.target.tagName;
@@ -294,7 +240,6 @@ const Topology = (() => {
       if (shortcuts[e.key]) setTool(shortcuts[e.key]);
     });
   }
-
 
   function setTool(tool) {
     State.tool = tool;
@@ -311,11 +256,11 @@ const Topology = (() => {
     TOOLS.forEach((t) => {
       document.getElementById("tool-" + t).addEventListener("click", () => setTool(t));
     });
-    const svg = canvas();
-    svg.addEventListener("click", (e) => {
-      if (e.target !== svg) return; // node/wire clicks handle themselves
+    canvas().addEventListener("click", (e) => {
       NetInfo.hide();
       if (marqueeEnded) { marqueeEnded = false; return; } // click trailing the marquee drag
+      // клик по узлу/связи уже обработан их mousedown — фону он не адресован
+      if (HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z)) return;
       clearSearch(); // клик по пустому фону сбрасывает активный поиск
       if (State.tool === "device" || State.tool === "network") openNodePopover(screenPoint(e), State.tool);
       else {
@@ -482,74 +427,31 @@ const Topology = (() => {
     render();
   }
 
-  function makeDraggable(node, kind, obj, onPlainClick) {
-    node.addEventListener("mousedown", (e) => {
-      if (e.button !== 0) return;
-      e.stopPropagation();
-      const start = screenPoint(e);
-      const group = [];
-      const addObj = (o) => {
-        if (State.topology.devices.includes(o)) {
-          const pos = State.layout.devices[o.name];
-          if (pos) group.push({ map: State.layout.devices, name: o.name, pos: { ...pos } });
-        } else if (State.topology.networks.includes(o)) {
-          const pos = State.layout.networks[o.name];
-          if (pos) group.push({ map: State.layout.networks, name: o.name, pos: { ...pos } });
-        }
-      };
-      if (State.selection.has(obj)) State.selection.forEach(addObj);
-      else addObj(obj);
-      let moved = false;
-
-      function onMove(ev) {
-        const p = screenPoint(ev);
-        const w = toWorld(p);
-        const o = toWorld(start);
-        const dx = w.x - o.x;
-        const dy = w.y - o.y;
-        if (Math.abs(p.x - start.x) > 3 || Math.abs(p.y - start.y) > 3) { moved = true; NetInfo.hide(); }
-        group.forEach((g) => { g.map[g.name] = { x: g.pos.x + dx, y: g.pos.y + dy }; });
-        render();
-      }
-      function onUp(ev) {
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-        if (moved) scheduleLayoutSave();
-        else if (onPlainClick) onPlainClick(ev);
-      }
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    });
-  }
-
   function cancelPending() {
     pending = null;
-    if (previewWire) {
-      previewWire.remove();
-      previewWire = null;
-    }
+    previewWire = null;
     render();
   }
 
-  // setupConnectPreview draws a dashed line from the pending device to the
-  // cursor while the connect tool awaits the second endpoint.
+  // setupConnectPreview рисует пунктир от pending-устройства к курсору,
+  // пока connect ждёт второй конец; линия — элемент оверлея канвы.
   function setupConnectPreview() {
     canvas().addEventListener("mousemove", (e) => {
       const want = pending && State.tool === "connect";
       if (want) {
         const from = deviceCenter(pending.device);
+        if (!from) return;
         const to = toWorld(screenPoint(e));
-        if (from) {
-          if (!previewWire) {
-            previewWire = el("path", { class: "wire-preview", fill: "none" });
-            viewportG.append(previewWire);
-          }
-          previewWire.setAttribute("d", `M ${from.x} ${from.y} L ${to.x} ${to.y}`);
-        }
-      } else if (previewWire) {
-        previewWire.remove();
+        previewWire = {
+          kind: "path",
+          geom: { segs: [{ x1: from.x, y1: from.y, cx: (from.x + to.x) / 2, cy: (from.y + to.y) / 2, x2: to.x, y2: to.y }] },
+          style: { stroke: theme.accent, lineWidth: 1.5, dash: [6, 4] },
+        };
+      } else {
+        if (!previewWire) return;
         previewWire = null;
       }
+      view.invalidate();
     });
   }
 
@@ -586,16 +488,6 @@ const Topology = (() => {
     cancelPending();
   }
 
-  // selectWire wires click-selection and right-click delete for a wire;
-  // links and attachments are only deletable through selection.
-  function selectWire(wire, obj, label) {
-    wire.onclick = (e) => {
-      e.stopPropagation();
-      if (State.tool === "select") selectNode(obj, e.shiftKey);
-    };
-    contextDelete(wire, obj, label);
-  }
-
   const attachSelected = (n, device) =>
     [...State.selection].some((s) => s.type === "attach" && s.net === n && s.device === device);
 
@@ -621,35 +513,20 @@ const Topology = (() => {
     return shade(searchSet.has(obj));
   };
 
-  // nodeHook подключает интерактив редактора к элементам сцены.
-  const nodeHook = (kind, elem, obj) => {
-    if (kind === "device") {
-      makeDraggable(elem, "device", obj, (ev) => {
-        if (State.tool === "connect") onDeviceConnect(obj.name);
-        else if (State.tool === "select") { selectNode(obj, ev.shiftKey); NetInfo.hide(); }
-      });
-      contextDelete(elem, obj, "устройство " + obj.name, "device");
-    } else if (kind === "network") {
-      makeDraggable(elem, "network", obj, (ev) => {
-        if (State.tool === "connect") onNetworkClick(obj.name);
-        else if (State.tool === "select") { selectNode(obj, ev.shiftKey); showNetInfo(obj); }
-      });
-      contextDelete(elem, obj, "сеть " + obj.name, "network");
-    } else if (kind === "wire") {
-      selectWire(elem, obj, (obj.filter ? "фильтрованная связь " : "связь ") + obj.a.device + "–" + obj.b.device);
-    } else if (kind === "attach") {
-      selectWire(elem, obj, `привязка ${obj.net.name}–${obj.device}`);
-    }
-  };
+  // getOverlay — динамические элементы поверх сцены: превью связи и рамка.
+  const getOverlay = () => [
+    ...(previewWire ? [previewWire] : []),
+    ...(marqueeRect ? [{
+      kind: "rrect",
+      geom: { ...marqueeRect, r: 0 },
+      style: { stroke: theme.accent, lineWidth: 1, dash: [4, 3], fill: theme.accent, fillAlpha: 0.08 },
+    }] : []),
+  ];
 
   function render() {
     ensureLayout();
-    const svg = canvas();
-    svg.innerHTML = "";
-    previewWire = null;
-    viewportG = el("g", { class: "viewport", transform: Camera.transform(State.camera) });
-    svg.append(viewportG);
-    TopoScene.render(viewportG, State, { classes: nodeClasses, hook: nodeHook });
+    State.list = TopoScene.buildScene(State, { theme, classes: nodeClasses }).list;
+    view.invalidate();
     // trash button mirrors the selection state
     document.getElementById("topo-delete").disabled = !State.selection.size;
   }
@@ -696,6 +573,13 @@ const Topology = (() => {
     } catch {
       State.layout = { devices: {}, networks: {} };
     }
+    theme = CanvasTheme.fromComputed(getComputedStyle(document.documentElement));
+    view = CanvasView.create(canvas(), {
+      getList: () => State.list,
+      getCam: () => State.camera,
+      getOverlay,
+      textHideZoom: theme.textHideZoom,
+    });
     setupForms();
     setupCamera();
     setupTools();
@@ -705,7 +589,6 @@ const Topology = (() => {
     setupPopover();
     setupSearch();
     NetInfo.attach(canvas());
-    document.addEventListener("click", hideContextMenu);
     setTool("select");
     Topology.render();
   }

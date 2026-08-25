@@ -7,15 +7,16 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 // DOM stubs mirror topology_render.test.js; search needs the same boot
-// pipeline (common.js + camera.js + topology.js) plus the #topo-search-toggle
-// button and the #topo-search input it reveals.
+// pipeline (common.js + camera.js + canvas modules + topology.js) plus the
+// #topo-search-toggle button and the #topo-search input it reveals.
 function makeEl(tag) {
-  return {
+  const el = {
     tag,
     children: [],
     attrs: {},
     listeners: {},
     dataset: {},
+    _classes: new Set(),
     style: {},
     setAttribute(k, v) { this.attrs[k] = v; },
     getAttribute(k) { return this.attrs[k]; },
@@ -36,23 +37,58 @@ function makeEl(tag) {
     get textContent() { return this._text || ""; },
     reset() {},
   };
+  el.classList = {
+    add: (...cs) => cs.forEach((c) => el._classes.add(c)),
+    remove: (...cs) => cs.forEach((c) => el._classes.delete(c)),
+    contains: (c) => el._classes.has(c),
+  };
+  return el;
+}
+
+// recorder: ctx-стаб, записывающий вызовы методов canvas 2d context
+function makeCtx() {
+  const calls = [];
+  const handler = {
+    get(t, prop) {
+      if (prop in t) return t[prop];
+      return (...args) => calls.push([prop, args]);
+    },
+    set(t, prop, v) { t[prop] = v; calls.push(["set:" + prop, [v]]); return true; },
+  };
+  const ctx = new Proxy({}, handler);
+  ctx.calls = calls;
+  return ctx;
+}
+
+function fire(target, type, ev) {
+  ev.type = type;
+  if (!ev.target) ev.target = target;
+  ev.preventDefault ||= () => {};
+  ev.stopPropagation ||= () => {};
+  (target.listeners[type] || []).forEach((fn) => fn(ev));
+  if (type === "click" && target.onclick) target.onclick(ev);
 }
 
 function bootTopology(responses) {
-  const canvas = makeEl("svg");
+  const ctx = makeCtx();
+  const canvas = Object.assign(makeEl("canvas"), {
+    clientWidth: 1200,
+    clientHeight: 800,
+    getContext: () => ctx,
+  });
   const ids = {};
   const doc = {
     readyState: "loading",
     listeners: {},
     body: makeEl("body"),
     documentElement: { dataset: {} },
+    getElementById: (id) => (id === "topo-canvas" ? canvas : (ids[id] ||= makeEl("div"))),
+    createElement: (tag) => makeEl(tag),
+    addEventListener(t, fn) { (doc.listeners[t] ||= []).push(fn); },
     removeEventListener(t, fn) {
       const list = doc.listeners[t];
       if (list) doc.listeners[t] = list.filter((f) => f !== fn);
     },
-    createElementNS: (ns, tag) => makeEl(tag),
-    getElementById: (id) => (id === "topo-canvas" ? canvas : (ids[id] ||= makeEl("div"))),
-    addEventListener(t, fn) { (doc.listeners[t] ||= []).push(fn); },
   };
   const sandbox = {
     document: doc,
@@ -67,6 +103,8 @@ function bootTopology(responses) {
     confirm: () => false,
     prompt: () => null,
     FormData: class { get() { return ""; } },
+    Path2D: class {},               // стаб для kind:"glyph"
+    getComputedStyle: () => ({ getPropertyValue: () => "" }),
     setTimeout,
     clearTimeout,
     Promise,
@@ -75,30 +113,22 @@ function bootTopology(responses) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  for (const f of ["common.js", "camera.js", "camera_input.js", "netmap.js", "net_info.js", "topo_scene.js", "topology.js"]) {
+  for (const f of [
+    "common.js", "camera.js", "camera_input.js", "netmap.js", "tween.js",
+    "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
+    "net_info.js", "topology.js",
+  ]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
-  return { canvas, doc, ids, get: (expr) => vm.runInContext(expr, sandbox), sandbox };
+  return { canvas, ctx, doc, ids, get: (expr) => vm.runInContext(expr, sandbox), sandbox };
 }
 
-// withClass collects all descendants whose class list contains cls
-const withClass = (node, cls) =>
-  (function walk(n, out = []) {
-    if (String(n.attrs.class || "").split(/\s+/).includes(cls)) out.push(n);
-    (n.children || []).forEach((c) => walk(c, out));
-    return out;
-  })(node);
-
-const viewport = (canvas) => withClass(canvas, "viewport")[0];
-
-function fire(target, type, ev) {
-  ev.type = type;
-  ev.target = target;
-  ev.preventDefault ||= () => {};
-  ev.stopPropagation ||= () => {};
-  (target.listeners[type] || []).forEach((fn) => fn(ev));
-}
+// подсветка поиска на канве: совпавшие светятся (glow), остальные приглушены.
+// JSON-прогон: массивы из vm-контекста не сравниваются deepEqual напрямую.
+const glowIds = (get) => JSON.parse(get(`JSON.stringify(State.list.filter((i) => i.style.glow).map((i) => i.id))`));
+const dimCount = (get) => get(`State.list.filter((i) => (i.style.alpha ?? 1) < 1).length`);
+const cam = (get) => JSON.parse(get("JSON.stringify(State.camera)"));
 
 // поиск вводится в поле #topo-search событием input; элемент создаётся в том
 // же реестре, откуда его возьмёт production-код
@@ -126,121 +156,117 @@ const responses = {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 
-// узел подсвечивается целиком (rect/path/glyph/label), поэтому считаем формы
-const hitShapes = (canvas, cls) => withClass(canvas, cls).filter((n) => String(n.attrs.class).includes("search-hit"));
-
 test("search by device name highlights it and dims the rest", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  search(ids, "sw1");
-  assert.equal(hitShapes(canvas, "node-rect").length, 1, "one highlighted device");
-  assert.equal(hitShapes(canvas, "subnet-rect").length, 0, "networks untouched");
-  assert.equal(withClass(canvas, "search-dim").length > 0, true, "non-matching elements dimmed");
+  search(page.ids, "sw1");
+  assert.deepEqual(glowIds(page.get), ["device:sw1"], "one highlighted device");
+  assert.ok(!glowIds(page.get).some((id) => id.startsWith("network:")), "networks untouched");
+  assert.ok(dimCount(page.get) > 0, "non-matching elements dimmed");
 });
 
 test("search is case-insensitive", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  search(ids, "SW1");
-  assert.equal(hitShapes(canvas, "node-rect").length, 1, "case-insensitive name match");
+  search(page.ids, "SW1");
+  assert.deepEqual(glowIds(page.get), ["device:sw1"], "case-insensitive name match");
 });
 
 test("network matches by subnet CIDR substring and highlights the network node", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  search(ids, "10.0.0");
-  const hits = hitShapes(canvas, "subnet-rect");
-  assert.equal(hits.length, 1, "net1 cloud highlighted via its subnet cidr");
+  search(page.ids, "10.0.0");
+  assert.deepEqual(glowIds(page.get), ["network:net1"], "net1 cloud highlighted via its subnet cidr");
 });
 
 test("host IP inside a subnet prefix finds the owning network", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  search(ids, "10.0.0.55");
-  assert.equal(hitShapes(canvas, "subnet-rect").length, 1, "net1 found by contained host address");
+  search(page.ids, "10.0.0.55");
+  assert.deepEqual(glowIds(page.get), ["network:net1"], "net1 found by contained host address");
 
-  search(ids, "10.0.1.1");
-  assert.equal(withClass(canvas, "search-hit").length, 0, "address outside every prefix matches nothing");
+  search(page.ids, "10.0.1.1");
+  assert.deepEqual(glowIds(page.get), [], "address outside every prefix matches nothing");
 });
 
 test("empty query clears highlighting and dimming", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  search(ids, "r1");
-  search(ids, "");
-  assert.equal(withClass(canvas, "search-hit").length, 0);
-  assert.equal(withClass(canvas, "search-dim").length, 0);
+  search(page.ids, "r1");
+  search(page.ids, "");
+  assert.deepEqual(glowIds(page.get), []);
+  assert.equal(dimCount(page.get), 0);
 });
 
 test("no-match query leaves everything dimmed and nothing hit", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  search(ids, "zzz");
-  assert.equal(withClass(canvas, "search-hit").length, 0);
-  assert.equal(withClass(canvas, "search-dim").length > 0, true, "all elements dimmed");
+  search(page.ids, "zzz");
+  assert.deepEqual(glowIds(page.get), []);
+  assert.ok(dimCount(page.get) > 0, "all elements dimmed");
 });
 
 test("first match centers the camera on the node", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  search(ids, "r1");
+  search(page.ids, "r1");
   // r1 sits at default layout (40,40), center (110,70); canvas stub 1200x800
-  assert.equal(viewport(canvas).attrs.transform, "translate(490 330) scale(1)");
+  assert.deepEqual(cam(page.get), { x: 490, y: 330, z: 1 });
 });
 
 test("Enter cycles the camera through the matches", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  search(ids, "1"); // r1, sw1 и net1
-  assert.equal(viewport(canvas).attrs.transform, "translate(490 330) scale(1)", "camera on the first hit");
-  fire(ids["topo-search"], "keydown", { key: "Enter" });
-  assert.equal(viewport(canvas).attrs.transform, "translate(290 330) scale(1)", "second hit centered");
-  fire(ids["topo-search"], "keydown", { key: "Enter" });
-  assert.equal(viewport(canvas).attrs.transform, "translate(480 70) scale(1)", "third hit (net1 at 40,300) centered");
-  fire(ids["topo-search"], "keydown", { key: "Enter" });
-  assert.equal(viewport(canvas).attrs.transform, "translate(490 330) scale(1)", "wraps back to the first hit");
+  search(page.ids, "1"); // r1, sw1 и net1
+  assert.deepEqual(cam(page.get), { x: 490, y: 330, z: 1 }, "camera on the first hit");
+  fire(page.ids["topo-search"], "keydown", { key: "Enter" });
+  assert.deepEqual(cam(page.get), { x: 290, y: 330, z: 1 }, "second hit centered");
+  fire(page.ids["topo-search"], "keydown", { key: "Enter" });
+  assert.deepEqual(cam(page.get), { x: 480, y: 70, z: 1 }, "third hit (net1 at 40,300) centered");
+  fire(page.ids["topo-search"], "keydown", { key: "Enter" });
+  assert.deepEqual(cam(page.get), { x: 490, y: 330, z: 1 }, "wraps back to the first hit");
 });
 
 test("search field stays hidden until the magnifier is clicked", async () => {
-  const { ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  assert.equal(ids["topo-search"].hidden, true, "input hidden on load");
-  fire(ids["topo-search-toggle"], "click", {});
-  assert.equal(ids["topo-search"].hidden, false, "magnifier reveals the input");
+  assert.equal(page.ids["topo-search"].hidden, true, "input hidden on load");
+  fire(page.ids["topo-search-toggle"], "click", {});
+  assert.equal(page.ids["topo-search"].hidden, false, "magnifier reveals the input");
 });
 
 test("a background canvas click resets the search", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  fire(ids["topo-search-toggle"], "click", {});
-  search(ids, "r1");
-  assert.equal(hitShapes(canvas, "node-rect").length, 1);
-  fire(canvas, "click", {}); // target === canvas means an empty-background click
-  assert.equal(ids["topo-search"].value, "", "query cleared");
-  assert.equal(ids["topo-search"].hidden, true, "field hidden again");
-  assert.equal(withClass(canvas, "search-hit").length, 0);
+  fire(page.ids["topo-search-toggle"], "click", {});
+  search(page.ids, "r1");
+  assert.deepEqual(glowIds(page.get), ["device:r1"]);
+  fire(page.canvas, "click", {}); // empty-background click
+  assert.equal(page.ids["topo-search"].value, "", "query cleared");
+  assert.equal(page.ids["topo-search"].hidden, true, "field hidden again");
+  assert.deepEqual(glowIds(page.get), []);
 });
 
 test("Escape clears the query and the highlighting", async () => {
-  const { canvas, ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  fire(ids["topo-search-toggle"], "click", {});
-  search(ids, "r1");
-  fire(ids["topo-search"], "keydown", { key: "Escape" });
-  assert.equal(ids["topo-search"].value, "", "input cleared");
-  assert.equal(ids["topo-search"].hidden, true, "input hidden again");
-  assert.equal(withClass(canvas, "search-hit").length, 0);
-  assert.equal(withClass(canvas, "search-dim").length, 0);
+  fire(page.ids["topo-search-toggle"], "click", {});
+  search(page.ids, "r1");
+  fire(page.ids["topo-search"], "keydown", { key: "Escape" });
+  assert.equal(page.ids["topo-search"].value, "", "input cleared");
+  assert.equal(page.ids["topo-search"].hidden, true, "input hidden again");
+  assert.deepEqual(glowIds(page.get), []);
+  assert.equal(dimCount(page.get), 0);
 });
 
 test("blurring an empty field hides it, a filled one stays visible", async () => {
-  const { ids } = bootTopology(responses);
+  const page = bootTopology(responses);
   await tick();
-  fire(ids["topo-search-toggle"], "click", {});
-  fire(ids["topo-search"], "blur", {});
-  assert.equal(ids["topo-search"].hidden, true, "empty blur hides the input");
-  fire(ids["topo-search-toggle"], "click", {});
-  search(ids, "r1");
-  fire(ids["topo-search"], "blur", {});
-  assert.equal(ids["topo-search"].hidden, false, "active query keeps the input visible");
+  fire(page.ids["topo-search-toggle"], "click", {});
+  fire(page.ids["topo-search"], "blur", {});
+  assert.equal(page.ids["topo-search"].hidden, true, "empty blur hides the input");
+  fire(page.ids["topo-search-toggle"], "click", {});
+  search(page.ids, "r1");
+  fire(page.ids["topo-search"], "blur", {});
+  assert.equal(page.ids["topo-search"].hidden, false, "active query keeps the input visible");
 });
