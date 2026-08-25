@@ -407,8 +407,9 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 }
 .ctx-sub:hover .submenu, .ctx-sub:focus-within .submenu { display: flex; }
 
-/* canvas hover tooltip (filtered wire exports) */
-.topo-tooltip {
+/* canvas hover tooltip (filtered wire exports, simulation deny point) */
+.topo-tooltip,
+.sim-tooltip {
   position: absolute;
   z-index: 3;
   pointer-events: none;
@@ -420,7 +421,8 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   padding: 2px 8px;
   font-size: 0.82rem;
 }
-.topo-tooltip[hidden] { display: none; }
+.topo-tooltip[hidden],
+.sim-tooltip[hidden] { display: none; }
 
 /* canvas interaction affordances */
 .marquee { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; fill: rgba(37, 99, 235, 0.08); }

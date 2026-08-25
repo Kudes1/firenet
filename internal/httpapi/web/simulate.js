@@ -180,9 +180,13 @@ const Simulate = (() => {
     view.invalidate();
   }
 
-  // animate гонит твин кадрами rAF, после каждого tick — перерисовка
-  function animate(tw, apply) {
+  // animate гонит твин кадрами rAF; повторный запуск того же канала
+  // вытесняет незавершённую анимацию (новый отчёт/полёт не спорит со старым)
+  const animGen = {};
+  function animate(key, tw, apply) {
+    const gen = (animGen[key] = (animGen[key] || 0) + 1);
     const step = () => {
+      if (animGen[key] !== gen) return;
       tw.tick(performance.now());
       apply();
       if (tw.active()) requestAnimationFrame(step);
@@ -197,7 +201,7 @@ const Simulate = (() => {
     const cur = { ...state.camera };
     const tw = Tween.create();
     tw.to(cur, to, ms);
-    animate(tw, () => setCam({ ...cur }));
+    animate("cam", tw, () => setCam({ ...cur }));
   }
 
   // worldPoint переводит точку курсора в мировые координаты
@@ -322,7 +326,7 @@ const Simulate = (() => {
       if (flow) {
         const tw = Tween.create();
         tw.to(state, { flowFade: 1 }, 200);
-        animate(tw, render);
+        animate("flow", tw, render);
       }
     }
     if (!report.paths.length) {

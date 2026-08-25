@@ -175,6 +175,7 @@ test("search by device name highlights it and dims the rest", async () => {
   const page = bootTopology(responses);
   await tick();
   search(page.ids, "sw1");
+  page.pump(); // твин затемнения проявляется кадрами
   assert.deepEqual(glowIds(page.get), ["device:sw1"], "one highlighted device");
   assert.ok(!glowIds(page.get).some((id) => id.startsWith("network:")), "networks untouched");
   assert.ok(dimCount(page.get) > 0, "non-matching elements dimmed");
@@ -209,6 +210,7 @@ test("empty query clears highlighting and dimming", async () => {
   await tick();
   search(page.ids, "r1");
   search(page.ids, "");
+  page.pump(); // дождались затухания затемнения
   assert.deepEqual(glowIds(page.get), []);
   assert.equal(dimCount(page.get), 0);
 });
@@ -217,6 +219,7 @@ test("no-match query leaves everything dimmed and nothing hit", async () => {
   const page = bootTopology(responses);
   await tick();
   search(page.ids, "zzz");
+  page.pump();
   assert.deepEqual(glowIds(page.get), []);
   assert.ok(dimCount(page.get) > 0, "all elements dimmed");
 });
@@ -225,14 +228,28 @@ test("first match centers the camera on the node", async () => {
   const page = bootTopology(responses);
   await tick();
   search(page.ids, "r1");
+  page.pump(); // камера долетает коротким твином
   // r1 sits at default layout (40,40), center (110,70); canvas stub 1200x800
   assert.deepEqual(cam(page.get), { x: 490, y: 330, z: 1 });
+});
+
+test("search dim fades in and out through state.searchFade", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  search(page.ids, "r1");
+  assert.equal(page.get("State.searchFade"), 0, "fade starts transparent");
+  page.pump();
+  assert.ok(page.get("State.searchFade") > 0, "dim faded in");
+  search(page.ids, "");
+  page.pump();
+  assert.equal(page.get("State.searchFade"), 0, "clearing fades the dim back out");
 });
 
 test("Enter cycles the camera through the matches", async () => {
   const page = bootTopology(responses);
   await tick();
   search(page.ids, "1"); // r1, sw1 и net1
+  page.pump(); // первый хит тоже летит твином
   assert.deepEqual(cam(page.get), { x: 490, y: 330, z: 1 }, "camera on the first hit");
   fire(page.ids["topo-search"], "keydown", { key: "Enter" });
   page.pump(); // камера долетает твином
@@ -273,6 +290,7 @@ test("Escape clears the query and the highlighting", async () => {
   fire(page.ids["topo-search"], "keydown", { key: "Escape" });
   assert.equal(page.ids["topo-search"].value, "", "input cleared");
   assert.equal(page.ids["topo-search"].hidden, true, "input hidden again");
+  page.pump();
   assert.deepEqual(glowIds(page.get), []);
   assert.equal(dimCount(page.get), 0);
 });

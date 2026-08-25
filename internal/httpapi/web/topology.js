@@ -8,6 +8,7 @@ const State = {
   tool: "select",
   selection: new Set(), // device/network/link objects
   list: [], // display list канвы (TopoScene.buildScene)
+  searchFade: 0, // прогресс затемнения поиска (твин updateSearch)
 };
 
 // Topology renders devices/links/networks on a canvas the user builds
@@ -149,7 +150,7 @@ const Topology = (() => {
     const label = nodeType === "device" ? `устройство ${obj.name}`
       : nodeType === "network" ? `сеть ${obj.name}`
       : obj.type === "attach" ? `привязка ${obj.net.name}–${obj.device}`
-      : `связь ${obj.a.device}–${obj.b.device}`;
+      : `${obj.filter ? "фильтрованная связь" : "связь"} ${obj.a.device}–${obj.b.device}`;
     const items = [];
     if (key) {
       const inSet = (s) => (s[key] || []).includes(obj.name);
@@ -478,13 +479,21 @@ const Topology = (() => {
     };
   }
 
+  // затемнение поиска проявляется/гаснет твином (канал "fade")
+  function tweenSearchFade(to) {
+    const tw = Tween.create();
+    tw.to(State, { searchFade: to }, 180);
+    animate("fade", tw, render);
+  }
+
   function updateSearch(raw) {
     searchQ = raw.trim().toLowerCase();
     searchHits = computeSearchHits(searchQ);
     searchSet = new Set(searchHits);
     hitIdx = 0;
     const target = searchHits.length && fitNode(searchHits[0]);
-    if (target) State.camera = target;
+    if (target) flyCam(target, 180);
+    tweenSearchFade(searchQ ? 1 : 0);
     render();
   }
 
@@ -561,18 +570,26 @@ const Topology = (() => {
     render();
   }
 
+  // animate гонит твин кадрами rAF; повторный запуск того же канала
+  // вытесняет незавершённую анимацию (новый полёт камеры не спорит со старым)
+  const animGen = {};
+  function animate(key, tw, apply) {
+    const gen = (animGen[key] = (animGen[key] || 0) + 1);
+    const step = () => {
+      if (animGen[key] !== gen) return;
+      tw.tick(performance.now());
+      apply();
+      if (tw.active()) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
   // flyCam плавно ведёт камеру к цели (кнопка «вписать», поиск)
   function flyCam(to, ms = 250) {
     const cur = { ...State.camera };
     const tw = Tween.create();
     tw.to(cur, to, ms);
-    const step = () => {
-      tw.tick(performance.now());
-      State.camera = { ...cur };
-      applyCamera();
-      if (tw.active()) requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
+    animate("cam", tw, () => { State.camera = { ...cur }; applyCamera(); });
   }
 
   // fitMap вписывает всю топологию во вьюпорт анимацией камеры
@@ -598,6 +615,7 @@ const Topology = (() => {
       const p = screenPoint(e);
       const hit = HitTest.pick(State.list, toWorld(p), State.camera.z);
       canvas().style.cursor = hit ? (hit.nodeType ? "grab" : "pointer") : "default";
+      previewWire = null;
       if (pending && State.tool === "connect") {
         const from = deviceCenter(pending.device);
         if (from) {
@@ -608,7 +626,7 @@ const Topology = (() => {
             style: { stroke: theme.accent, lineWidth: 1.5, dash: [6, 4] },
           };
         }
-      } else previewWire = null;
+      }
       view.invalidate();
       clearTimeout(tipTimer);
       if (hit && hit.meta && hit.meta.tooltip) {
@@ -694,7 +712,12 @@ const Topology = (() => {
 
   function render() {
     ensureLayout();
-    State.list = TopoScene.buildScene(State, { theme, classes: nodeClasses, popOf }).list;
+    State.list = TopoScene.buildScene(State, {
+      theme,
+      classes: nodeClasses,
+      popOf,
+      fade: { dim: State.searchFade },
+    }).list;
     view.invalidate();
     // trash button mirrors the selection state
     document.getElementById("topo-delete").disabled = !State.selection.size;

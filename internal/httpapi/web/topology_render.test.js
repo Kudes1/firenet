@@ -482,6 +482,21 @@ test("context menu deletes a node", async () => {
   assert.ok(!texts(page.get).includes("r1 (router)"), "r1 removed");
 });
 
+test("filtered link menu item names it a filtered wire", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/topology": {
+      ...responses["/api/topology"],
+      links: [{ a: { device: "r1" }, b: { device: "r2" }, filter: { aExports: ["a"], bExports: [] } }],
+    },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 }); // середина связи r1–r2
+  const del = findBtn(ctxMenu(page), (b) => String(b.textContent).startsWith("Удалить"));
+  assert.ok(del, "menu opened on the wire");
+  assert.match(String(del.textContent), /Удалить фильтрованная связь r1–r2/, "filtered prefix restored");
+});
+
 test("clean right-click on a node opens its menu after release", async () => {
   const page = bootTopology(responses);
   await tick();
