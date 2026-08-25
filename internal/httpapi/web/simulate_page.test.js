@@ -589,8 +589,10 @@ test("map paints flow segments and marks the deny point with a tooltip", async (
   await frames(10); // дождались полного прогрева потока (flowFade = 1)
   const theme = JSON.parse(get("JSON.stringify(CanvasTheme.create({}))"));
   const byStroke = (color) => JSON.parse(get(
-    `JSON.stringify(Simulate.state.list.filter((i) => i.style.wire && i.style.stroke === ${JSON.stringify(color)}).map((i) => i.id).sort())`,
+    `JSON.stringify(Simulate.state.list.filter((i) => /^(link:|attach:)/.test(i.id) && i.style.stroke === ${JSON.stringify(color)}).map((i) => i.id).sort())`,
   ));
+  assert.ok(get("Simulate.state.list.every((i) => !('wire' in (i.style || {})))"),
+    "the internal wire flag never leaks into public styles");
   assert.deepEqual(byStroke(theme.flowOk), ["attach:MAIN|sw1", "link:r1|r2", "link:r1|sw1"],
     "wires and attaches up to the deny point are green");
   assert.deepEqual(byStroke(theme.flowDeny), ["attach:OFFICE|sw2", "link:r2|sw2"],
@@ -618,6 +620,12 @@ test("hovering the denying router shows a delayed tooltip", async () => {
   assert.equal(tip.style.top, "64px");
   fire(canvas, "mouseleave", {});
   assert.ok(tip.hidden, "leaving the canvas hides the tooltip");
+  // повторный hover и уход на пустое место: тултип прячется сразу
+  fire(canvas, "mousemove", { clientX: 250, clientY: 50 });
+  await new Promise((r) => setTimeout(r, 350));
+  assert.ok(!tip.hidden, "tooltip shown again over the deny router");
+  fire(canvas, "mousemove", { clientX: 1000, clientY: 400 });
+  assert.ok(tip.hidden, "moving onto empty space hides the shown tooltip");
 });
 
 // — разделитель «форма ↔ карта» —

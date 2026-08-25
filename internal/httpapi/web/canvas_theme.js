@@ -26,12 +26,10 @@ const CanvasTheme = (() => {
         network: g("--kind-network", "#16a34a"),
       },
       radius: { router: 16, switch: 2, default: 6 },
-      unionColors: NetMap.UNION_COLORS,
       filteredColor: "#d29922",
       flowOk: "#10b981",
       flowDeny: "#ef4444",
       dimAlpha: 0.35,
-      hitWidth: 14,
       textHideZoom: 0.5,
       fonts: { label: "12px system-ui, sans-serif", sub: "11px system-ui, sans-serif" },
       lerpHex(a, b, t) {

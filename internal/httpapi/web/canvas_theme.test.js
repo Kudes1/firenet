@@ -23,8 +23,15 @@ test("create maps css vars onto theme fields", () => {
   assert.equal(t.kind.router, "#d97706");
   assert.equal(t.radius.router, 16);
   assert.equal(t.radius.default, 6);
-  assert.equal(t.hitWidth, 14);
-  assert.equal(t.unionColors.length >= 2, true);
+});
+
+// тема самодостаточна: загрузка без глобального NetMap не падает
+test("theme loads standalone, without the global NetMap", () => {
+  const sb = { console };
+  vm.createContext(sb);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "canvas_theme.js"), "utf8"), sb);
+  const T = vm.runInContext("CanvasTheme", sb);
+  assert.equal(T.create({}).textHideZoom, 0.5);
 });
 
 test("fromComputed reads css variables via getPropertyValue", () => {

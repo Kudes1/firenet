@@ -229,7 +229,7 @@ const Simulate = (() => {
     cv.addEventListener("mousemove", (e) => {
       const it = HitTest.pick(state.list, worldPoint(e), state.camera.z);
       clearTimeout(tipTimer);
-      if (!it || !it.meta || !it.meta.tooltip) return;
+      if (!it || !it.meta || !it.meta.tooltip) { hideTip(); return; }
       tipTimer = setTimeout(() => {
         const r = cv.getBoundingClientRect();
         tip.textContent = it.meta.tooltip;
@@ -437,6 +437,7 @@ const Simulate = (() => {
         getList: () => state.list,
         getCam: () => state.camera,
         getOverlay: () => [],
+        textHideZoom: theme.textHideZoom,
       });
       render();
       setupCamera();

@@ -6,7 +6,7 @@
 // (drag/select/context) страница подключает сама через opts.hook, классы
 // оформления — через opts.classes, приглушение элементов — через opts.dim.
 const TopoScene = (() => {
-  const { DEVICE_W, DEVICE_H, NET_W, NET_H, KINDS, center, linkOffsets, spreadOffset, pointAt, cloudSegs } = NetMap;
+  const { DEVICE_W, DEVICE_H, NET_W, NET_H, KINDS, center, linkOffsets, spreadOffset, pointAt, cloudSegs, UNION_COLORS } = NetMap;
   const UNION_PAD = 30;
 
   // nameSummary joins names into "a, b" or, when the list exceeds max
@@ -64,8 +64,11 @@ const TopoScene = (() => {
   // styled применяет состояния к базовому стилю по правилам спецификации:
   // selected/pending → accent; search-hit → glow; sim-flow-* → лерп цвета и
   // ширины по fade.flow; search-dim|sim-dim → alpha по fade.dim.
+  // Служебный признак связи (base.wire) тратится на ширину flow-подсветки
+  // и в итоговый стиль не выходит.
   function styled(base, states, theme, fade) {
-    const st = { ...base };
+    const { wire, ...pub } = base;
+    const st = { ...pub };
     if (states.has("selected")) { st.stroke = theme.accent; st.lineWidth = 2.5; }
     if (states.has("pending")) { st.stroke = theme.accent; st.lineWidth = 3; }
     if (states.has("search-hit")) st.glow = { color: theme.accent, blur: 8 };
@@ -74,7 +77,7 @@ const TopoScene = (() => {
     if (flow && base.stroke) {
       const k = fade?.flow ?? 1;
       st.stroke = theme.lerpHex(base.stroke, flow, k);
-      st.lineWidth = base.lineWidth + ((base.wire ? 4 : 2.5) - base.lineWidth) * k;
+      st.lineWidth = pub.lineWidth + ((wire ? 4 : 2.5) - pub.lineWidth) * k;
       if (k > 0.05) st.glow = { color: flow, blur: 4 * k };
     }
     // дефолты fade.* = 1: если страница не анимирует переход, эффект
@@ -112,7 +115,7 @@ const TopoScene = (() => {
     (topology.unions || []).forEach((s, i) => {
       const box = unionBox(s, layout);
       if (!box) return;
-      const color = theme.unionColors[i % theme.unionColors.length];
+      const color = UNION_COLORS[i % UNION_COLORS.length];
       emit("rrect", `union:${s.name}`, s,
         { x: box.x, y: box.y, w: box.w, h: box.h, r: 14 },
         { fill: color, fillAlpha: 0.07, stroke: color, strokeAlpha: 0.5, lineWidth: 1 });
