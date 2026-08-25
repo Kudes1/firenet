@@ -42,3 +42,36 @@ test("pickNodes intersects bboxes with the marquee rect", () => {
   assert.deepEqual(HitTest.pickNodes([a, b, w], { x: -10, y: -10, w: 200, h: 100 }), [a]);
   assert.deepEqual(HitTest.pickNodes([a, b], { x: -10, y: -10, w: 700, h: 100 }), [a, b]);
 });
+
+// замкнутое залитое облако (квадратики с выпуклыми рёбрами вокруг центра)
+const cloudSegs = (cx, cy) => [
+  { x1: cx, y1: cy - 50, cx: cx + 50, cy: cy - 50, x2: cx + 50, y2: cy },
+  { x1: cx + 50, y1: cy, cx: cx + 50, cy: cy + 50, x2: cx, y2: cy + 50 },
+  { x1: cx, y1: cy + 50, cx: cx - 50, cy: cy + 50, x2: cx - 50, y2: cy },
+  { x1: cx - 50, y1: cy, cx: cx - 50, cy: cy - 50, x2: cx, y2: cy - 50 },
+];
+
+test("closed filled path picks by area inside the outline", () => {
+  const net = { kind: "path", geom: { segs: cloudSegs(100, 100), closed: true }, style: { fill: "#fff" }, pick: true, name: "net" };
+  assert.equal(HitTest.pick([net], { x: 100, y: 100 }, 1).name, "net", "center of the cloud is a hit");
+  assert.equal(HitTest.pick([net], { x: 130, y: 90 }, 1).name, "net", "off-center interior too");
+});
+
+test("open or unfilled paths stay outline-only picks", () => {
+  const bare = { kind: "path", geom: { segs: cloudSegs(100, 100) }, pick: true, name: "bare" };
+  const hollow = { kind: "path", geom: { segs: cloudSegs(100, 100), closed: true }, pick: true, name: "hollow" };
+  // центр в ~50px от кривой — дальше порога
+  for (const it of [bare, hollow]) {
+    assert.equal(HitTest.pick([it], { x: 100, y: 100 }, 1), null, `${it.name}: interior is not a hit`);
+    assert.equal(HitTest.pick([it], { x: 100, y: 53 }, 1).name, it.name, `${it.name}: near the outline still hits`);
+  }
+});
+
+test("pickNodes keeps bbox semantics for closed shapes", () => {
+  const net = {
+    kind: "path", geom: { segs: cloudSegs(100, 100), closed: true },
+    style: { fill: "#fff" }, pick: true, nodeType: "network",
+  };
+  // прямоугольник внутри облака не касается контура — узел всё равно выбирается
+  assert.deepEqual(HitTest.pickNodes([net], { x: 95, y: 95, w: 10, h: 10 }), [net]);
+});
