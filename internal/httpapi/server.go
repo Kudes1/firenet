@@ -29,6 +29,7 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /api/validate", h.validate)
 	mux.HandleFunc("POST /api/compile", h.compile)
 	mux.HandleFunc("POST /api/diagnose", h.diagnose)
+	mux.HandleFunc("GET /api/lint", h.lint)
 	mux.HandleFunc("GET /api/layout", h.getLayout)
 	mux.HandleFunc("PUT /api/layout", h.putLayout)
 

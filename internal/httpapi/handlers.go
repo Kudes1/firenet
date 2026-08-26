@@ -437,6 +437,25 @@ func (h *handlers) diagnose(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rep)
 }
 
+func (h *handlers) lint(w http.ResponseWriter, r *http.Request) {
+	topo, err := h.loadTopology()
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	pol, err := h.loadPolicy()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("parse stored rules: %w", err))
+		return
+	}
+	findings, err := app.Lint(r.Context(), h.log, topo, pol)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"findings": findings})
+}
+
 func (h *handlers) getLayout(w http.ResponseWriter, r *http.Request) {
 	raw, err := h.store.ReadLayout()
 	if err != nil {

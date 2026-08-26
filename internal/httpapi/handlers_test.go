@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/kudes1/firenet/internal/diagnose"
+	"github.com/kudes1/firenet/internal/lint"
 	"github.com/kudes1/firenet/internal/rules"
 )
 
@@ -788,6 +789,70 @@ func TestDiagnoseHandler(t *testing.T) {
 		rec := doJSON(t, h, http.MethodPost, "/api/diagnose",
 			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"443", "1024:65535"}})
 		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+func TestLintEndpoint(t *testing.T) {
+	h, store := newTestServer(t)
+
+	t.Run("clean policy has no findings", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodGet, "/api/lint", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Findings []lint.Finding `json:"findings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(out.Findings) != 0 {
+			t.Fatalf("want no findings for the default fixture, got %+v", out.Findings)
+		}
+	})
+
+	t.Run("unreachable rule is reported", func(t *testing.T) {
+		if err := store.WriteRules([]byte(`
+chains:
+  - name: FIRENET-FWD
+    defaultAction: deny
+    chainPosition: top
+    rules:
+      - {name: allow-all, comment: "broad by design", src: [any], dst: [any], proto: any, action: allow}
+      - {name: shadowed, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: deny}
+`)); err != nil {
+			t.Fatal(err)
+		}
+		rec := doJSON(t, h, http.MethodGet, "/api/lint", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Findings []lint.Finding `json:"findings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Findings) != 1 || out.Findings[0].Chain != "FIRENET-FWD" {
+			t.Fatalf("want one unreachable-rule finding, got %+v", out.Findings)
+		}
+	})
+
+	t.Run("invalid rules file surfaces as client error", func(t *testing.T) {
+		if err := store.WriteRules([]byte(`
+chains:
+  - name: FIRENET-FWD
+    defaultAction: deny
+    chainPosition: top
+    rules:
+      - {name: bad, src: [no-such-subnet], dst: [any], proto: any, action: allow}
+`)); err != nil {
+			t.Fatal(err)
+		}
+		rec := doJSON(t, h, http.MethodGet, "/api/lint", nil)
+		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 		}
 	})
