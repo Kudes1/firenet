@@ -58,9 +58,25 @@ const DirtyGuard = (() => {
   return { arm, markClean, isDirty };
 })();
 
+// loginRedirectURL builds the /login target for an unauthenticated
+// request, preserving where the user was so they land back there after
+// logging in. Guards against open redirects: only same-origin, absolute
+// paths are honored as the "next" target.
+function loginRedirectURL(pathname, search) {
+  const target = pathname + search;
+  const safe = target.startsWith("/") && !target.startsWith("//");
+  return "/login" + (safe ? "?next=" + encodeURIComponent(target) : "");
+}
+
+async function redirectToLogin() {
+  window.location.href = loginRedirectURL(window.location.pathname, window.location.search);
+  return new Promise(() => {}); // navigation is underway; never resolve
+}
+
 const Api = {
   async get(path) {
     const res = await fetch(path);
+    if (res.status === 401) return redirectToLogin();
     if (!res.ok) throw await apiError(res);
     return res.json();
   },
@@ -70,6 +86,7 @@ const Api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (res.status === 401) return redirectToLogin();
     if (!res.ok) throw await apiError(res);
     return res.status === 204 ? null : res.json();
   },
@@ -79,6 +96,7 @@ const Api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (res.status === 401) return redirectToLogin();
     if (!res.ok) throw await apiError(res);
     return res.status === 204 ? null : res.json();
   },
@@ -229,6 +247,7 @@ const NAV_GROUPS = [
 
 const NAV_STANDALONE = [
   { id: "diagnose", href: "/ui/diagnose", label: "Диагностика" },
+  { id: "users", href: "/ui/users", label: "Пользователи" },
 ];
 
 const svgOpen = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
@@ -242,6 +261,7 @@ const NAV_ICONS = {
   rules: svgOpen + '<path d="M12 3l8 3v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3z"/></svg>',
   compile: svgOpen + '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
   diagnose: svgOpen + '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+  users: svgOpen + '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 8a3 3 0 1 1 0 6"/><path d="M21 20c0-2.5-1.6-4.6-4-5.5"/></svg>',
 };
 
 // buildNav renders the shared sidebar shell (brand, collapsible nav with
@@ -352,6 +372,28 @@ function buildNav(active) {
     localStorage.setItem("firenet-theme", next);
   });
   aside.append(btn);
+
+  const userBox = document.createElement("div");
+  userBox.className = "user-box";
+  const userName = document.createElement("span");
+  userName.className = "user-name";
+  const logoutBtn = document.createElement("button");
+  logoutBtn.type = "button";
+  logoutBtn.className = "logout-btn";
+  logoutBtn.textContent = "Выйти";
+  logoutBtn.addEventListener("click", async () => {
+    await fetch("/api/logout", { method: "POST" });
+    window.location.href = "/login";
+  });
+  userBox.append(userName, logoutBtn);
+  aside.append(userBox);
+
+  fetch("/api/me")
+    .then((res) => (res.ok ? res.json() : null))
+    .then((me) => {
+      if (me) userName.textContent = me.username + (me.role === "admin" ? " · admin" : "");
+    })
+    .catch(() => {});
 
   const banner = document.createElement("div");
   banner.id = "error-banner";

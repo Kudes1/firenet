@@ -63,6 +63,7 @@ function loadCommon({ confirmResult }) {
     CustomEvent: class {},
     dispatchEvent() {},
     confirm: () => confirmResult,
+    fetch: () => Promise.resolve({ ok: false }),
     setTimeout,
     clearTimeout,
     console,
