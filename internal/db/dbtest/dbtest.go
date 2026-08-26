@@ -53,7 +53,7 @@ func Open(t *testing.T) *pgxpool.Pool {
 	}
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "TRUNCATE users, sessions RESTART IDENTITY CASCADE")
+		_, _ = pool.Exec(ctx, "TRUNCATE users, sessions, versions, entity_changes, drafts, draft_entity_changes RESTART IDENTITY CASCADE")
 		_, _ = lockConn.Exec(ctx, "SELECT pg_advisory_unlock($1)", testDBLockKey)
 		lockConn.Release()
 		pool.Close()
