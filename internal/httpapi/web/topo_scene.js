@@ -123,21 +123,28 @@ const TopoScene = (() => {
     });
 
     const offsets = linkOffsets(topology.links);
+    const waypointHandles = []; // emitted last so handles stay on top for picking/painting
     topology.links.forEach((l, i) => {
       const pa = deviceCenter(l.a.device);
       const pb = deviceCenter(l.b.device);
       if (!pa || !pb) return;
-      const mid = pointAt(pa, pb, 0.5, spreadOffset(offsets[i]));
+      const key = [l.a.device, l.b.device].sort().join("|");
+      const wps = layout.links && layout.links[key] && layout.links[key][offsets[i]];
       const base = { stroke: l.filter ? theme.filteredColor : theme.muted, lineWidth: 1.5, wire: true };
       if (l.filter) base.dash = [6, 4];
-      emit("path", `link:${[l.a.device, l.b.device].sort().join("|")}`, l,
-        { segs: [{ x1: pa.x, y1: pa.y, cx: mid.x, cy: mid.y, x2: pb.x, y2: pb.y }] }, base,
+      const geom = wps && wps.length
+        ? { poly: [pa, ...wps, pb], r: 10 }
+        : { segs: [(() => { const mid = pointAt(pa, pb, 0.5, spreadOffset(offsets[i])); return { x1: pa.x, y1: pa.y, cx: mid.x, cy: mid.y, x2: pb.x, y2: pb.y }; })()] };
+      emit("path", `link:${key}`, l, geom, base,
         { pick: true, ...(l.filter ? { meta: {
           filter: {
             a: l.a.device, b: l.b.device,
             aExports: [...(l.filter.aExports || [])], bExports: [...(l.filter.bExports || [])],
           },
         } } : {}) });
+      if (opts.editable && opts.editable(l) && wps) {
+        wps.forEach((wp, wi) => waypointHandles.push({ key, dupIdx: offsets[i], idx: wi, link: l, wp }));
+      }
     });
 
     topology.networks.forEach((n) => {
@@ -203,6 +210,13 @@ const TopoScene = (() => {
         const st = emit("text", id, n, { x: pt.x, y: pt.y, w: text.length * 6.5 }, { fill }, { text }, "inner").style;
         if (pop) st.alpha = (st.alpha ?? 1) * pop.a;
       });
+    });
+
+    waypointHandles.forEach(({ key, dupIdx, idx, link, wp }) => {
+      emit("rrect", `linkpt:${key}:${dupIdx}:${idx}`, { link, key, dupIdx, idx },
+        { x: wp.x - 5, y: wp.y - 5, w: 10, h: 10, r: 5 },
+        { fill: theme.accent, stroke: theme.panel, lineWidth: 1.5 },
+        { pick: true, nodeType: "linkpoint" });
     });
 
     return { list };

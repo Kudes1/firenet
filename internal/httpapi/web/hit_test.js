@@ -16,6 +16,14 @@ const HitTest = (() => {
       });
       return { x: x1 - PAD, y: y1 - PAD, w: x2 - x1 + 2 * PAD, h: y2 - y1 + 2 * PAD };
     }
+    if (g.poly) {
+      let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+      g.poly.forEach((p) => {
+        x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y);
+        x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y);
+      });
+      return { x: x1 - PAD, y: y1 - PAD, w: x2 - x1 + 2 * PAD, h: y2 - y1 + 2 * PAD };
+    }
     return { x: g.x - PAD, y: g.y - PAD, w: (g.w || 0) + 2 * PAD, h: (g.h || 0) + 2 * PAD };
   }
 
@@ -71,6 +79,13 @@ const HitTest = (() => {
     return inside;
   }
 
+  // расстояние до ломаной: минимум по всем её отрезкам
+  function distPoly(p, points) {
+    let best = Infinity;
+    for (let i = 0; i < points.length - 1; i++) best = Math.min(best, distSeg(p, points[i].x, points[i].y, points[i + 1].x, points[i + 1].y));
+    return best;
+  }
+
   function pick(list, p, z) {
     for (let i = list.length - 1; i >= 0; i--) {
       const it = list[i];
@@ -80,6 +95,8 @@ const HitTest = (() => {
         // замкнутый залитый путь (облако сети) ловит и свою внутренность
         if (it.geom.closed && it.style && it.style.fill
           && pointInPolygon(p, it.geom.segs)) return it;
+      } else if (it.geom.poly) {
+        if (distPoly(p, it.geom.poly) <= 14 / z) return it;
       } else if (hits(bbox(it), p)) return it;
     }
     return null;

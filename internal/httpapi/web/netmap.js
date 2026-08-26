@@ -51,6 +51,25 @@ const NetMap = (() => {
     return { x: a.x + dx * t + (-dy / len) * offset, y: a.y + dy * t + (dx / len) * offset };
   }
 
+  // distToSeg — расстояние от точки до отрезка ab
+  function distToSeg(p, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
+    return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
+  }
+
+  // insertIndex находит сегмент ломаной points, ближайший к p, и возвращает
+  // индекс его начала — новую точку изгиба вставляют сразу после него.
+  function insertIndex(points, p) {
+    let best = Infinity, at = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const d = distToSeg(p, points[i], points[i + 1]);
+      if (d < best) { best = d; at = i; }
+    }
+    return at;
+  }
+
   // cloudSegs выдаёт контур L2-облака как замкнутый список квадратичных
   // сегментов: прямоугольный периметр с наружными выпуклостями (глубина 6).
   function cloudSegs(x, y, w, h) {
@@ -73,5 +92,8 @@ const NetMap = (() => {
     return segs;
   }
 
-  return Object.freeze({ DEVICE_W, DEVICE_H, NET_W, NET_H, UNION_COLORS, KINDS, center, linkOffsets, spreadOffset, pointAt, cloudSegs });
+  return Object.freeze({
+    DEVICE_W, DEVICE_H, NET_W, NET_H, UNION_COLORS, KINDS,
+    center, linkOffsets, spreadOffset, pointAt, insertIndex, cloudSegs,
+  });
 })();

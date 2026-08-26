@@ -9,14 +9,14 @@ devices:
       kind: router
     - name: core2
       kind: switch
-    - name: market
-      kind: router
     - name: core_office1
       kind: switch
     - name: market-a
       kind: router
     - name: core-market-a
       kind: switch
+    - name: market
+      kind: router
 links:
     - a:
         device: test1
@@ -27,34 +27,10 @@ links:
       b:
         device: test2
     - a:
-        device: core2
-      b:
-        device: market
-    - a:
         device: office1
       b:
         device: core_office1
     - a:
-        device: market
-      b:
-        device: test2
-      filter:
-        a-exports:
-            - MARKET
-        b-exports:
-            - MAIN
-            - market-a
-    - a:
-        device: market
-      b:
-        device: test1
-      filter:
-        a-exports:
-            - MARKET
-        b-exports:
-            - MAIN
-            - market-a
-    - a:
         device: test1
       b:
         device: office1
@@ -70,15 +46,6 @@ links:
       filter:
         a-exports:
             - MAIN
-        b-exports:
-            - OFFICE-NETWORK
-    - a:
-        device: market
-      b:
-        device: office1
-      filter:
-        a-exports:
-            - MARKET
         b-exports:
             - OFFICE-NETWORK
     - a:
@@ -94,6 +61,19 @@ links:
         device: market-a
       b:
         device: core-market-a
+    - a:
+        device: core2
+      b:
+        device: market
+    - a:
+        device: market
+      b:
+        device: test1
+      filter:
+        a-exports:
+            - MARKET
+        b-exports:
+            - MAIN
 networks:
     - name: OFFICE-NETWORK
       subnets:

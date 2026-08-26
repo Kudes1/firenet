@@ -133,7 +133,7 @@ function bootTopology(responses) {
   for (const f of [
     "common.js", "camera.js", "minimap.js", "camera_input.js", "netmap.js", "tween.js",
     "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
-    "net_info.js", "topology.js",
+    "net_info.js", "link_panel.js", "topology.js",
   ]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
@@ -707,6 +707,16 @@ test("delete button removes the selected device after confirm", async () => {
   assert.ok(names.includes("r2 (router)"), "r2 kept");
 });
 
+test("deleting a device cascades to its links and network attachments", async () => {
+  const page = bootTopology(responses);
+  page.sandbox.confirm = () => true;
+  await tick();
+  clickNode(page, "r1");
+  fire(page.ids["topo-delete"], "click", {});
+  assert.equal(page.get("State.topology.links.length"), 0, "link to r1 removed");
+  assert.equal(page.get("State.topology.networks[0].attach.length"), 0, "attach to r1 removed");
+});
+
 test("declining confirm keeps the selected device", async () => {
   const page = bootTopology(responses);
   await tick();
@@ -864,6 +874,47 @@ test("union submenu lists locations and shows a placeholder when none are availa
   assert.ok(item && !item.disabled, "union listed for a node outside it");
 });
 
+test("union submenu with several candidates shows a search field that filters the list", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/topology": {
+      ...responses["/api/topology"],
+      unions: [{ name: "dmz", devices: [] }, { name: "lan", devices: [] }, { name: "office", devices: [] }],
+    },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  const sub = findBtn(
+    ctxMenu(page),
+    (n) => n.tag !== "button" && String(n.attrs.class || "").includes("submenu"),
+  );
+  const input = sub.children.find((c) => c.tag === "input");
+  assert.ok(input, "search field rendered for several candidates");
+  const names = () => sub.children.filter((c) => c.tag === "button" && !c.hidden).map((b) => String(b.textContent));
+
+  input.value = "dm";
+  fire(input, "input", {});
+  assert.deepEqual(names(), ["В объединение «dmz»"], "only the matching union stays visible");
+
+  input.value = "";
+  fire(input, "input", {});
+  assert.deepEqual(names(), ["В объединение «dmz»", "В объединение «lan»", "В объединение «office»"], "clearing restores the full list");
+});
+
+test("union submenu with a single candidate renders no search field", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: [] }] },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  const sub = findBtn(
+    ctxMenu(page),
+    (n) => n.tag !== "button" && String(n.attrs.class || "").includes("submenu"),
+  );
+  assert.ok(!sub.children.some((c) => c.tag === "input"), "no search field for a single candidate");
+});
+
 test("context menu keeps union items above the danger delete item", async () => {
   const page = bootTopology({
     ...responses,
@@ -1018,4 +1069,122 @@ test("a freshly created node pops in and settles", async () => {
   const settled = JSON.parse(page.get(`JSON.stringify(State.list.find((i) => i.id === "device:r3"))`));
   assert.equal(settled.geom.w, 140, "full-size box after the pop");
   assert.equal(settled.style.alpha ?? 1, 1, "fully opaque after the pop");
+});
+
+// --- редактирование точек изгиба связи ---
+
+// midpoint of the default r1–r2 link (centers (110,70) and (310,70) at z=1)
+const LINK_MID = { x: 210, y: 70 };
+
+test("double-click on a link adds a waypoint and switches it to a poly", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "dblclick", { clientX: LINK_MID.x, clientY: LINK_MID.y });
+  const link = byId(page.get, "link:r1|r2");
+  assert.ok(link.geom.poly, "link now renders as a poly");
+  assert.deepEqual(
+    JSON.parse(page.get(`JSON.stringify(State.list.find((i) => i.id === "link:r1|r2").geom.poly[1])`)),
+    LINK_MID,
+    "waypoint placed at the click position",
+  );
+  assert.equal(page.get("State.selection.size"), 1, "adding a waypoint selects the link");
+  assert.ok(byId(page.get, "linkpt:r1|r2:0:0"), "waypoint handle rendered for the selected link");
+});
+
+test("double-click on a waypoint handle removes it", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "dblclick", { clientX: LINK_MID.x, clientY: LINK_MID.y });
+  fire(page.canvas, "dblclick", { clientX: LINK_MID.x, clientY: LINK_MID.y });
+  const link = byId(page.get, "link:r1|r2");
+  assert.ok(link.geom.segs, "link falls back to the auto curve without waypoints");
+  assert.equal(page.get(`State.layout.links["r1|r2"][0].length`), 0, "waypoint removed from layout");
+});
+
+test("dragging a waypoint handle updates its position and rebuilds the display list", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "dblclick", { clientX: LINK_MID.x, clientY: LINK_MID.y });
+  fire(page.canvas, "mousedown", { button: 0, clientX: LINK_MID.x, clientY: LINK_MID.y });
+  fire(page.doc, "mousemove", { clientX: LINK_MID.x, clientY: LINK_MID.y - 30 });
+  fire(page.doc, "mouseup", {});
+  const moved = { x: LINK_MID.x, y: LINK_MID.y - 30 };
+  assert.deepEqual(
+    JSON.parse(page.get(`JSON.stringify(State.layout.links["r1|r2"][0][0])`)),
+    moved,
+    "waypoint moved to the dragged position",
+  );
+  assert.deepEqual(
+    JSON.parse(page.get(`JSON.stringify(State.list.find((i) => i.id === "link:r1|r2").geom.poly[1])`)),
+    moved,
+    "display list reflects the drag",
+  );
+});
+
+// --- link panel: ПКМ по связи → «Редактировать» открывает плавающую панель ---
+
+function domTexts(node) {
+  const out = [];
+  (function walk(n) {
+    if (n._text) out.push(String(n._text));
+    (n.children || []).forEach(walk);
+  })(node);
+  return out;
+}
+
+test("right-click on a link offers Редактировать and opens the link panel at the click point", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 }); // середина связи r1–r2
+  const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+  assert.ok(edit, "edit item present on a link");
+  fire(edit, "click", {});
+  const panel = page.ids["link-panel"];
+  assert.ok(panel && !panel.hidden, "panel opened");
+  assert.match(domTexts(panel).join("|"), /r1.*↔.*r2/, "title names both link devices");
+  assert.equal(panel.style.left, "224px", "anchored near the click point");
+});
+
+test("device context menu has no Редактировать item", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  assert.ok(!findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "no edit item for a device");
+});
+
+test("applying a filter from the link panel updates the topology and marks it dirty", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/link-exports?link=0&side=a": { entities: [{ name: "office", cidr: "10.0.0.0/24" }] },
+    "/api/link-exports?link=0&side=b": { entities: [] },
+  });
+  await tick();
+  assert.equal(page.get("DirtyGuard.isDirty()"), false, "clean after boot");
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  const panel = page.ids["link-panel"];
+  fire(findBtn(panel, (b) => String(b.textContent).trim() === "Сделать фильтрованной"), "click", {});
+  await tick();
+  const select = findBtn(panel, (n) => n.tag === "select");
+  select.value = "office";
+  fire(select, "change", {});
+  fire(findBtn(panel, (b) => String(b.textContent).trim() === "Применить"), "click", {});
+  assert.deepEqual(
+    JSON.parse(page.get("JSON.stringify(State.topology.links[0].filter)")),
+    { aExports: ["office"], bExports: [] },
+    "filter applied to the in-memory topology",
+  );
+  assert.ok(panel.hidden, "panel closes after apply");
+  assert.equal(page.get("DirtyGuard.isDirty()"), true, "unsaved filter marks the page dirty");
+});
+
+test("cancel closes the link panel without touching the topology", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  const panel = page.ids["link-panel"];
+  fire(findBtn(panel, (b) => String(b.textContent).trim() === "Отмена"), "click", {});
+  assert.ok(panel.hidden, "panel closed");
+  assert.equal(page.get("DirtyGuard.isDirty()"), false, "no changes recorded");
 });

@@ -3,7 +3,7 @@
 const State = {
   topology: { devices: [], links: [], networks: [], unions: [] },
   subnets: [],
-  layout: { devices: {}, networks: {} },
+  layout: { devices: {}, networks: {}, links: {} },
   camera: Camera.create(),
   tool: "select",
   selection: new Set(), // device/network/link objects
@@ -73,6 +73,25 @@ const Topology = (() => {
     NetInfo.show(n, State.subnets, Camera.worldToScreen(State.camera, pos.x + NET_W, pos.y), { w: r.width, h: r.height });
   }
 
+  // openLinkPanel открывает плавающую панель редактирования фильтра связи
+  // в экранной точке at (правый клик, из контекстного меню). Правки идут в
+  // State.topology.links в памяти, как и остальные правки канвы — сохранение
+  // общей кнопкой «Сохранить», не отдельным запросом.
+  function openLinkPanel(link, at) {
+    const index = State.topology.links.indexOf(link);
+    if (index < 0) return;
+    const r = canvas().getBoundingClientRect();
+    LinkPanel.show(link, index, {
+      subnets: State.subnets,
+      fetchExports: (i, side) => Api.get(`/api/link-exports?link=${i}&side=${side}`).then((res) => res.entities || []),
+      onApply: (filter) => {
+        const { filter: _drop, ...rest } = link;
+        State.topology.links[index] = filter ? { ...rest, filter } : rest;
+        render();
+      },
+    }, at, { w: r.width, h: r.height });
+  }
+
   function scheduleLayoutSave() {
     clearTimeout(saveLayoutTimer);
     saveLayoutTimer = setTimeout(() => {
@@ -108,16 +127,32 @@ const Topology = (() => {
   function showContextMenu(at, items) {
     const menu = document.getElementById("topo-context-menu");
     menu.innerHTML = "";
-    const mkItem = (label, action, cls, active = !!action) => {
+    const mkItem = (label, action, cls, active = !!action, search) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = label;
+      if (search !== undefined) btn.dataset.search = search;
       if (action) {
         if (cls) btn.setAttribute("class", cls);
         btn.onclick = (e) => { e.stopPropagation(); hideContextMenu(); action(); };
       }
       if (!active) btn.disabled = true;
       return btn;
+    };
+    // searchField добавляет в подменю фильтр по data-search: клик не должен
+    // закрыть меню, ввод скрывает несовпавшие пункты через containsFold.
+    const searchField = (sub) => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "ctx-search";
+      input.placeholder = "Поиск...";
+      input.addEventListener("click", (e) => e.stopPropagation());
+      input.addEventListener("input", () => {
+        Array.from(sub.children).forEach((c) => {
+          if (c.dataset.search !== undefined) c.hidden = !containsFold(c.dataset.search, input.value);
+        });
+      });
+      return input;
     };
     const fill = (parent, entries) => {
       entries.forEach((it) => {
@@ -126,6 +161,11 @@ const Topology = (() => {
           wrap.setAttribute("class", "ctx-sub");
           const sub = document.createElement("div");
           sub.setAttribute("class", "submenu");
+          if (it.searchable) {
+            const search = searchField(sub);
+            sub.append(search);
+            wrap.addEventListener("mouseenter", () => search.focus());
+          }
           wrap.append(mkItem(it.label, null, null, true), sub);
           fill(sub, it.children);
           parent.append(wrap);
@@ -150,15 +190,18 @@ const Topology = (() => {
     render();
   }
 
-  // menuItemsFor собирает пункты меню объекта: членство в объединениях
-  // (только у узлов) и удаление с подписью по типу; объединения — до danger.
-  function menuItemsFor(obj, nodeType) {
+  // menuItemsFor собирает пункты меню объекта: редактирование фильтра
+  // (только у связей), членство в объединениях (только у узлов) и удаление
+  // с подписью по типу; объединения — до danger.
+  function menuItemsFor(obj, nodeType, at) {
     const key = nodeType === "device" ? "devices" : nodeType === "network" ? "networks" : null;
+    const isLink = !key && obj.type !== "attach";
     const label = nodeType === "device" ? `устройство ${obj.name}`
       : nodeType === "network" ? `сеть ${obj.name}`
       : obj.type === "attach" ? `привязка ${obj.net.name}–${obj.device}`
       : `${obj.filter ? "фильтрованная связь" : "связь"} ${obj.a.device}–${obj.b.device}`;
     const items = [];
+    if (isLink) items.push(["Редактировать", () => openLinkPanel(obj, at)]);
     if (key) {
       const inSet = (s) => (s[key] || []).includes(obj.name);
       if ((State.topology.unions || []).some(inSet)) {
@@ -166,10 +209,11 @@ const Topology = (() => {
       }
       const candidates = (State.topology.unions || [])
         .filter((s) => !inSet(s))
-        .map((s) => [`В объединение «${s.name}»`, () => setUnion(obj.name, key, State.topology.unions.indexOf(s))]);
+        .map((s) => [`В объединение «${s.name}»`, () => setUnion(obj.name, key, State.topology.unions.indexOf(s)), null, true, s.name]);
       items.push({
         label: "Добавить в объединение",
         children: candidates.length ? candidates : [["(нет доступных объединений)", null]],
+        searchable: candidates.length > 1,
       });
     }
     items.push(["Удалить " + label, () => {
@@ -189,9 +233,10 @@ const Topology = (() => {
       if (State.tool !== "select") return;
       e.preventDefault();
       const hit = HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z);
-      if (!hit || !(hit.nodeType || hit.id.startsWith("link:") || hit.id.startsWith("attach:"))) return;
-      const items = menuItemsFor(hit.ref, hit.nodeType);
+      const isNode = hit && (hit.nodeType === "device" || hit.nodeType === "network");
+      if (!hit || !(isNode || hit.id.startsWith("link:") || hit.id.startsWith("attach:"))) return;
       const at = screenPoint(e);
+      const items = menuItemsFor(hit.ref, hit.nodeType, at);
       if (camControls && camControls.isRightDown()) ctxPending = { items, at };
       else showContextMenu(at, items);
     });
@@ -220,9 +265,12 @@ const Topology = (() => {
   }
 
   // deleteSelection drops every selected device/network/link plus any
-  // selected attachments ({type:"attach", net, device} entries).
+  // selected attachments ({type:"attach", net, device} entries). Deleting a
+  // device also cascades to links and attachments that reference it, so the
+  // topology never ends up with dangling references the server would reject.
   function deleteSelection() {
     if (!State.selection.size) return;
+    const deletedDevices = new Set();
     State.selection.forEach((s) => {
       if (s && s.type === "attach") s.net.attach = s.net.attach.filter((a) => a.device !== s.device);
     });
@@ -230,6 +278,7 @@ const Topology = (() => {
       if (State.selection.has(d)) {
         delete State.layout.devices[d.name];
         dropMember(d.name, "devices");
+        deletedDevices.add(d.name);
         return false;
       }
       return true;
@@ -242,7 +291,15 @@ const Topology = (() => {
       }
       return true;
     });
-    State.topology.links = State.topology.links.filter((l) => !State.selection.has(l));
+    if (deletedDevices.size) {
+      State.topology.networks.forEach((n) => {
+        n.attach = n.attach.filter((a) => !deletedDevices.has(a.device));
+      });
+    }
+    State.topology.links = State.topology.links.filter((l) => {
+      if (State.selection.has(l)) return false;
+      return !deletedDevices.has(l.a.device) && !deletedDevices.has(l.b.device);
+    });
     clearSelection();
   }
 
@@ -308,7 +365,7 @@ const Topology = (() => {
       const o = toWorld(start);
       const dx = w.x - o.x;
       const dy = w.y - o.y;
-      if (Math.abs(p.x - start.x) > 3 || Math.abs(p.y - start.y) > 3) { moved = true; NetInfo.hide(); }
+      if (Math.abs(p.x - start.x) > 3 || Math.abs(p.y - start.y) > 3) { moved = true; NetInfo.hide(); LinkPanel.hide(); }
       group.forEach((g) => { g.map[g.name] = { x: g.pos.x + dx, y: g.pos.y + dy }; });
       render();
     }
@@ -322,12 +379,73 @@ const Topology = (() => {
     document.addEventListener("mouseup", onUp);
   }
 
+  // linkDupIndex находит порядковый номер link среди параллельных связей той
+  // же пары устройств — тот же индекс, что использует NetMap.linkOffsets
+  // при разводке кривых, здесь адресует layout.links[key][idx].
+  function linkDupIndex(link) {
+    const key = [link.a.device, link.b.device].sort().join("|");
+    const offsets = NetMap.linkOffsets(State.topology.links);
+    return { key, idx: offsets[State.topology.links.indexOf(link)] };
+  }
+
+  // addWaypoint вставляет точку изгиба в место клика на связи, между
+  // ближайшей парой соседних точек (концы устройств или уже существующие
+  // точки изгиба).
+  function addWaypoint(link, p) {
+    const { key, idx } = linkDupIndex(link);
+    State.layout.links[key] = State.layout.links[key] || [];
+    const arr = State.layout.links[key];
+    while (arr.length <= idx) arr.push([]);
+    const wps = arr[idx];
+    const points = [deviceCenter(link.a.device), ...wps, deviceCenter(link.b.device)];
+    wps.splice(NetMap.insertIndex(points, p), 0, { x: p.x, y: p.y });
+    selectNode(link, false);
+    scheduleLayoutSave();
+  }
+
+  // removeWaypoint удаляет одну точку изгиба по ссылке хендла ({key, dupIdx, idx}).
+  function removeWaypoint(ref) {
+    const arr = State.layout.links[ref.key] && State.layout.links[ref.key][ref.dupIdx];
+    if (!arr) return;
+    arr.splice(ref.idx, 1);
+    scheduleLayoutSave();
+    render();
+  }
+
+  // startPointDrag тащит одну точку изгиба связи; сохранение — тем же
+  // debounced-путём, что и перетаскивание узлов.
+  function startPointDrag(ref, e) {
+    const arr = State.layout.links[ref.key][ref.dupIdx];
+    function onMove(ev) {
+      arr[ref.idx] = toWorld(screenPoint(ev));
+      render();
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      scheduleLayoutSave();
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  // onCanvasDblClick: двойной клик по точке изгиба удаляет её, по связи —
+  // добавляет новую точку в месте клика (и выделяет связь).
+  function onCanvasDblClick(e) {
+    if (State.tool !== "select") return;
+    const hit = HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z);
+    if (!hit) return;
+    if (hit.nodeType === "linkpoint") removeWaypoint(hit.ref);
+    else if (hit.id.startsWith("link:")) addWaypoint(hit.ref, toWorld(screenPoint(e)));
+  }
+
   // onPlainClick: клик по узлу без движения — connect/select/NetInfo.
   function onPlainClick(obj, ev) {
     const isDev = State.topology.devices.includes(obj);
     if (State.tool === "connect") isDev ? onDeviceConnect(obj.name) : onNetworkClick(obj.name);
     else if (State.tool === "select") {
       selectNode(obj, ev.shiftKey);
+      LinkPanel.hide();
       isDev ? NetInfo.hide() : showNetInfo(obj);
     }
   }
@@ -342,9 +460,11 @@ const Topology = (() => {
         if (State.tool === "select") startMarquee(e);
         return;
       }
-      if (hit.nodeType) startNodeDrag(hit.ref, e);
+      if (hit.nodeType === "linkpoint") startPointDrag(hit.ref, e);
+      else if (hit.nodeType) startNodeDrag(hit.ref, e);
       else if (hit.id.startsWith("link:") || hit.id.startsWith("attach:")) selectNode(hit.ref, e.shiftKey);
     });
+    canvas().addEventListener("dblclick", onCanvasDblClick);
     document.addEventListener("keydown", (e) => {
       const tag = e.target && e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -359,6 +479,7 @@ const Topology = (() => {
     cancelPending();
     hidePopover();
     NetInfo.hide();
+    LinkPanel.hide();
     TOOLS.forEach((t) => {
       const btn = document.getElementById("tool-" + t);
       btn.setAttribute("class", "tool" + (t === tool ? " active" : ""));
@@ -375,6 +496,7 @@ const Topology = (() => {
       // клик по узлу/связи уже обработан их mousedown — фону он не адресован
       if (HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z)) return;
       NetInfo.hide(); // окно состава сети закрывает только клик по фону
+      LinkPanel.hide();
       clearSearch(); // клик по пустому фону сбрасывает активный поиск
       if (State.tool === "device" || State.tool === "network") openNodePopover(screenPoint(e), State.tool);
       else {
@@ -731,7 +853,7 @@ const Topology = (() => {
     }
     if (part === "shape") {
       return (State.selection.has(obj) ? " selected" : "")
-        + (pending && (pending.device === obj.name || pending.network === obj.name) ? " pending" : "")
+        + (pending && obj.name !== undefined && (pending.device === obj.name || pending.network === obj.name) ? " pending" : "")
         + mark(searchSet.has(obj));
     }
     return shade(searchSet.has(obj));
@@ -754,6 +876,7 @@ const Topology = (() => {
       classes: nodeClasses,
       popOf,
       fade: { dim: State.searchFade },
+      editable: (obj) => State.selection.has(obj),
     }).list;
     view.invalidate();
     minimap.update();
@@ -798,10 +921,10 @@ const Topology = (() => {
     }
     try {
       const layout = await Api.get("/api/layout");
-      State.layout = { devices: layout.devices || {}, networks: layout.networks || layout.subnets || {} };
+      State.layout = { devices: layout.devices || {}, networks: layout.networks || layout.subnets || {}, links: layout.links || {} };
       State.camera = layout.camera && layout.camera.z > 0 ? { ...Camera.create(), ...layout.camera } : Camera.create();
     } catch {
-      State.layout = { devices: {}, networks: {} };
+      State.layout = { devices: {}, networks: {}, links: {} };
     }
     theme = CanvasTheme.fromComputed(getComputedStyle(document.documentElement));
     view = CanvasView.create(canvas(), {
@@ -831,6 +954,7 @@ const Topology = (() => {
     setupPopover();
     setupSearch();
     NetInfo.attach(canvas());
+    LinkPanel.attach(canvas());
     setTool("select");
     Topology.render();
   }

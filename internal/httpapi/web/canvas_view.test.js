@@ -74,6 +74,17 @@ test("offscreen primitives are culled", () => {
   assert.equal(traceCalls.length, 1, "only the visible shape traced");
 });
 
+test("poly geometry traces straight segments with rounded corners via arcTo", () => {
+  const list = [
+    { kind: "path", geom: { poly: [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 50 }], r: 10 }, style: { stroke: "#222", lineWidth: 1.5 } },
+  ];
+  const { view, lastCtx } = boot(list, CAM);
+  view.draw();
+  const calls = lastCtx().calls;
+  assert.ok(calls.some((c) => c[0] === "arcTo" && c[1][4] === 10), "corner rounded with the geometry's radius");
+  assert.ok(calls.some((c) => c[0] === "lineTo" && c[1][0] === 50 && c[1][1] === 50), "path ends at the last point");
+});
+
 test("overlay draws after the scene", () => {
   const scene = [{ kind: "rrect", geom: { x: 0, y: 0, w: 10, h: 10, r: 0 }, style: {} }];
   const over = [{ kind: "path", geom: { segs: [{ x1: 0, y1: 0, cx: 5, cy: 5, x2: 10, y2: 10 }] }, style: {} }];

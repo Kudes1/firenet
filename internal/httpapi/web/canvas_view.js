@@ -15,6 +15,11 @@ const CanvasView = (() => {
       ctx.moveTo(g.segs[0].x1, g.segs[0].y1);
       g.segs.forEach((s) => ctx.quadraticCurveTo(s.cx, s.cy, s.x2, s.y2));
       if (g.closed) ctx.closePath();
+    } else if (g.poly) {
+      ctx.beginPath();
+      ctx.moveTo(g.poly[0].x, g.poly[0].y);
+      for (let i = 1; i < g.poly.length - 1; i++) ctx.arcTo(g.poly[i].x, g.poly[i].y, g.poly[i + 1].x, g.poly[i + 1].y, g.r || 0);
+      ctx.lineTo(g.poly[g.poly.length - 1].x, g.poly[g.poly.length - 1].y);
     } else {
       ctx.beginPath();
       const r = g.r || 0;

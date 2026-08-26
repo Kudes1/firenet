@@ -10,6 +10,12 @@ vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "netmap.js"), "utf8"), sandbox);
 const NetMap = vm.runInContext("NetMap", sandbox);
 
+test("insertIndex finds the closest segment of a polyline", () => {
+  const points = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }];
+  assert.equal(NetMap.insertIndex(points, { x: 40, y: 5 }), 0, "closest to the first segment");
+  assert.equal(NetMap.insertIndex(points, { x: 95, y: 60 }), 1, "closest to the second segment");
+});
+
 test("cloudSegs outlines the bbox with quadratic segments", () => {
   const segs = NetMap.cloudSegs(0, 0, 160, 60);
   assert.ok(segs.length >= 18, "enough bumps on the perimeter");

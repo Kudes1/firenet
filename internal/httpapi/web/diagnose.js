@@ -652,7 +652,7 @@ const Diagnose = (() => {
       ]);
       state.topology = topo;
       state.subnets = subnetsDoc.subnets || [];
-      state.layout = { devices: layout.devices || {}, networks: layout.networks || layout.subnets || {} };
+      state.layout = { devices: layout.devices || {}, networks: layout.networks || layout.subnets || {}, links: layout.links || {} };
       state.camera = layout.camera && layout.camera.z > 0
         ? { ...Camera.create(), ...layout.camera }
         : Camera.create();

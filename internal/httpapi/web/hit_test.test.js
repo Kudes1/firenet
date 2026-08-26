@@ -67,6 +67,18 @@ test("open or unfilled paths stay outline-only picks", () => {
   }
 });
 
+test("bbox covers a poly's points", () => {
+  const b = HitTest.bbox({ kind: "path", geom: { poly: [{ x: 10, y: 10 }, { x: 100, y: 50 }, { x: 10, y: 90 }] } });
+  assert.deepEqual(b, { x: 6, y: 6, w: 98, h: 88 });
+});
+
+test("pick hits a poly line along its straight segments", () => {
+  const poly = { kind: "path", geom: { poly: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }] }, pick: true, name: "elbow" };
+  assert.equal(HitTest.pick([poly], { x: 50, y: 2 }, 1).name, "elbow", "first segment hit");
+  assert.equal(HitTest.pick([poly], { x: 99, y: 50 }, 1).name, "elbow", "second segment hit");
+  assert.equal(HitTest.pick([poly], { x: 50, y: 50 }, 1), null, "corner cut is not a hit");
+});
+
 test("pickNodes keeps bbox semantics for closed shapes", () => {
   const net = {
     kind: "path", geom: { segs: cloudSegs(100, 100), closed: true },

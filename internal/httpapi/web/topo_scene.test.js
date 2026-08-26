@@ -69,6 +69,34 @@ test("filtered link carries dash and filter meta", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(link.meta.filter)), { a: "r1", b: "r2", aExports: ["N1"], bExports: ["N2"] });
 });
 
+test("link with waypoints renders as a poly instead of a curve", () => {
+  const s = scene();
+  s.topology.devices.push({ name: "r2", kind: "router" });
+  s.layout.devices.r2 = { x: 200, y: 40 };
+  s.topology.links = [{ a: { device: "r1" }, b: { device: "r2" } }];
+  s.layout.links = { "r1|r2": [[{ x: 150, y: 20 }]] };
+  const { list } = TopoScene.buildScene(s, { theme });
+  const link = list.find((i) => i.id === "link:r1|r2");
+  assert.ok(link.geom.poly, "poly geometry used when waypoints exist");
+  assert.equal(link.geom.poly.length, 3, "device center, waypoint, device center");
+  assert.deepEqual(link.geom.poly[1], { x: 150, y: 20 });
+});
+
+test("waypoint handles render only when the link is editable", () => {
+  const s = scene();
+  s.topology.devices.push({ name: "r2", kind: "router" });
+  s.layout.devices.r2 = { x: 200, y: 40 };
+  s.topology.links = [{ a: { device: "r1" }, b: { device: "r2" } }];
+  s.layout.links = { "r1|r2": [[{ x: 150, y: 20 }]] };
+  const hidden = TopoScene.buildScene(s, { theme }).list;
+  assert.equal(hidden.filter((i) => i.nodeType === "linkpoint").length, 0, "no handles without editable()");
+  const shown = TopoScene.buildScene(s, { theme, editable: () => true }).list;
+  const handles = shown.filter((i) => i.nodeType === "linkpoint");
+  assert.equal(handles.length, 1);
+  assert.equal(handles[0].id, "linkpt:r1|r2:0:0");
+  assert.ok(handles[0].pick, "handle is pickable");
+});
+
 test("fade.dim scales dimming progress", () => {
   // дефолт fade.dim = 1: без переданного fade состояние применено полностью
   // (та же семантика, что у flow — страницы без анимации не передают fade)
