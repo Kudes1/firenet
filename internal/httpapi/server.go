@@ -8,30 +8,42 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/kudes1/firenet/internal/auth"
 )
 
 // NewServer builds the HTTP handler for firenet's web UI and JSON API,
-// backed by store. Routing/middleware here is deliberately decoupled from
-// "how many projects" or auth — a future team server can wrap this with its
-// own routing and auth layer and pick a ProjectStore per request instead of
-// once at startup, without touching a single handler.
-func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
-	h := &handlers{store: store, log: log}
+// backed by store. Every /api/ route requires a valid session (login and
+// logout excepted); routing/project selection otherwise stays decoupled
+// from "how many projects" — a future team server can still pick a
+// ProjectStore per request instead of once at startup, without touching a
+// single handler.
+func NewServer(store ProjectStore, users *auth.Store, log *slog.Logger) http.Handler {
+	h := &handlers{store: store, users: users, log: log}
+
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("GET /api/topology", h.getTopology)
+	apiMux.HandleFunc("PUT /api/topology", h.putTopology)
+	apiMux.HandleFunc("GET /api/subnets", h.getSubnets)
+	apiMux.HandleFunc("GET /api/link-exports", h.getLinkExports)
+	apiMux.HandleFunc("PUT /api/subnets", h.putSubnets)
+	apiMux.HandleFunc("GET /api/rules", h.getRules)
+	apiMux.HandleFunc("PUT /api/rules", h.putRules)
+	apiMux.HandleFunc("POST /api/validate", h.validate)
+	apiMux.HandleFunc("POST /api/compile", h.compile)
+	apiMux.HandleFunc("POST /api/diagnose", h.diagnose)
+	apiMux.HandleFunc("GET /api/lint", h.lint)
+	apiMux.HandleFunc("GET /api/layout", h.getLayout)
+	apiMux.HandleFunc("PUT /api/layout", h.putLayout)
+	apiMux.HandleFunc("GET /api/me", h.me)
+	apiMux.Handle("GET /api/users", auth.RequireAdmin(http.HandlerFunc(h.listUsers)))
+	apiMux.Handle("POST /api/users", auth.RequireAdmin(http.HandlerFunc(h.createUser)))
+	apiMux.Handle("DELETE /api/users/{id}", auth.RequireAdmin(http.HandlerFunc(h.deleteUser)))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/topology", h.getTopology)
-	mux.HandleFunc("PUT /api/topology", h.putTopology)
-	mux.HandleFunc("GET /api/subnets", h.getSubnets)
-	mux.HandleFunc("GET /api/link-exports", h.getLinkExports)
-	mux.HandleFunc("PUT /api/subnets", h.putSubnets)
-	mux.HandleFunc("GET /api/rules", h.getRules)
-	mux.HandleFunc("PUT /api/rules", h.putRules)
-	mux.HandleFunc("POST /api/validate", h.validate)
-	mux.HandleFunc("POST /api/compile", h.compile)
-	mux.HandleFunc("POST /api/diagnose", h.diagnose)
-	mux.HandleFunc("GET /api/lint", h.lint)
-	mux.HandleFunc("GET /api/layout", h.getLayout)
-	mux.HandleFunc("PUT /api/layout", h.putLayout)
+	mux.HandleFunc("POST /api/login", h.login)
+	mux.HandleFunc("POST /api/logout", h.logout)
+	mux.Handle("/api/", auth.RequireAuth(users)(apiMux))
 
 	mux.HandleFunc("POST /ui/compile", h.uiCompile)
 
@@ -39,6 +51,7 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/topology", http.StatusFound)
 	})
+	mux.HandleFunc("GET /login", servePage("login.html"))
 	mux.HandleFunc("GET /ui/topology", servePage("topology.html"))
 	mux.HandleFunc("GET /ui/subnets", servePage("subnets.html"))
 	mux.HandleFunc("GET /ui/networks", servePage("networks.html"))
@@ -48,6 +61,7 @@ func NewServer(store ProjectStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
 	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
 	mux.HandleFunc("GET /ui/diagnose", servePage("diagnose.html"))
+	mux.HandleFunc("GET /ui/users", servePage("users.html"))
 
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {

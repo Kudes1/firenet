@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/kudes1/firenet/internal/app"
+	"github.com/kudes1/firenet/internal/auth"
 	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/graph"
 	"github.com/kudes1/firenet/internal/rules"
@@ -22,6 +23,7 @@ import (
 
 type handlers struct {
 	store ProjectStore
+	users *auth.Store
 	log   *slog.Logger
 }
 

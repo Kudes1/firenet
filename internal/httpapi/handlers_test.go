@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -14,6 +15,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/kudes1/firenet/internal/auth"
+	"github.com/kudes1/firenet/internal/db/dbtest"
 	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/lint"
 	"github.com/kudes1/firenet/internal/rules"
@@ -48,6 +51,12 @@ func discardLogger() *slog.Logger {
 
 func newTestServer(t *testing.T) (http.Handler, FileProjectStore) {
 	t.Helper()
+	pool := dbtest.Open(t)
+	users := auth.NewStore(pool)
+	if err := users.BootstrapAdmin(context.Background(), "admin", "test-password-1"); err != nil {
+		t.Fatalf("bootstrap admin: %v", err)
+	}
+
 	dir := t.TempDir()
 	store := FileProjectStore{
 		TopologyPath: filepath.Join(dir, "topology.yaml"),
@@ -64,7 +73,38 @@ func newTestServer(t *testing.T) (http.Handler, FileProjectStore) {
 	if err := store.WriteRules([]byte(fixtureRules)); err != nil {
 		t.Fatalf("seed rules: %v", err)
 	}
-	return NewServer(store, discardLogger()), store
+
+	srv := NewServer(store, users, discardLogger())
+	return authenticatedHandler(t, srv), store
+}
+
+// authenticatedHandler logs in once and returns a handler that stamps
+// every incoming test request with that session cookie first, so the
+// dozens of existing handler tests that build requests directly and call
+// srv.ServeHTTP need no changes to stay authenticated.
+func authenticatedHandler(t *testing.T, srv http.Handler) http.Handler {
+	t.Helper()
+	body, err := json.Marshal(loginRequest{Username: "admin", Password: "test-password-1"})
+	if err != nil {
+		t.Fatalf("marshal login body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("test login failed: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("test login did not set a session cookie")
+	}
+	sessionCookie := cookies[0]
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.AddCookie(sessionCookie)
+		srv.ServeHTTP(w, r)
+	})
 }
 
 // errorBody decodes the {"error": ...} envelope into the raw message.
