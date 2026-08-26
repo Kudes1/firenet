@@ -6,32 +6,33 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/kudes1/firenet/internal/auth"
 	"github.com/kudes1/firenet/internal/db/dbtest"
+	"github.com/kudes1/firenet/internal/pgstore"
+	"github.com/kudes1/firenet/internal/projectdoc"
 )
 
 func newUnauthenticatedTestServer(t *testing.T) (http.Handler, *auth.Store) {
 	t.Helper()
 	pool := dbtest.Open(t)
 	users := auth.NewStore(pool)
-	if err := users.BootstrapAdmin(context.Background(), "admin", "test-password-1"); err != nil {
+	ctx := context.Background()
+	if err := users.BootstrapAdmin(ctx, "admin", "test-password-1"); err != nil {
 		t.Fatalf("bootstrap admin: %v", err)
 	}
+	admin, err := users.GetUserByUsername(ctx, "admin")
+	if err != nil {
+		t.Fatalf("get admin: %v", err)
+	}
 
-	dir := t.TempDir()
-	store := FileProjectStore{
-		TopologyPath: filepath.Join(dir, "topology.yaml"),
-		SubnetsPath:  filepath.Join(dir, "subnets.yaml"),
-		RulesPath:    filepath.Join(dir, "rules.yaml"),
-		LayoutPath:   filepath.Join(dir, ".firenet-layout.json"),
+	projects := pgstore.NewStore(pool)
+	if _, err := projects.SeedInitialVersion(ctx, projectdoc.ProjectDoc{}, admin); err != nil {
+		t.Fatalf("seed initial version: %v", err)
 	}
-	if err := store.EnsureSeeded(); err != nil {
-		t.Fatalf("seed store: %v", err)
-	}
-	return NewServer(store, users, discardLogger()), users
+
+	return NewServer(projects, users, discardLogger()), users
 }
 
 func TestLoginSetsSessionCookie(t *testing.T) {
@@ -69,7 +70,7 @@ func TestProtectedRouteWithoutSessionIs401(t *testing.T) {
 	srv, _ := newUnauthenticatedTestServer(t)
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/topology", nil))
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/versions/current/topology", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("got status %d, want 401", rec.Code)
 	}
@@ -90,7 +91,7 @@ func TestLogoutClearsSession(t *testing.T) {
 		t.Fatalf("got status %d, want 204", rec.Code)
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/api/topology", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/api/versions/current/topology", nil)
 	req2.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: sess.Token})
 	rec2 := httptest.NewRecorder()
 	srv.ServeHTTP(rec2, req2)

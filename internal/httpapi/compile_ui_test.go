@@ -29,7 +29,7 @@ func encodeForm(form map[string]string) string {
 }
 
 func TestUICompile_Success(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, _ := newTestServer(t)
 	rec := doForm(t, h, http.MethodPost, "/ui/compile", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)

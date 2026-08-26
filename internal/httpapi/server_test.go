@@ -12,7 +12,7 @@ import (
 // revalidation: the browser keeps its cached copy, a matching
 // If-None-Match gets a cheap 304, and a rebuild changes the hash.
 func TestStaticAssetsNoCache(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, _, _ := newTestServer(t)
 	for _, path := range []string{"/common.js", "/rules.js", "/style.css", "/favicon.svg"} {
 		rec := doJSON(t, srv, http.MethodGet, path, nil)
 		if rec.Code != http.StatusOK {

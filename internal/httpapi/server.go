@@ -10,35 +10,54 @@ import (
 	"strings"
 
 	"github.com/kudes1/firenet/internal/auth"
+	"github.com/kudes1/firenet/internal/pgstore"
 )
 
-// NewServer builds the HTTP handler for firenet's web UI and JSON API,
-// backed by store. Every /api/ route requires a valid session (login and
-// logout excepted); routing/project selection otherwise stays decoupled
-// from "how many projects" — a future team server can still pick a
-// ProjectStore per request instead of once at startup, without touching a
-// single handler.
-func NewServer(store ProjectStore, users *auth.Store, log *slog.Logger) http.Handler {
-	h := &handlers{store: store, users: users, log: log}
+// NewServer builds the HTTP handler for firenet's web UI and JSON API.
+// Every /api/ route requires a valid session (login/logout excepted).
+// Project content lives entirely in projects (internal/pgstore): the
+// current confirmed version is read-only everywhere, edits only ever
+// happen inside a personal draft.
+func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) http.Handler {
+	h := &handlers{projects: projects, users: users, log: log}
 
 	apiMux := http.NewServeMux()
-	apiMux.HandleFunc("GET /api/topology", h.getTopology)
-	apiMux.HandleFunc("PUT /api/topology", h.putTopology)
-	apiMux.HandleFunc("GET /api/subnets", h.getSubnets)
-	apiMux.HandleFunc("GET /api/link-exports", h.getLinkExports)
-	apiMux.HandleFunc("PUT /api/subnets", h.putSubnets)
-	apiMux.HandleFunc("GET /api/rules", h.getRules)
-	apiMux.HandleFunc("PUT /api/rules", h.putRules)
-	apiMux.HandleFunc("POST /api/validate", h.validate)
-	apiMux.HandleFunc("POST /api/compile", h.compile)
-	apiMux.HandleFunc("POST /api/diagnose", h.diagnose)
-	apiMux.HandleFunc("GET /api/lint", h.lint)
-	apiMux.HandleFunc("GET /api/layout", h.getLayout)
-	apiMux.HandleFunc("PUT /api/layout", h.putLayout)
 	apiMux.HandleFunc("GET /api/me", h.me)
 	apiMux.Handle("GET /api/users", auth.RequireAdmin(http.HandlerFunc(h.listUsers)))
 	apiMux.Handle("POST /api/users", auth.RequireAdmin(http.HandlerFunc(h.createUser)))
 	apiMux.Handle("DELETE /api/users/{id}", auth.RequireAdmin(http.HandlerFunc(h.deleteUser)))
+
+	apiMux.HandleFunc("GET /api/versions", h.versionHistory)
+	apiMux.HandleFunc("GET /api/versions/diff", h.versionDiff)
+	apiMux.Handle("POST /api/versions/{n}/restore", auth.RequireAdmin(http.HandlerFunc(h.restoreVersion)))
+	apiMux.HandleFunc("GET /api/versions/current/topology", h.getCurrentTopology)
+	apiMux.HandleFunc("GET /api/versions/current/subnets", h.getCurrentSubnets)
+	apiMux.HandleFunc("GET /api/versions/current/rules", h.getCurrentRules)
+	apiMux.HandleFunc("GET /api/versions/current/layout", h.getCurrentLayout)
+	apiMux.HandleFunc("GET /api/versions/current/link-exports", h.getCurrentLinkExports)
+	apiMux.HandleFunc("POST /api/versions/current/validate", h.validateCurrent)
+	apiMux.HandleFunc("POST /api/versions/current/compile", h.compileCurrent)
+	apiMux.HandleFunc("POST /api/versions/current/diagnose", h.diagnoseCurrent)
+	apiMux.HandleFunc("GET /api/versions/current/lint", h.lintCurrent)
+
+	apiMux.HandleFunc("POST /api/drafts", h.createDraft)
+	apiMux.HandleFunc("GET /api/drafts", h.listDrafts)
+	apiMux.HandleFunc("DELETE /api/drafts/{id}", h.deleteDraft)
+	apiMux.HandleFunc("GET /api/drafts/{id}/diff", h.draftDiff)
+	apiMux.Handle("POST /api/drafts/{id}/confirm", auth.RequireAdmin(http.HandlerFunc(h.confirmDraft)))
+	apiMux.HandleFunc("GET /api/drafts/{id}/topology", h.getDraftTopology)
+	apiMux.HandleFunc("PUT /api/drafts/{id}/topology", h.putDraftTopology)
+	apiMux.HandleFunc("GET /api/drafts/{id}/subnets", h.getDraftSubnets)
+	apiMux.HandleFunc("PUT /api/drafts/{id}/subnets", h.putDraftSubnets)
+	apiMux.HandleFunc("GET /api/drafts/{id}/rules", h.getDraftRules)
+	apiMux.HandleFunc("PUT /api/drafts/{id}/rules", h.putDraftRules)
+	apiMux.HandleFunc("GET /api/drafts/{id}/layout", h.getDraftLayout)
+	apiMux.HandleFunc("PUT /api/drafts/{id}/layout", h.putDraftLayout)
+	apiMux.HandleFunc("GET /api/drafts/{id}/link-exports", h.getDraftLinkExports)
+	apiMux.HandleFunc("POST /api/drafts/{id}/validate", h.validateDraft)
+	apiMux.HandleFunc("POST /api/drafts/{id}/compile", h.compileDraft)
+	apiMux.HandleFunc("POST /api/drafts/{id}/diagnose", h.diagnoseDraft)
+	apiMux.HandleFunc("GET /api/drafts/{id}/lint", h.lintDraft)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/login", h.login)

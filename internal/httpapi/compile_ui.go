@@ -12,28 +12,19 @@ type compileView struct {
 }
 
 func (h *handlers) uiCompile(w http.ResponseWriter, r *http.Request) {
-	topoRaw, err := h.store.ReadTopology()
+	doc, err := h.currentDoc(r)
 	if err != nil {
-		h.renderCompileResults(w, compileView{Error: "Ошибка чтения топологии: " + err.Error()})
+		h.renderCompileResults(w, compileView{Error: "Ошибка чтения проекта: " + err.Error()})
 		return
 	}
-	subnetsRaw, err := h.readStoredSubnets()
-	if err != nil {
-		h.renderCompileResults(w, compileView{Error: "Ошибка чтения подсетей: " + err.Error()})
-		return
-	}
-	rulesRaw, err := h.store.ReadRules()
-	if err != nil {
-		h.renderCompileResults(w, compileView{Error: "Ошибка чтения правил: " + err.Error()})
-		return
-	}
-	devices, err := app.Compile(r.Context(), h.log, app.CompileOptions{
-		TopologyYAML: topoRaw,
-		SubnetsYAML:  subnetsRaw,
-		RulesYAML:    rulesRaw,
-	})
+	devicesAny, err := h.compileDoc(r.Context(), doc)
 	if err != nil {
 		h.renderCompileResults(w, compileView{Error: "Ошибка компиляции: " + err.Error()})
+		return
+	}
+	devices, ok := devicesAny.([]app.CompiledDevice)
+	if !ok {
+		h.renderCompileResults(w, compileView{Error: "Ошибка компиляции: unexpected result type"})
 		return
 	}
 	h.renderCompileResults(w, compileView{Devices: devices})
