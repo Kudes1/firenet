@@ -107,3 +107,95 @@ func mustBootstrapAdminID(t *testing.T, users *auth.Store) string {
 	}
 	return u.ID
 }
+
+func loginAndGetCookie(t *testing.T, srv http.Handler, username, password string) *http.Cookie {
+	t.Helper()
+	body, _ := json.Marshal(loginRequest{Username: username, Password: password})
+	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login as %s failed: status %d, body %s", username, rec.Code, rec.Body.String())
+	}
+	return rec.Result().Cookies()[0]
+}
+
+func TestCreateAndListUsersAsAdmin(t *testing.T) {
+	srv, _ := newUnauthenticatedTestServer(t)
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+
+	body, _ := json.Marshal(createUserRequest{Username: "ivan", Password: "hunter22222", Role: "user"})
+	req := httptest.NewRequest(http.MethodPost, "/api/users", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got status %d, want 201; body: %s", rec.Code, rec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	listReq.AddCookie(adminCookie)
+	listRec := httptest.NewRecorder()
+	srv.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want 200", listRec.Code)
+	}
+	var users []userResponse
+	if err := json.Unmarshal(listRec.Body.Bytes(), &users); err != nil {
+		t.Fatalf("decode users: %v", err)
+	}
+	if len(users) != 2 { // admin + ivan
+		t.Fatalf("got %d users, want 2", len(users))
+	}
+}
+
+func TestCreateUserAsNonAdminIsForbidden(t *testing.T) {
+	srv, users := newUnauthenticatedTestServer(t)
+	if _, err := users.CreateUser(context.Background(), "plain", "hunter22222", auth.RoleUser); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	userCookie := loginAndGetCookie(t, srv, "plain", "hunter22222")
+
+	body, _ := json.Marshal(createUserRequest{Username: "someone", Password: "hunter22222", Role: "user"})
+	req := httptest.NewRequest(http.MethodPost, "/api/users", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(userCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("got status %d, want 403", rec.Code)
+	}
+}
+
+func TestDeleteUser(t *testing.T) {
+	srv, users := newUnauthenticatedTestServer(t)
+	target, err := users.CreateUser(context.Background(), "todelete", "hunter22222", auth.RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/users/"+target.ID, nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want 204; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDeleteLastAdminIsRejected(t *testing.T) {
+	srv, users := newUnauthenticatedTestServer(t)
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+	adminID := mustBootstrapAdminID(t, users)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/users/"+adminID, nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want 400", rec.Code)
+	}
+}
