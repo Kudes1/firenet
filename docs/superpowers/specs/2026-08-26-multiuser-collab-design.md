@@ -1,4 +1,4 @@
-# Дизайн: многопользовательский режим (auth + git-ветки)
+# Дизайн: многопользовательский режим (auth + версионирование сущностей)
 
 Дата: 2026-08-26
 Статус: принят к реализации
@@ -16,16 +16,26 @@
 проектом одновременно:
 
 - вход по логину/паролю, роли `admin`/`user`;
-- рабочая версия (`main`) доступна всем на чтение, редактирование —
-  только через личную ветку и merge request с ревью;
-- реальное git-версионирование (ветки, коммиты, three-way merge с
-  конфликт-маркерами), а не "последний сохранивший выиграл".
+- текущая подтверждённая версия проекта видна всем на чтение, правки —
+  только в личном черновике, применяются в неё только через подтверждение
+  админом;
+- версионирование результата: полная история подтверждённых изменений,
+  дифф между любыми двумя версиями, откат к прошлой версии.
 
-Не входит в эту фичу: живое совместное редактирование в реальном времени
-(веткам это не нужно), применение правил на реальные устройства (и так вне
-скоупа MVP — см. README), SSO/LDAP (только точка расширения на будущее),
-структурный/entity-aware diff и merge (только построчный, как у обычного
-`git diff`/`git merge`).
+**Решение об архитектуре хранения:** рассматривались git-подобный подход
+(ветки/коммиты/three-way merge построчным diff3) и подход на структурных
+сущностях. Выбран второй: `topology.yaml`/`subnets.yaml`/`rules.yaml` —
+это и так списки именованных сущностей (устройство, сеть, набор, объединение,
+подсеть, правило внутри цепочки — см. `internal/httpapi/dto.go`), а не
+свободный текст. Построчный merge может показать ложный конфликт там, где
+два человека правили разные сущности, физически оказавшиеся рядом в
+YAML. Версионирование на уровне сущностей избавляет от этого класса
+ложных конфликтов и не требует своей реализации diff3/CAS-по-рефам —
+конкурентность и атомарность решаются транзакциями обычной БД.
+
+Не входит в эту фичу: живое совместное редактирование в реальном времени,
+применение правил на реальные устройства (вне скоупа MVP — см. README),
+SSO/LDAP (только точка расширения на будущее).
 
 ## Архитектура
 
@@ -35,202 +45,246 @@
   (opaque-токен в httpOnly cookie), middleware `RequireAuth`/`RequireAdmin`.
   Аутентификация спрятана за интерфейсом `Authenticator`, чтобы позже
   подключить SSO/LDAP без переписывания хендлеров.
-- **`internal/vcs`** — обёртка над bare-репозиторием `go-git`, полностью
-  заменяет `FileProjectStore` как persistence-слой проекта: чтение/запись
-  файла в конкретной ветке, ветвление, история, diff, three-way merge.
-  Работает in-process, без внешнего `git`-бинарника и без checkout —
-  каждая операция читает/пишет объекты репозитория напрямую.
+- **`internal/pgstore`** — Postgres-backed реализация версионирования и
+  черновиков, полностью заменяет `FileProjectStore`. Наружу отдаёт те же
+  DTO-типы, что уже определены в `internal/httpapi/dto.go`
+  (`TopologyDoc`, `SubnetsDoc`, `PolicyDoc`, layout) — существующие
+  хендлеры `getTopology`/`putRules`/... почти не меняются, просто читают
+  и пишут через черновик вместо файла; вся entity-level логика (диффы,
+  конфликты, история) спрятана внутри пакета.
 
 Изменённые:
 
-- **`internal/httpapi`** — существующие хендлеры (`getTopology`,
-  `putRules` и т.п.) становятся branch-aware
-  (`/api/branches/{branch}/...`), добавляются группы хендлеров auth,
-  branches, merge-requests, users.
-- **Web UI** — страница логина, переключатель текущей ветки в шапке
-  (read-only индикатор на `main`, кнопка «Форкнуть» для начала правок),
-  страница Merge Requests (список / диф / approve), страница
-  пользователей (только admin).
+- **`internal/httpapi`** — хендлеры становятся draft-aware
+  (`/api/drafts/{id}/...`), добавляются группы: auth, drafts, versions,
+  users.
+- **Web UI** — страница логина, индикатор текущей версии в шапке
+  (read-only, только "Открыть черновик" для начала правок), страница
+  черновиков с кнопкой «Отправить на подтверждение», страница истории
+  версий (список + дифф), страница пользователей (только admin).
 
-`ProjectStore`-интерфейс из `store.go` был спроектирован как seam именно
-под такое расширение — его форма (Read/Write topology/subnets/rules/layout)
-сохраняется, просто у каждого метода появляется параметр ветки, а
-единственная реализация становится git-based; прямая файловая реализация
-остаётся только для одноразовой миграции существующих `*.yaml` в первый
-коммит `main` при первом запуске новой версии.
+## Модель данных (PostgreSQL)
 
-## Модель данных
+Все сущности проекта (устройство, сеть, набор, объединение, подсеть,
+правило, цепочка, элемент layout) хранятся не как блоб YAML/JSON, а как
+строки с натуральным ключом и версией, в которой они появились:
 
-**Git-репозиторий** (bare, `go-git`), в корне дерева каждого коммита — те
-же четыре файла, что и сейчас: `topology.yaml`, `subnets.yaml`,
-`rules.yaml`, `layout.json`.
+```sql
+CREATE TABLE users (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username      TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('admin','user')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-Ветки:
+CREATE TABLE sessions (
+  token      TEXT PRIMARY KEY,
+  user_id    UUID NOT NULL REFERENCES users(id),
+  expires_at TIMESTAMPTZ NOT NULL
+);
 
-- `main` — рабочая версия, доступна всем на чтение, прямая запись
-  запрещена (только через merge).
-- `user/<username>/<branch-name>` — личная ветка, создаётся форком от
-  текущего `main`; писать в неё может только её владелец.
+-- Подтверждённая история. Append-only, линейная (без веток).
+CREATE TABLE versions (
+  id           BIGSERIAL PRIMARY KEY,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  confirmed_by UUID REFERENCES users(id),
+  draft_id     UUID,        -- какой черновик подтверждён (без FK — см. ниже)
+  note         TEXT         -- напр. "restored to v5"
+);
 
-**JSON-метаданные** (по образцу `writeFileAtomic` из `store.go`: временный
-файл + rename, плюс мьютекс в процессе на каждый файл):
+-- Одна строка = одна сущность, изменившаяся в данной версии.
+CREATE TABLE entity_changes (
+  id         BIGSERIAL PRIMARY KEY,
+  version_id BIGINT NOT NULL REFERENCES versions(id),
+  kind       TEXT NOT NULL, -- device|link|network|set|union|subnet
+                             -- |chain|rule|layout_device|layout_network
+                             -- |layout_link|layout_camera
+  key        TEXT NOT NULL, -- натуральный ключ, напр. имя устройства;
+                             -- "chain::rule" для правил; "a|b" для links
+  change     TEXT NOT NULL CHECK (change IN ('added','modified','removed')),
+  data       JSONB,         -- NULL при change='removed'
+  author     UUID NOT NULL REFERENCES users(id)
+);
+CREATE INDEX entity_changes_lookup ON entity_changes (kind, key, version_id DESC);
 
-```go
-// users.json
-type User struct {
-    ID           string
-    Username     string
-    PasswordHash string // bcrypt
-    Role         string // "admin" | "user"
-    CreatedAt    time.Time
-}
+-- Личный черновик: правки поверх конкретной базовой версии.
+CREATE TABLE drafts (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner           UUID NOT NULL REFERENCES users(id),
+  name            TEXT NOT NULL,
+  base_version_id BIGINT NOT NULL REFERENCES versions(id),
+  status          TEXT NOT NULL DEFAULT 'open', -- open|conflict|merged|closed
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (owner, name)
+);
 
-// sessions.json
-type Session struct {
-    Token     string
-    UserID    string
-    ExpiresAt time.Time
-}
-
-// merge_requests.json
-type MergeRequest struct {
-    ID           string
-    SourceBranch string
-    TargetBranch string // всегда "main"
-    Author       string
-    Status       string // "open" | "conflict" | "merged" | "closed"
-    CreatedAt    time.Time
-    MergedAt     *time.Time
-    MergedBy     string
-}
+-- Текущее состояние правок черновика: по одной строке на затронутую
+-- сущность (не история — перезаписывается при каждом сохранении).
+CREATE TABLE draft_entity_changes (
+  draft_id UUID NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+  kind     TEXT NOT NULL,
+  key      TEXT NOT NULL,
+  change   TEXT NOT NULL CHECK (change IN ('added','modified','removed')),
+  data     JSONB,
+  PRIMARY KEY (draft_id, kind, key)
+);
 ```
 
-Протухшие сессии вычищаются при чтении `sessions.json`.
+`versions.draft_id` намеренно без FK на `drafts` — иначе цикл
+`versions ↔ drafts` (`drafts.base_version_id → versions`,
+`versions.draft_id → drafts`); ссылка нужна только для отображения "какой
+черновик стал этой версией" в истории, не для целостности.
 
-**Конкурентная запись в одну ветку** — CAS по хешу текущего коммита
-ветки: `GET .../{branch}/topology` отдаёт заголовок `X-Commit: <sha>`,
-`PUT` требует его обратно; несовпадение (кто-то уже закоммитил в эту же
-ветку, например из второй открытой вкладки) → `409`, клиент перечитывает
-и повторяет правку поверх свежих данных.
+**Текущее состояние сущности** (для сборки `TopologyDoc`/`SubnetsDoc`/
+`PolicyDoc`/layout на чтение) = для каждого `(kind, key)` строка
+`entity_changes` с максимальным `version_id ≤ N`, если её `change != removed`.
+Тот же запрос с `N = текущая последняя версия` даёт "главную" версию,
+с произвольным `N` — снимок любой прошлой версии.
 
-## `internal/vcs`
+**Черновик на чтение** = состояние базовой версии, с точечной заменой по
+`(kind, key)` из `draft_entity_changes` (added/modified — берётся `data`
+черновика, removed — сущность выкидывается).
+
+## `internal/pgstore`
 
 ```go
-package vcs
+package pgstore
 
-type Store struct{ repo *git.Repository }
+// Только чтение подтверждённой истории.
+func (s *Store) CurrentVersion(ctx) (int64, error)
+func (s *Store) ReadAt(ctx, version int64) (ProjectDoc, error)
+func (s *Store) History(ctx, limit int) ([]VersionInfo, error)
+func (s *Store) DiffVersions(ctx, from, to int64) ([]EntityDiff, error)
+func (s *Store) Restore(ctx, toVersion int64, actor User) (newVersion int64, err error)
 
-func Open(path string) (*Store, error)
-func Init(path string, seed map[string][]byte) (*Store, error)
+// Черновики.
+func (s *Store) CreateDraft(ctx, owner User, name string) (Draft, error) // baseVersion = текущая последняя
+func (s *Store) ListDrafts(ctx, owner *User) ([]Draft, error)            // owner=nil — все (для ревью)
+func (s *Store) ReadDraft(ctx, draftID string) (doc ProjectDoc, revision string, err error)
+func (s *Store) WriteDraft(ctx, draftID string, doc ProjectDoc, expectRevision string) (newRevision string, err error) // ErrRevisionMismatch на CAS-конфликт
+func (s *Store) DeleteDraft(ctx, draftID string) error
 
-func (s *Store) ReadFile(branch, path string) (content []byte, commit string, err error)
-func (s *Store) WriteFile(branch, path string, content []byte, expectCommit string, author User, message string) (newCommit string, err error) // ErrCommitMismatch на CAS-конфликт
-
-func (s *Store) CreateBranch(from, name string, owner string) error
-func (s *Store) ListBranches() ([]BranchInfo, error) // включает Owner
-func (s *Store) DeleteBranch(name string) error
-func (s *Store) History(branch string, limit int) ([]CommitInfo, error)
-
-func (s *Store) Diff(base, head string) ([]FileDiff, error) // построчный unified diff на файл
-
-type MergeResult struct {
-    Merged   bool
-    Commit   string              // если Merged
-    Conflicts map[string][]byte  // path -> контент с <<<<<<< маркерами, если не Merged
-}
-func (s *Store) Merge(source, target string, actor User) (MergeResult, error)
+func (s *Store) DiffDraft(ctx, draftID string) ([]EntityDiff, error)       // vs base_version
+func (s *Store) Conflicts(ctx, draftID string) ([]EntityConflict, error)   // пересечение с тем, что изменилось между base и текущей версией
+func (s *Store) Confirm(ctx, draftID string, admin User) (newVersion int64, conflicts []EntityConflict, err error)
 ```
 
-`Merge` находит общего предка (merge-base) `source` и `target`, для
-каждого из четырёх файлов делает three-way merge построчным diff3-алгоритмом
-(реализуется в пакете, без внешних зависимостей на сам merge — только
-чтение объектов через `go-git`). Если хотя бы один файл конфликтует —
-`Merged=false`, `Conflicts` содержит итоговый текст со стандартными
-`<<<<<<<`/`=======`/`>>>>>>>` маркерами для каждого затронутого файла (не
-затронутые конфликтом файлы берутся из `source` как есть). Если конфликтов
-нет — создаётся merge-коммит с двумя родителями, ref `target` двигается
-на него (тоже через CAS, на случай гонки с другим merge).
+`WriteDraft` сравнивает входящий `ProjectDoc` с состоянием базовой версии,
+вычисляет добавленные/изменённые/удалённые сущности и одним `UPSERT`
+записывает их в `draft_entity_changes` (плюс `DELETE` для сущностей,
+вернувшихся к состоянию базовой версии — черновик хранит только реальные
+отличия). CAS — обычная `UPDATE drafts SET updated_at=now() WHERE id=$1
+AND updated_at=$2`; 0 обновлённых строк → `ErrRevisionMismatch` → `409`
+(гонка второй вкладки того же пользователя).
+
+`Confirm` в одной транзакции: для каждого `(kind,key)` в
+`draft_entity_changes` сравнивает состояние на `base_version_id` и на
+текущей последней версии; если хоть где-то есть расхождение — коммит
+откатывается, возвращается список `EntityConflict` (сущность, значение в
+черновике, текущее значение), `drafts.status = 'conflict'`, версия не
+создаётся. Если конфликтов нет — вставляется новая строка `versions`,
+для каждой затронутой сущности — строка в `entity_changes` со значением
+из черновика, `drafts.status = 'merged'`.
 
 ## Request-флоу
 
-**Просмотр:** UI по умолчанию открывает `main` в read-only режиме — все
-кнопки сохранения задизейблены, виден баннер «только чтение, форкните
-ветку для правок». `GET /api/branches/{branch}/{topology|subnets|rules|layout}`
-работает для любой ветки, видимой пользователю (все ветки читаемы всеми
-авторизованными — нужно для ревью MR).
+**Просмотр:** UI по умолчанию открывает текущую версию в read-only —
+`GET /api/versions/current/{topology|subnets|rules|layout}`. Кнопки
+сохранения скрыты; виден баннер «только чтение» и кнопка «Открыть
+черновик».
 
-**Начало правок:** `POST /api/branches {from: "main", name: "..."}` →
-`vcs.CreateBranch`, владелец — текущий пользователь. UI переключается на
-неё, кнопки Save становятся активными.
+**Начало правок:** `POST /api/drafts {name}` → `pgstore.CreateDraft` от
+текущей версии, владелец — текущий пользователь. Можно иметь несколько
+именованных черновиков параллельно.
 
-**Редактирование:** `PUT /api/branches/{branch}/{...}` — `403`, если
-текущий пользователь не владелец ветки или ветка — `main`. Иначе —
-`vcs.WriteFile` с CAS (раздел «Модель данных»).
+**Редактирование:** `GET/PUT /api/drafts/{id}/{topology|subnets|rules|layout}`
+— `403`, если не владелец. `PUT` — `pgstore.WriteDraft` с CAS по ревизии
+из предыдущего `GET` (заголовок `X-Draft-Revision`).
 
-**Merge request:** `POST /api/merge-requests {sourceBranch}` (`target`
-всегда `main`) — только владелец `sourceBranch`. `GET
-/api/merge-requests/{id}` — построчный diff по каждому изменённому файлу
-между `main` и веткой (`vcs.Diff`), виден всем авторизованным.
+**Отправка на подтверждение:** явного отдельного MR-объекта не заводим —
+черновик сам по себе и есть заявка; `GET /api/drafts/{id}/diff` (список
+затронутых сущностей, `pgstore.DiffDraft`) виден владельцу и всем admin
+для ревью.
 
-**Approve/merge:** `POST /api/merge-requests/{id}/approve` затем
-`POST .../merge` — только `admin`. `merge` вызывает `vcs.Merge(source,
-"main", actor)`:
-- чисто → MR → `merged`, `MergedAt`/`MergedBy` проставляются;
-- конфликт → MR → `conflict`, тело ответа — конфликтующие файлы с
-  маркерами (то же, что вернул бы `vcs.Merge`).
+**Подтверждение:** `POST /api/drafts/{id}/confirm` — только admin.
+- Конфликтов нет → `pgstore.Confirm` создаёт версию, черновик закрывается
+  (`merged`), в ответе — номер новой версии.
+- Конфликты есть → `409` с телом `EntityConflict[]` (сущность: значение в
+  черновике / текущее значение), `drafts.status = 'conflict'`.
 
-**Разрешение конфликта** — на стороне автора ветки, не admin: у владельца
-ветки есть `POST /api/branches/{branch}/sync-main`, который делает
-`vcs.Merge("main", branch, actor)` (в обратную сторону — вливает свежий
-`main` в его личную ветку) тем же движком. При конфликте — тот же формат
-ответа с маркерами; конфликтующий файл просто открывается в текстовом
-редакторе страницы как есть (с маркерами внутри YAML), автор правит
-руками и сохраняет обычным `PUT` (это и есть разрешение конфликта — новый
-коммит в его ветке без маркеров). После этого повторный `merge` со
-стороны admin проходит чисто.
+**Разрешение конфликта** — на стороне автора черновика, не admin:
+конфликтующие сущности приходят через `GET /api/drafts/{id}/diff`
+(конфликтные помечены отдельно) прямо в форму редактирования — конкретные
+устройство/сеть/правило с обоими вариантами полей; автор решает, какое
+значение оставить, сохраняет обычным `PUT` (это меняет
+`draft_entity_changes`, конфликт этой сущности снят). Admin повторно жмёт
+«Подтвердить» — на этот раз конфликта по этой сущности уже нет.
+
+**История:** `GET /api/versions?limit=N` — список версий с changelog;
+`GET /api/versions/diff?from=X&to=Y` — дифф между любыми двумя;
+`POST /api/versions/{n}/restore` (только admin) — откат: создаёт новую
+версию, содержимое которой равно версии `n`.
 
 ## Права и ошибки
 
-`RequireAuth` — на весь `/api/*` и `/ui/*`, кроме `/login`.
-`RequireAdmin` — на управление пользователями и approve/merge MR.
+`RequireAuth` — весь `/api/*` и `/ui/*`, кроме `/login`.
+`RequireAdmin` — подтверждение/откат версий и управление пользователями.
 
-| Действие | admin | user (не владелец) | user (владелец ветки) |
+| Действие | admin | user (не владелец) | user (владелец черновика) |
 |---|---|---|---|
-| читать `main`/любую ветку/MR-диффы | ✅ | ✅ | ✅ |
-| форкнуть ветку от `main` | ✅ | ✅ | — |
-| писать в свою ветку | ✅ | ❌ | ✅ |
-| открыть MR из своей ветки | ✅ | ❌ | ✅ |
-| approve/merge MR | ✅ | ❌ | ❌ |
+| читать текущую версию/историю/чужой дифф черновика | ✅ | ✅ | ✅ |
+| создать черновик | ✅ | ✅ | — |
+| писать в черновик | ✅ (свой) | ❌ | ✅ |
+| подтвердить/отклонить черновик | ✅ | ❌ | ❌ |
+| откат версии | ✅ | ❌ | ❌ |
 | управлять пользователями | ✅ | ❌ | ❌ |
 
-Ошибки: `401` (+ редирект на `/login` для UI-роутов, JSON для API) при
-отсутствии/протухшей сессии; `403` при записи в чужую ветку или `main`
-напрямую, а также при недостатке роли; `409` при CAS-конфликте на `PUT`.
-Мердж-конфликт — не HTTP-ошибка, а обычный ответ со статусом MR
-`conflict` и телом-диффом.
+Ошибки: `401` (+ редирект на `/login` для UI, JSON для API) без валидной
+сессии; `403` при записи в чужой черновик или недостатке роли; `409` при
+CAS-гонке на `PUT` черновика **и** при конфликте на `confirm` (в обоих
+случаях тело ответа объясняет, что именно разошлось, чтобы клиент мог
+показать актуальные данные, не просто "ошибка").
 
-## Миграция
+## Деплой
 
-При первом запуске новой версии `firenet serve`, если git-репозитория в
-data-директории ещё нет — он инициализируется, текущее содержимое
-`topology.yaml`/`subnets.yaml`/`rules.yaml`/layout (или seed-заглушки,
-как сейчас делает `EnsureSeeded`) становится первым коммитом `main`.
-Одновременно, раз UI регистрации пока нет, обязателен bootstrap первого
-admin-аккаунта из `FIRENET_ADMIN_USER`/`FIRENET_ADMIN_PASSWORD` — без них
-сервер с пустым `users.json` не стартует.
+`docker-compose.yml` с двумя сервисами:
 
-`FileProjectStore` и однопользовательский режим `serve` полностью
-заменяются `internal/vcs`, без флага совместимости — по стилю проекта
-(без backward-compat костылей для уже вышедшей в разработке функциональности).
+- **`app`** — образ firenet (Go-бинарник, как сейчас, плюс подключение к
+  Postgres через `DATABASE_URL`); флаги/env первого запуска
+  `FIRENET_ADMIN_USER`/`FIRENET_ADMIN_PASSWORD` для бутстрапа первого
+  admin-аккаунта, если таблица `users` пуста.
+  Драйвер — `pgx` (без cgo, тот же принцип "один статический бинарник",
+  что уже соблюдается для веб-ассетов через `go:embed`).
+- **`db`** — `postgres:16`, именованный volume для данных, healthcheck,
+  `app` стартует по `depends_on: db: condition: service_healthy`.
+
+Миграции — набор пронумерованных `.sql`-файлов, встроенных через
+`go:embed` (по аналогии с уже встроенными веб-ассетами), применяются
+автоматически при старте `app` (таблица `schema_migrations` отслеживает
+применённые) — без отдельного шага/контейнера для миграций и без
+тяжёлого migration-фреймворка, которого проекту такого размера не нужно.
+
+## Миграция существующих данных
+
+При первом запуске новой версии, если `versions` пуста — текущие
+`topology.yaml`/`subnets.yaml`/`rules.yaml`/layout (или seed-заглушки, как
+сейчас делает `EnsureSeeded`) парсятся в сущности и записываются как
+версия 1 без автора-черновика (`draft_id = NULL`, `note = "initial
+import"`). `FileProjectStore` и однопользовательский режим `serve`
+полностью заменяются `internal/pgstore`, без флага совместимости — по
+стилю проекта (без backward-compat костылей для функциональности, ещё не
+вышедшей в релиз).
 
 ## Тестирование
 
 | Слой | Что покрываем |
 |------|----------------|
-| `internal/vcs` | создание repo во временной директории; чтение/запись/CAS-конфликт на PUT; создание/список/удаление веток; three-way merge — чистый случай и случай с конфликтом на каждом из четырёх файлов; `sync-main` в обе стороны |
+| `internal/pgstore` | против реального Postgres в докере (`testcontainers-go` или `docker-compose` в CI) либо `pgx`-совместимого in-memory — таблица случаев: чтение/запись черновика с CAS-конфликтом; сборка `ProjectDoc` из сущностей на текущей версии и на произвольной прошлой; `Confirm` без конфликтов; `Confirm` с конфликтом на одной сущности из нескольких; `Restore` |
 | `internal/auth` | выдача/протухание сессии, bcrypt hash/verify, middleware пропускает/блокирует по роли |
-| `internal/httpapi` | новые хендлеры (branches, merge-requests, users, login/logout) через `httptest`, по образцу `handlers_test.go`; старые branch-aware хендлеры — happy path + 403/409 |
-| web (`node --test`) | переключатель ветки, read-only баннер на `main`, экран MR-диффа с конфликт-маркерами |
+| `internal/httpapi` | новые хендлеры (drafts, versions, users, login/logout) через `httptest`; старые draft-aware хендлеры — happy path + 403/409 |
+| web (`node --test`) | read-only баннер на текущей версии, экран диффа черновика с выделенными конфликтами |
 
 Без ручного браузерного прогона на каждое изменение — только автотесты
 (`go build ./...`, `go vet ./...`, `gofmt -l .`, `go test ./...`,
