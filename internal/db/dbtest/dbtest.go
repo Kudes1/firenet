@@ -12,6 +12,13 @@ import (
 	"github.com/kudes1/firenet/internal/db"
 )
 
+// testDBLockKey is an arbitrary constant used with pg_advisory_lock to
+// serialize every Postgres-backed test across the whole module. `go test
+// ./...` runs different packages' test binaries concurrently, and they'd
+// otherwise all hit the same shared FIRENET_TEST_DATABASE_URL at once,
+// stepping on each other's users/sessions rows.
+const testDBLockKey = 727626
+
 // Open returns a migrated pool for the calling test, backed by
 // FIRENET_TEST_DATABASE_URL. If that env var is unset, the test is
 // skipped. Tables that hold per-test data are truncated via t.Cleanup;
@@ -33,8 +40,22 @@ func Open(t *testing.T) *pgxpool.Pool {
 		pool.Close()
 		t.Fatalf("migrate test database: %v", err)
 	}
+
+	lockConn, err := pool.Acquire(ctx)
+	if err != nil {
+		pool.Close()
+		t.Fatalf("acquire lock connection: %v", err)
+	}
+	if _, err := lockConn.Exec(ctx, "SELECT pg_advisory_lock($1)", testDBLockKey); err != nil {
+		lockConn.Release()
+		pool.Close()
+		t.Fatalf("acquire test database lock: %v", err)
+	}
+
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "TRUNCATE users, sessions RESTART IDENTITY CASCADE")
+		_, _ = lockConn.Exec(ctx, "SELECT pg_advisory_unlock($1)", testDBLockKey)
+		lockConn.Release()
 		pool.Close()
 	})
 	return pool
