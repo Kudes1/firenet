@@ -10,7 +10,7 @@ const vm = require("node:vm");
 // unified create/edit modal, client-side filtering (including IP/CIDR
 // search), chain tabs, and persistence against a stubbed fetch.
 
-function bootPage({ failPut = null } = {}) {
+function bootPage({ failPut = null, lintFindings = [] } = {}) {
   const factories = {};
   const calls = [];
   const banners = [];
@@ -71,6 +71,9 @@ function bootPage({ failPut = null } = {}) {
           status: 200,
           json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }, { name: "b", cidr: "10.0.1.0/24" }] }),
         };
+      }
+      if (path_ === "/api/lint") {
+        return { ok: true, status: 200, json: async () => ({ findings: lintFindings }) };
       }
       return { ok: false, status: 404, json: async () => ({}) };
     },
@@ -371,4 +374,28 @@ test("persist sends chains-shaped body", async () => {
 
   const put = calls.find((c) => c.path === "/api/rules" && c.method === "PUT");
   assert.ok(Array.isArray(put.body.chains));
+});
+
+test("runLint fetches findings and opens the panel", async () => {
+  const ctx = bootPage({
+    lintFindings: [{ severity: "warning", chain: "FIRENET-FWD", rules: ["web"], message: "правило web никогда не применяется" }],
+  });
+  await ctx.page.init();
+
+  await ctx.page.runLint();
+
+  assert.equal(ctx.page.lintOpen, true);
+  assert.equal(ctx.page.lintFindings.length, 1);
+  assert.equal(ctx.page.lintFindings[0].chain, "FIRENET-FWD");
+});
+
+test("jumpToFinding switches to the finding's chain and highlights its rules", async () => {
+  const ctx = bootPage();
+  await ctx.page.init();
+  ctx.page.active = 0;
+
+  ctx.page.jumpToFinding({ severity: "warning", chain: "LIMITED", rules: ["limited-dns"], message: "..." });
+
+  assert.equal(ctx.page.active, 1); // LIMITED is rulesFixture.chains[1]
+  assert.deepEqual(ctx.page.highlightedRules, ["limited-dns"]);
 });

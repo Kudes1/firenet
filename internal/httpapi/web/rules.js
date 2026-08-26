@@ -62,6 +62,10 @@ function registerRulesPage() {
     saving: false,
     editing: false,
     searchOpen: false,
+    linting: false,
+    lintOpen: false,
+    lintFindings: [],
+    highlightedRules: [],
 
     async init() {
       try {
@@ -410,6 +414,29 @@ function registerRulesPage() {
       const doc = await Api.put("/api/rules", { chains: next.chains });
       this._applyDoc(doc);
       showBanner("Правила сохранены", "ok");
+    },
+
+    // --- lint ---
+
+    async runLint() {
+      this.linting = true;
+      try {
+        const res = await Api.get("/api/lint");
+        this.lintFindings = res.findings || [];
+        this.lintOpen = true;
+      } catch (e) {
+        showBanner("Ошибка проверки правил: " + e.message);
+      } finally {
+        this.linting = false;
+      }
+    },
+
+    jumpToFinding(f) {
+      const idx = this.doc.chains.findIndex((c) => c.name === f.chain);
+      if (idx >= 0) this.switchChain(idx);
+      this.highlightedRules = f.rules || [];
+      clearTimeout(this._lintHighlightTimer);
+      this._lintHighlightTimer = setTimeout(() => { this.highlightedRules = []; }, 2000);
     },
   }));
   });

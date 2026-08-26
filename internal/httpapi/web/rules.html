@@ -58,7 +58,25 @@
 
       <div class="toolbar-actions">
         <button type="button" class="secondary btn-search" @click="searchOpen = !searchOpen" title="Поиск по правилам"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.25"/><path d="m13.2 13.2-4.3-4.3"/></svg></button>
+        <button type="button" class="secondary" :disabled="linting" @click="runLint()" title="Проверить правила на типичные проблемы">Проверить</button>
         <button type="button" class="primary" @click="openAdd()">+ правило</button>
+      </div>
+    </div>
+
+    <div class="lint-panel" x-show="lintOpen" x-cloak>
+      <header class="lint-panel-header">
+        <strong>Находки линтера (<span x-text="lintFindings.length"></span>)</strong>
+        <button type="button" class="lint-panel-close" @click="lintOpen = false" title="Закрыть" aria-label="Закрыть">&times;</button>
+      </header>
+      <div class="lint-panel-body">
+        <p class="hint" x-show="!lintFindings.length">Проблем не найдено.</p>
+        <template x-for="(f, i) in lintFindings" :key="i">
+          <button type="button" class="lint-finding" @click="jumpToFinding(f)">
+            <span class="badge" :class="f.severity === 'warning' ? 'badge-warn' : 'badge-info'" x-text="f.severity"></span>
+            <span class="lint-finding-chain" x-text="f.chain"></span>
+            <span class="lint-finding-msg" x-text="f.message"></span>
+          </button>
+        </template>
       </div>
     </div>
     <div class="table-wrap" x-show="loaded" x-cloak>
@@ -106,7 +124,7 @@
       </thead>
       <tbody>
         <template x-for="row in filteredRules" :key="row.index">
-          <tr>
+          <tr :class="{ 'lint-highlighted': highlightedRules.includes(row.rule.name) }">
             <td class="row-index-cell">
               <button type="button" class="icon-btn move" title="Вверх" @click="moveRule(row.index, -1)">&#9650;</button>
               <button type="button" class="icon-btn move" title="Вниз" @click="moveRule(row.index, 1)">&#9660;</button>
