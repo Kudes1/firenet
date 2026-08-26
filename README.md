@@ -59,6 +59,16 @@ ipset); правила ссылаются на имена подсетей и с
 | `FIRENET_ADMIN_USER`   | — | логин первого admin-аккаунта; обязателен при пустой таблице `users` |
 | `FIRENET_ADMIN_PASSWORD` | — | пароль первого admin-аккаунта; обязателен при пустой таблице `users` |
 
+## Развёртывание (docker-compose)
+
+```sh
+cp .env.example .env   # и поменяйте пароли
+docker compose up -d --build
+```
+
+Поднимает Postgres и firenet рядом, применяет миграции и создаёт первый
+admin-аккаунт из `.env` при первом запуске. UI — на `http://localhost:8787`.
+
 ## Разработка
 
 ```sh
