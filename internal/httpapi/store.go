@@ -10,24 +10,9 @@ import (
 	"github.com/kudes1/firenet/internal/rules"
 )
 
-// ProjectStore is the persistence seam between the HTTP API and where a
-// project's topology/rules/layout actually live. FileProjectStore (a single
-// directory's worth of files) is the only implementation today; a future
-// multi-project/team server can swap in a different one without touching a
-// single handler.
-type ProjectStore interface {
-	ReadTopology() ([]byte, error)
-	WriteTopology([]byte) error
-	ReadSubnets() ([]byte, error)
-	WriteSubnets([]byte) error
-	ReadRules() ([]byte, error)
-	WriteRules([]byte) error
-	// ReadLayout returns (nil, nil) if no layout has been saved yet.
-	ReadLayout() ([]byte, error)
-	WriteLayout([]byte) error
-}
-
-// FileProjectStore reads/writes a project's files directly on disk.
+// FileProjectStore reads/writes a project's files directly on disk. Used
+// only for the one-time legacy-file import into version 1 (see
+// internal/cli/legacy.go) — live serving goes through internal/pgstore.
 type FileProjectStore struct {
 	TopologyPath string
 	SubnetsPath  string
