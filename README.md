@@ -55,6 +55,9 @@ ipset); правила ссылаются на имена подсетей и с
 |-----------------------|--------------|-------------------------------|
 | `FIRENET_LOG_LEVEL`   | `info`       | `debug`, `info`, `warn`, `error` |
 | `FIRENET_LOG_FORMAT`  | `text`       | `text` или `json`             |
+| `FIRENET_DATABASE_URL` | — (обязательна) | строка подключения к Postgres, напр. `postgres://user:pass@host:5432/firenet?sslmode=disable` |
+| `FIRENET_ADMIN_USER`   | — | логин первого admin-аккаунта; обязателен при пустой таблице `users` |
+| `FIRENET_ADMIN_PASSWORD` | — | пароль первого admin-аккаунта; обязателен при пустой таблице `users` |
 
 ## Разработка
 
