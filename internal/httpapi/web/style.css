@@ -1065,3 +1065,61 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   border-color: var(--accent);
   color: var(--accent);
 }
+
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+.login-card {
+  width: min(320px, 90vw);
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.login-card h1 {
+  margin: 0 0 16px;
+  font-size: 1.2em;
+}
+.login-card label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 0.9em;
+}
+.login-card input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+}
+.login-card button {
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+.login-error {
+  margin-top: 12px;
+  color: #dc2626;
+  font-size: 0.85em;
+}
+.data-table {
+  border-collapse: collapse;
+  margin-bottom: 24px;
+}
+.data-table th, .data-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+}
