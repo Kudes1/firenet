@@ -319,3 +319,66 @@ func TestRun_ReturnPathAllowed_FalseWhenFullyUnreachable(t *testing.T) {
 		t.Fatal("an isolated subnet has no path in either direction")
 	}
 }
+
+const chainedReExportDiagTopology = `
+devices:
+  - {name: market, kind: router}
+  - {name: dc, kind: router}
+  - {name: office, kind: router}
+links:
+  - a: {device: market}
+    b: {device: dc}
+    filter: {a-exports: [MARKET], b-exports: [DC]}
+  - a: {device: office}
+    b: {device: dc}
+    filter: {a-exports: [OFFICE], b-exports: [DC, MARKET]}
+networks:
+  - {name: MARKET, subnets: [market-net], attach: [{device: market}]}
+  - {name: DC, subnets: [dc-net], attach: [{device: dc}]}
+  - {name: OFFICE, subnets: [office-net], attach: [{device: office}]}
+`
+
+const chainedReExportDiagSubnets = `
+subnets:
+  - {name: market-net, cidr: 10.9.0.0/24}
+  - {name: dc-net, cidr: 10.9.1.0/24}
+  - {name: office-net, cidr: 10.9.2.0/24}
+`
+
+// office learned a route to MARKET because dc re-exports it (b-exports on
+// the office-dc link includes MARKET); market never learned a route back
+// to OFFICE (b-exports on the market-dc link only has DC). This mirrors
+// the real-world scenario the diagnose UI is meant to surface: the request
+// physically arrives, the response has no route home — a routing gap, not
+// a firewall verdict, but ReturnPathAllowed reports the same false either
+// way (see internal/diagnose/diagnose.go's pathResults/returnPathAllowed).
+func TestRun_ChainedReExportRequestArrivesReturnHasNoRoute(t *testing.T) {
+	topo, err := topology.Load(strings.NewReader(chainedReExportDiagTopology))
+	if err != nil {
+		t.Fatalf("load topology: %v", err)
+	}
+	subs, err := topology.LoadSubnets(strings.NewReader(chainedReExportDiagSubnets))
+	if err != nil {
+		t.Fatalf("load subnets: %v", err)
+	}
+	topo.Subnets = subs
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("validate topology: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	rep, err := diagnose.Run(topo, nil, g, graph.DefaultLimits(), diagnose.Flow{
+		Src: netip.MustParseAddr("10.9.2.5"), Dst: netip.MustParseAddr("10.9.0.5"), Proto: rules.ProtoAny,
+	})
+	if err != nil {
+		t.Fatalf("diagnose.Run: %v", err)
+	}
+	if len(rep.Paths) == 0 {
+		t.Fatal("office must have learned a route to market via dc's re-export")
+	}
+	if rep.ReturnPathAllowed {
+		t.Fatal("market never learned a route back to office: no firewall rule can create a route that was never announced")
+	}
+}
