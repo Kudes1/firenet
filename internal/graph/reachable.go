@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
@@ -8,15 +9,16 @@ import (
 )
 
 // ReachableEntities returns the sorted names of networks and bare subnets
-// reachable from router device when topo.Links[skip] and every filtered link
-// are excluded from the graph. A filtered-link export may only announce
-// locally available entities, never entities learned through another filter.
-// Ordinary links retain their full-connectivity semantics.
+// reachable from router device when topo.Links[skip] is excluded from the
+// graph (skip < 0 keeps every link). A name qualifies if any of its subnets
+// can be reached from a subnet attached to device, honoring the export
+// rules of all other filtered links — so an entity counts as reachable both
+// over plain links and across other filtered links that announce it.
 func ReachableEntities(topo *topology.Topology, device string, skip int) ([]string, error) {
 	trimmed := *topo
 	trimmed.Links = make([]topology.Link, 0, len(topo.Links))
 	for i, l := range topo.Links {
-		if i != skip && l.Filter == nil {
+		if i != skip {
 			trimmed.Links = append(trimmed.Links, l)
 		}
 	}
@@ -31,9 +33,20 @@ func ReachableEntities(topo *topology.Topology, device string, skip int) ([]stri
 		return nil, nil // nothing attached: nothing is in reach
 	}
 
-	localSet := make(map[string]struct{}, len(local))
-	for _, name := range local {
-		localSet[name] = struct{}{}
+	reachable := func(subs []string) bool {
+		for _, dst := range subs {
+			for _, src := range local {
+				paths, err := g.AllSimplePaths(SubnetNode(src), SubnetNode(dst), DefaultLimits())
+				if len(paths) > 0 {
+					return true
+				}
+				var tooMany *ErrTooManyPaths
+				if errors.As(err, &tooMany) {
+					return true // paths exist, enumeration just overflowed
+				}
+			}
+		}
+		return false
 	}
 
 	var out []string
@@ -42,15 +55,12 @@ func ReachableEntities(topo *topology.Topology, device string, skip int) ([]stri
 		if err != nil {
 			return nil, err
 		}
-		for _, sub := range subs {
-			if _, ok := localSet[sub]; ok {
-				out = append(out, name)
-				break
-			}
+		if reachable(subs) {
+			out = append(out, name)
 		}
 	}
 	for _, name := range sortedMapNames(topo.Subnets) {
-		if _, ok := localSet[name]; ok {
+		if reachable([]string{name}) {
 			out = append(out, name)
 		}
 	}
@@ -58,8 +68,8 @@ func ReachableEntities(topo *topology.Topology, device string, skip int) ([]stri
 }
 
 // ValidateFilterExports checks every filtered link's export list against
-// local reachability with that same link excluded: exporting a network or
-// subnet learned through another filtered link would silently re-export it.
+// reachability with that same link excluded: exporting a network or subnet
+// the device cannot otherwise reach would silently announce nothing.
 func ValidateFilterExports(topo *topology.Topology) error {
 	type side struct {
 		label, dev string
@@ -89,9 +99,9 @@ func ValidateFilterExports(topo *topology.Topology) error {
 }
 
 // plainReachableSubnets BFSes from start over unrestricted edges only (no
-// filtered-link hops) and returns the subnet names reached. Going through
-// switch domains counts, so a router behind a switch owns its segment's
-// subnets.
+// filtered-link hops) and returns the subnet names reached — the seeds that
+// count as "locally available" for export candidates. Going through switch
+// domains counts, so a router behind a switch owns its segment's subnets.
 func plainReachableSubnets(g *Graph, start Node) []string {
 	seen := map[Node]bool{start: true}
 	queue := []Node{start}

@@ -14,8 +14,8 @@ document.addEventListener("alpine:init", () => {
     saving: false,
     draft: { index: -1, aExports: [], bExports: [] },
     combo: { side: "", search: "", cursor: 0 },
-    // Export candidates per side, served by /api/link-exports: only entities
-    // local to that device without traversing filtered links.
+    // Export candidates per side, served by /api/link-exports with the
+    // edited link excluded: only entities reachable from that device.
     candidates: { a: [], b: [] },
     filters: { devices: "", mode: "", aExports: "", bExports: "" },
     searchOpen: false,

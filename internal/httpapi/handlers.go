@@ -283,9 +283,9 @@ func (h *handlers) postDraftTopologyOperation(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, editorSnapshot{Topology: saved.Topology, Layout: saved.Layout})
 }
 
-// getLinkExports serves the local export candidates for one side of a link.
-// The edited link and every other filtered link are excluded, so a route
-// learned through one filter cannot be re-exported through another.
+// getLinkExports serves the reachable export candidates for one side of a
+// link: networks and subnets the side's device can reach when that very
+// link is excluded from the graph.
 func (h *handlers) getDraftLinkExports(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.resolveDraftForAccess(w, r); !ok {
 		return

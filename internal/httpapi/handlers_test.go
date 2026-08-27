@@ -770,7 +770,7 @@ func TestGetLinkExports(t *testing.T) {
 	}
 }
 
-func TestGetLinkExports_ExcludesEntitiesLearnedOverOtherFilteredLinks(t *testing.T) {
+func TestGetLinkExports_ChainsThroughOtherFilteredLinks(t *testing.T) {
 	h, _, draftID := newTestServer(t)
 	topo := TopologyDoc{
 		Devices: []DeviceDoc{
@@ -784,7 +784,11 @@ func TestGetLinkExports_ExcludesEntitiesLearnedOverOtherFilteredLinks(t *testing
 				B:      EndpointDoc{Device: "r2"},
 				Filter: &LinkFilterDoc{AExports: []string{"n-office"}, BExports: []string{"n-dmz"}},
 			},
-			{A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "r3"}},
+			{
+				A:      EndpointDoc{Device: "r1"},
+				B:      EndpointDoc{Device: "r3"},
+				Filter: &LinkFilterDoc{AExports: []string{}, BExports: []string{}},
+			},
 		},
 		Networks: []NetworkDoc{
 			{Name: "n-office", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
@@ -805,7 +809,12 @@ func TestGetLinkExports_ExcludesEntitiesLearnedOverOtherFilteredLinks(t *testing
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	want := []EntityDoc{{Name: "n-office"}, {Name: "office", CIDR: "10.0.0.0/24"}}
+	// r1 re-announces n-dmz — learned only via its filtered link to r2 —
+	// on its other filtered link toward r3.
+	want := []EntityDoc{
+		{Name: "n-dmz"}, {Name: "n-office"},
+		{Name: "dmz", CIDR: "10.0.1.0/24"}, {Name: "office", CIDR: "10.0.0.0/24"},
+	}
 	if !slices.EqualFunc(got.Entities, want, func(a, b EntityDoc) bool { return a == b }) {
 		t.Fatalf("entities = %+v, want %+v", got.Entities, want)
 	}
