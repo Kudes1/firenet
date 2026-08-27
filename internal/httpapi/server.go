@@ -80,6 +80,7 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
 	mux.HandleFunc("GET /ui/diagnose", servePage("diagnose.html"))
 	mux.HandleFunc("GET /ui/users", servePage("users.html"))
+	mux.HandleFunc("GET /ui/drafts", servePage("drafts.html"))
 
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {

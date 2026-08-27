@@ -1153,3 +1153,6 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   border-color: var(--accent);
   color: var(--accent);
 }
+.conflict-row {
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg));
+}
