@@ -348,11 +348,18 @@ func TestBuild_FilteredLinkBlocksUnannouncedDst(t *testing.T) {
 	}
 }
 
-func TestBuild_FilteredLinkBlocksUnannouncedSrc(t *testing.T) {
+// c→a used to be blocked because 'c' never appeared in the m-d filter's
+// own declared lists. Real routers don't work that way: 'd' legitimately
+// learned a route to 'a' (via the m-d filter's AExports) and freely shares
+// everything it knows with 'o' across their unrestricted link — exactly
+// like an ordinary router redistributing its routing table. Restricting
+// *who* may ride along a specific link, regardless of destination, is now
+// a firewall/rule concern (internal/rules), not a routing one.
+func TestBuild_FilteredLinkPropagatesLearnedRouteAcrossPlainLink(t *testing.T) {
 	g, _ := Build(filteredTopo())
 	paths, err := g.AllSimplePaths(SubnetNode("c"), SubnetNode("a"), DefaultLimits())
-	if err != nil || len(paths) != 0 {
-		t.Fatalf("c→a must be filtered out, got %d paths (%v)", len(paths), err)
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("c→a expected reachable: d relays its learned route to a across the plain d-o link, got %d paths (%v)", len(paths), err)
 	}
 }
 

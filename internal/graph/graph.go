@@ -52,15 +52,15 @@ func (n Node) String() string {
 // Edge is a directed graph edge.
 type Edge struct {
 	To Node
-	// Allow, when non-nil, carries only announced traffic: a path using
-	// this edge must have src ∈ From and dst ∈ To (filtered-link rules).
+	// Allow, when non-nil, restricts this edge to an announced destination:
+	// crossing it requires dst ∈ To (filtered-link route advertisement).
 	Allow *edgeAllow
 }
 
-// edgeAllow holds the subnet names each side of a filtered link announces
-// across it, resolved at Build time.
+// edgeAllow holds the subnet names announced as reachable across a
+// filtered link in this direction, resolved at Build time.
 type edgeAllow struct {
-	From, To map[string]struct{}
+	To map[string]struct{}
 }
 
 // Graph is a router/subnet adjacency list built from a Topology.
@@ -111,16 +111,16 @@ func Build(topo *topology.Topology) (*Graph, error) {
 		case !aIsSwitch && !bIsSwitch:
 			var ab, ba *edgeAllow
 			if l.Filter != nil {
-				from, err := exportSubnets(topo, l.Filter.AExports)
+				aExports, err := exportSubnets(topo, l.Filter.AExports)
 				if err != nil {
 					return nil, fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
 				}
-				to, err := exportSubnets(topo, l.Filter.BExports)
+				bExports, err := exportSubnets(topo, l.Filter.BExports)
 				if err != nil {
 					return nil, fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
 				}
-				ab = &edgeAllow{From: from, To: to}
-				ba = &edgeAllow{From: to, To: from}
+				ab = &edgeAllow{To: bExports}
+				ba = &edgeAllow{To: aExports}
 			}
 			g.addEdgeAllow(RouterNode(l.A.Device), RouterNode(l.B.Device), ab)
 			g.addEdgeAllow(RouterNode(l.B.Device), RouterNode(l.A.Device), ba)
