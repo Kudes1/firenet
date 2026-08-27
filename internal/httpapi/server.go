@@ -65,8 +65,6 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("POST /api/logout", h.logout)
 	mux.Handle("/api/", auth.RequireAuth(users)(apiMux))
 
-	mux.HandleFunc("POST /ui/compile", h.uiCompile)
-
 	// Standalone UI pages.
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/topology", http.StatusFound)

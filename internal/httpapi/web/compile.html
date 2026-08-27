@@ -16,13 +16,13 @@
 
 <main>
   <div style="margin-bottom: var(--space-3);">
-    <button class="primary" hx-post="/ui/compile" hx-target="#compile-output" hx-swap="innerHTML">Скомпилировать</button>
+    <button id="compile-run" class="primary">Скомпилировать</button>
   </div>
   <div id="compile-output"></div>
 </main>
 
-<script src="/htmx.min.js"></script>
 <script src="/alpine.min.js" defer></script>
 <script src="/common.js"></script>
+<script src="/compile.js"></script>
 </body>
 </html>
