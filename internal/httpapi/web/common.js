@@ -80,16 +80,25 @@ function isReadOnly() {
 
 // renderDraftBanner shows a persistent, page-wide indicator of whether
 // this tab is viewing the read-only current version or editing inside a
-// draft, with the action to switch.
-function renderDraftBanner() {
+// draft, with the action to switch. If the active draft no longer exists
+// (deleted or confirmed from another tab), the tab drops back to read-only.
+async function renderDraftBanner() {
   const banner = document.createElement("div");
   banner.className = "draft-banner";
   const draftID = currentDraftID();
 
   if (draftID) {
+    let draft;
+    try {
+      draft = await Api.get(`/api/drafts/${draftID}`);
+    } catch {
+      setCurrentDraftID(null);
+      window.location.reload();
+      return;
+    }
     banner.classList.add("draft-banner-editing");
     const text = document.createElement("span");
-    text.textContent = "Черновик активен.";
+    text.textContent = `Черновик «${draft.name}» (${draft.status}).`;
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.textContent = "Вернуться к текущей версии";
@@ -99,9 +108,10 @@ function renderDraftBanner() {
     });
     banner.append(text, closeBtn);
   } else {
+    const [version] = await Api.get("/api/versions?limit=1");
     banner.classList.add("draft-banner-readonly");
     const text = document.createElement("span");
-    text.textContent = "Только чтение — текущая подтверждённая версия.";
+    text.textContent = `Только чтение — версия ${version ? version.id : "—"}.`;
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.textContent = "Открыть черновик";
@@ -514,5 +524,7 @@ function buildNav(active) {
 document.addEventListener("DOMContentLoaded", () => {
   const active = document.body.dataset.nav;
   if (active) buildNav(active);
-  if (!document.body.dataset.noDraftBanner) renderDraftBanner();
+  if (!document.body.dataset.noDraftBanner) {
+    void renderDraftBanner().catch((e) => showBanner("Не удалось загрузить статус версии: " + e.message));
+  }
 });
