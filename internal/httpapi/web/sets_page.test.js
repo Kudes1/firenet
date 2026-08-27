@@ -27,6 +27,7 @@ function bootPage() {
     document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
     window: { dispatchEvent: notify },
     localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     dispatchEvent: notify,

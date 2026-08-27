@@ -111,6 +111,7 @@ function bootTopology(responses) {
       dispatchEvent() {},
     },
     localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     dispatchEvent() {},

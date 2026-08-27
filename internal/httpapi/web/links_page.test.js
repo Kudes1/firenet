@@ -28,6 +28,7 @@ function bootPage(failPut = false) {
     document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
     window: { dispatchEvent: notify },
     localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
     dispatchEvent: notify,

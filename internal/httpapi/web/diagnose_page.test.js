@@ -129,6 +129,11 @@ function bootDiagnose(responses, savedStore) {
       setItem: (k, v) => { store[k] = String(v); },
       removeItem: (k) => { delete store[k]; },
     },
+    sessionStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+    },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     dispatchEvent() {},

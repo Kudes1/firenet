@@ -78,6 +78,50 @@ function isReadOnly() {
   return !currentDraftID();
 }
 
+// renderDraftBanner shows a persistent, page-wide indicator of whether
+// this tab is viewing the read-only current version or editing inside a
+// draft, with the action to switch.
+function renderDraftBanner() {
+  const banner = document.createElement("div");
+  banner.className = "draft-banner";
+  const draftID = currentDraftID();
+
+  if (draftID) {
+    banner.classList.add("draft-banner-editing");
+    const text = document.createElement("span");
+    text.textContent = "Черновик активен.";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.textContent = "Вернуться к текущей версии";
+    closeBtn.addEventListener("click", () => {
+      setCurrentDraftID(null);
+      window.location.reload();
+    });
+    banner.append(text, closeBtn);
+  } else {
+    banner.classList.add("draft-banner-readonly");
+    const text = document.createElement("span");
+    text.textContent = "Только чтение — текущая подтверждённая версия.";
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.textContent = "Открыть черновик";
+    openBtn.addEventListener("click", async () => {
+      const name = window.prompt("Имя черновика:");
+      if (!name) return;
+      try {
+        const draft = await Api.post("/api/drafts", { name });
+        setCurrentDraftID(draft.id);
+        window.location.reload();
+      } catch (e) {
+        showBanner("Не удалось создать черновик: " + e.message);
+      }
+    });
+    banner.append(text, openBtn);
+  }
+
+  document.body.prepend(banner);
+}
+
 // apiPath builds the URL for one project-data resource (e.g. "topology",
 // or "link-exports?link=0&side=a"), routed through the active draft in
 // this tab, or the read-only current version otherwise. Every page that
@@ -466,4 +510,5 @@ function buildNav(active) {
 document.addEventListener("DOMContentLoaded", () => {
   const active = document.body.dataset.nav;
   if (active) buildNav(active);
+  if (!document.body.dataset.noDraftBanner) renderDraftBanner();
 });

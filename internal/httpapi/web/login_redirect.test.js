@@ -11,6 +11,7 @@ function loadCommon() {
     document: { addEventListener() {} },
     window: {},
     localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     matchMedia: () => ({ matches: false }),
     console,
   };

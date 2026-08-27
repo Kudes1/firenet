@@ -59,6 +59,7 @@ function loadCommon({ confirmResult }) {
     document: doc,
     window: { addEventListener: (t, fn) => { (winListeners[t] ||= []).push(fn); }, location },
     localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     dispatchEvent() {},

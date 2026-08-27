@@ -1123,3 +1123,33 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   padding: 6px 12px;
   text-align: left;
 }
+
+.draft-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 0.85em;
+  border-bottom: 1px solid var(--border);
+}
+.draft-banner-readonly {
+  background: var(--bg);
+  color: var(--muted);
+}
+.draft-banner-editing {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--text);
+}
+.draft-banner button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+.draft-banner button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
