@@ -58,6 +58,53 @@ const DirtyGuard = (() => {
   return { arm, markClean, isDirty };
 })();
 
+// --- draft context ---
+// sessionStorage (not localStorage) so each browser tab can hold a
+// different draft: a user editing draft A in one tab and draft B in
+// another must not clobber each other's context.
+const DRAFT_ID_KEY = "firenet-draft-id";
+
+function currentDraftID() {
+  return sessionStorage.getItem(DRAFT_ID_KEY) || null;
+}
+
+function setCurrentDraftID(id) {
+  lastDraftRevision = null;
+  if (id) sessionStorage.setItem(DRAFT_ID_KEY, id);
+  else sessionStorage.removeItem(DRAFT_ID_KEY);
+}
+
+function isReadOnly() {
+  return !currentDraftID();
+}
+
+// apiPath builds the URL for one project-data resource (e.g. "topology",
+// or "link-exports?link=0&side=a"), routed through the active draft in
+// this tab, or the read-only current version otherwise. Every page that
+// reads/writes project data goes through this instead of a literal
+// "/api/..." string, so there is exactly one place that knows the
+// draft-vs-current routing rule.
+function apiPath(suffix) {
+  const draftID = currentDraftID();
+  return draftID ? `/api/drafts/${draftID}/${suffix}` : `/api/versions/current/${suffix}`;
+}
+
+class ReadOnlyError extends Error {
+  constructor() {
+    super("Только чтение — откройте черновик, чтобы редактировать");
+  }
+}
+
+// assertEditable is the one-line guard every save path calls first.
+function assertEditable() {
+  if (isReadOnly()) throw new ReadOnlyError();
+}
+
+// lastDraftRevision is the CAS token from the most recent draft response
+// (GET or PUT) in this page load — attached to the next PUT automatically
+// so callers never have to thread X-Draft-Revision through by hand.
+let lastDraftRevision = null;
+
 // loginRedirectURL builds the /login target for an unauthenticated
 // request, preserving where the user was so they land back there after
 // logging in. Guards against open redirects: only same-origin, absolute
@@ -78,6 +125,8 @@ const Api = {
     const res = await fetch(path);
     if (res.status === 401) return redirectToLogin();
     if (!res.ok) throw await apiError(res);
+    const rev = res.headers?.get("X-Draft-Revision");
+    if (rev) lastDraftRevision = rev;
     return res.json();
   },
   async post(path, body) {
@@ -91,11 +140,17 @@ const Api = {
     return res.status === 204 ? null : res.json();
   },
   async put(path, body) {
-    const res = await fetch(path, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const headers = { "Content-Type": "application/json" };
+    if (lastDraftRevision) headers["X-Draft-Revision"] = lastDraftRevision;
+    const res = await fetch(path, { method: "PUT", headers, body: JSON.stringify(body) });
+    if (res.status === 401) return redirectToLogin();
+    if (!res.ok) throw await apiError(res);
+    const rev = res.headers?.get("X-Draft-Revision");
+    if (rev) lastDraftRevision = rev;
+    return res.status === 204 ? null : res.json();
+  },
+  async delete(path) {
+    const res = await fetch(path, { method: "DELETE" });
     if (res.status === 401) return redirectToLogin();
     if (!res.ok) throw await apiError(res);
     return res.status === 204 ? null : res.json();
@@ -103,12 +158,12 @@ const Api = {
 };
 
 async function apiError(res) {
-  try {
-    const data = await res.json();
-    return new Error(data.error || `HTTP ${res.status}`);
-  } catch {
-    return new Error(`HTTP ${res.status}`);
-  }
+  let data = {};
+  try { data = await res.json(); } catch {}
+  const err = new Error(data.error || `HTTP ${res.status}`);
+  err.status = res.status;
+  err.data = data;
+  return err;
 }
 
 // ipv4CidrOverlap is a best-effort client-side hint for the same check
