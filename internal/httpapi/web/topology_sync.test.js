@@ -202,6 +202,52 @@ test("on 422 invalid operation: same reload/discard/report rollback as 409", asy
   assert.ok(statuses.includes("error"));
 });
 
+test("when reload also fails during reconcile: does not wedge the queue, still reports error, and recovers on the next enqueue", async () => {
+  const TopologySync = loadTopologySync();
+  const sent = [];
+  const statuses = [];
+  let lastState = null;
+  const conflict = Object.assign(new Error("stale revision"), { status: 409 });
+  const reloadFailure = new TypeError("Failed to fetch");
+  let reloadShouldFail = true;
+  const sync = TopologySync.create({
+    read: () => ({ value: -1 }),
+    apply: (s, op) => ({ value: s.value + op.delta }),
+    write: async (op) => {
+      sent.push(op.delta);
+      if (op.delta === 1) throw conflict; // first op: the write itself fails
+      return { value: 100 + op.delta }; // second op (after recovery): succeeds
+    },
+    onState: (s) => { lastState = s; },
+    onStatus: (s) => statuses.push(s),
+    reload: async () => {
+      if (reloadShouldFail) throw reloadFailure; // reconcile's own reload also fails
+      return { value: 50 };
+    },
+  });
+  sync.seed({ value: 0 });
+  sync.enqueue({ delta: 1 });
+  // Must settle (not hang) and must not throw/reject despite reload() also
+  // failing inside reconcile() - no unhandled rejection should escape.
+  await assert.doesNotReject(sync.idle());
+  assert.deepEqual(sent, [1]);
+  // Status must reflect the failure even though reload() itself threw -
+  // never left silently stuck on "saving".
+  assert.ok(statuses.includes("error"));
+  // Nothing fresher to publish, so the last known-good confirmed snapshot
+  // (from seed) stands, with the discarded queue projected over it (empty).
+  assert.deepEqual(lastState, { value: 0 });
+  assert.equal(sync.pending().length, 0);
+
+  // The queue must not be permanently wedged: a later enqueue still drains.
+  reloadShouldFail = false;
+  sync.enqueue({ delta: 5 });
+  await assert.doesNotReject(sync.idle());
+  assert.deepEqual(sent, [1, 5]);
+  assert.deepEqual(lastState, { value: 105 });
+  assert.equal(statuses[statuses.length - 1], "saved");
+});
+
 test("on network error: same reload/discard/report rollback, distinguished only by the thrown shape", async () => {
   const TopologySync = loadTopologySync();
   const sent = [];

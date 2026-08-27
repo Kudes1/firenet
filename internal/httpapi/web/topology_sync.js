@@ -88,10 +88,22 @@ const TopologySync = (() => {
     // reconcile handles every write failure (409, 422, network error) the
     // same way: never auto-retry (the topology may have changed underneath
     // the queued op), reload the canonical snapshot, discard everything
-    // pending, publish, and report.
+    // pending, publish, and report. reload() itself is injected (e.g. an
+    // Api.get call) and can also fail - if it does, there's no fresher
+    // snapshot to publish, so `confirmed` is left as whatever it last was;
+    // the discarded queue still can't be trusted (that's why we're here),
+    // so it stays discarded either way. What must never happen: drain()
+    // left permanently inFlight (wedging every future enqueue) or a
+    // silently-stuck status. So this always ends by clearing inFlight and
+    // reporting ERROR, reload failure or not.
     async function reconcile() {
       queue = [];
-      confirmed = await reload();
+      try {
+        confirmed = await reload();
+      } catch {
+        // Keep the last known-good confirmed snapshot; fall through to
+        // publish/unwedge/report below regardless.
+      }
       publish();
       inFlight = false;
       onStatus(ERROR);
