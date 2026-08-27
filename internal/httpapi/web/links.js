@@ -22,7 +22,7 @@ document.addEventListener("alpine:init", () => {
 
     async init() {
       try {
-        const [topo, subs] = await Promise.all([Api.get("/api/topology"), Api.get("/api/subnets")]);
+        const [topo, subs] = await Promise.all([Api.get(apiPath("topology")), Api.get(apiPath("subnets"))]);
         this._topo = topo;
         this.subnets = subs.subnets || [];
         this.networks = topo.networks || [];
@@ -99,7 +99,7 @@ document.addEventListener("alpine:init", () => {
 
     async loadCandidates(i) {
       try {
-        const [a, b] = await Promise.all([Api.get(`/api/link-exports?link=${i}&side=a`), Api.get(`/api/link-exports?link=${i}&side=b`)]);
+        const [a, b] = await Promise.all([Api.get(apiPath(`link-exports?link=${i}&side=a`)), Api.get(apiPath(`link-exports?link=${i}&side=b`))]);
         this.candidates = { a: a.entities || [], b: b.entities || [] };
       } catch (e) {
         this.candidates = { a: [], b: [] };
@@ -185,7 +185,8 @@ document.addEventListener("alpine:init", () => {
 
     async persist(next) {
       try {
-        const doc = await Api.put("/api/topology", {
+        assertEditable();
+        const doc = await Api.put(apiPath("topology"), {
           devices: this._topo.devices || [],
           links: next.map((l) => ({
             a: { device: l.a.device },

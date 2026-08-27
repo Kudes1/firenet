@@ -71,7 +71,9 @@ function fire(target, type, ev) {
   if (type === "click" && target.onclick) target.onclick(ev);
 }
 
-function bootTopology(responses) {
+function bootTopology(responses, draftID = "d1") {
+  const draftStore = draftID ? { "firenet-draft-id": draftID } : {};
+  const calls = [];
   const ctx = makeCtx();
   const canvas = Object.assign(makeEl("canvas"), {
     clientWidth: 1200,
@@ -111,7 +113,11 @@ function bootTopology(responses) {
       dispatchEvent() {},
     },
     localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: {
+      getItem: (k) => (k in draftStore ? draftStore[k] : null),
+      setItem: (k, v) => { draftStore[k] = v; },
+      removeItem: (k) => { delete draftStore[k]; },
+    },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     dispatchEvent() {},
@@ -127,7 +133,10 @@ function bootTopology(responses) {
     Promise,
     console,
     // clone: production mutates loaded state, responses must stay pristine
-    fetch: async (p) => ({ ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(responses[p] ?? null)) }),
+    fetch: async (p, opts) => {
+      calls.push({ path: p, method: opts?.method || "GET" });
+      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(responses[p] ?? null)) };
+    },
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
@@ -148,7 +157,7 @@ function bootTopology(responses) {
       rafQueue.splice(0).forEach((fn) => fn(clock));
     }
   };
-  return { canvas, ctx, doc, ids, get, sandbox, pump, minimapCanvas, minimapCtx };
+  return { canvas, ctx, doc, ids, get, sandbox, pump, minimapCanvas, minimapCtx, calls };
 }
 
 const texts = (get) => get("State.list.filter((i) => i.text).map((i) => i.text)");
@@ -166,14 +175,14 @@ function clickNode(page, name, shift) {
 }
 
 const responses = {
-  "/api/topology": {
+  "/api/drafts/d1/topology": {
     devices: [{ name: "r1", kind: "router" }, { name: "r2", kind: "router" }],
     links: [{ a: { device: "r1" }, b: { device: "r2" } }],
     networks: [{ name: "net1", subnets: ["a"], attach: [{ device: "r1" }] }],
     unions: [],
   },
-  "/api/subnets": { subnets: [{ name: "a", cidr: "10.0.0.0/24" }] },
-  "/api/layout": {},
+  "/api/drafts/d1/subnets": { subnets: [{ name: "a", cidr: "10.0.0.0/24" }] },
+  "/api/drafts/d1/layout": {},
 };
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
@@ -199,8 +208,8 @@ test("network subtitle summarizes long subnet lists with a +N tail", async () =>
   };
   const { get } = bootTopology({
     ...responses,
-    "/api/topology": topo,
-    "/api/subnets": { subnets: topo.networks[0].subnets.map((name) => ({ name, cidr: "10.0.0.0/24" })) },
+    "/api/drafts/d1/topology": topo,
+    "/api/drafts/d1/subnets": { subnets: topo.networks[0].subnets.map((name) => ({ name, cidr: "10.0.0.0/24" })) },
   });
   await tick();
   const summary = texts(get).find((t) => t.includes("+"));
@@ -213,7 +222,7 @@ test("device kinds get their distinct shape and glyph, unknown kinds fall back",
     links: [],
     networks: [],
   };
-  const { get } = bootTopology({ ...responses, "/api/topology": topo });
+  const { get } = bootTopology({ ...responses, "/api/drafts/d1/topology": topo });
   await tick();
   const radii = JSON.parse(get(
     `JSON.stringify(State.list.filter((i) => i.nodeType === "device").map((i) => [i.ref.name, i.geom.r]))`,
@@ -234,9 +243,9 @@ test("network node renders as a closed cloud path inside its bbox", async () => 
 
 test("topology tolerates empty project", async () => {
   const { ids, get } = bootTopology({
-    "/api/topology": { devices: [], links: [], networks: [] },
-    "/api/subnets": { subnets: [] },
-    "/api/layout": {},
+    "/api/drafts/d1/topology": { devices: [], links: [], networks: [] },
+    "/api/drafts/d1/subnets": { subnets: [] },
+    "/api/drafts/d1/layout": {},
   });
   await tick();
   assert.equal(get("State.list.length"), 0, "empty display list for empty project");
@@ -246,7 +255,7 @@ test("topology tolerates empty project", async () => {
 test("camera from layout is applied to the canvas view", async () => {
   const { get } = bootTopology({
     ...responses,
-    "/api/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
+    "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
   });
   await tick();
   assert.deepEqual(JSON.parse(get("JSON.stringify(State.camera)")), { x: -100, y: -50, z: 2 });
@@ -255,7 +264,7 @@ test("camera from layout is applied to the canvas view", async () => {
 test("wheel zooms around the cursor", async () => {
   const { canvas, get, pump } = bootTopology({
     ...responses,
-    "/api/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
+    "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
   });
   await tick();
   const before = JSON.parse(get("JSON.stringify(State.camera)"));
@@ -273,7 +282,7 @@ test("wheel zooms around the cursor", async () => {
 test("middle-button drag pans the camera", async () => {
   const { canvas, doc, get, pump } = bootTopology({
     ...responses,
-    "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 1 } },
+    "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 1 } },
   });
   await tick();
   fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
@@ -286,7 +295,7 @@ test("middle-button drag pans the camera", async () => {
 test("node dragging accounts for camera zoom", async () => {
   const { canvas, doc, get } = bootTopology({
     ...responses,
-    "/api/layout": {
+    "/api/drafts/d1/layout": {
       devices: { r1: { x: 100, y: 100 }, r2: { x: 400, y: 100 } },
       networks: { net1: { x: 250, y: 300 } },
       camera: { x: 0, y: 0, z: 2 },
@@ -317,7 +326,7 @@ test("toolbar switches the active tool", async () => {
 test("device tool creates a device at the clicked world position", async () => {
   const { canvas, ids, get, pump } = bootTopology({
     ...responses,
-    "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 2 } },
+    "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 2 } },
   });
   await tick();
   fire(ids["tool-device"], "click", {});
@@ -352,7 +361,7 @@ test("connect tool links two devices with click-click", async () => {
   // start without the r1–r2 link so the connect tool can create it
   const page = bootTopology({
     ...responses,
-    "/api/topology": { ...responses["/api/topology"], links: [] },
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], links: [] },
   });
   await tick();
   fire(page.ids["tool-connect"], "click", {});
@@ -463,8 +472,8 @@ test("connect tool shows a preview wire while connecting", async () => {
 test("connect tool links network-first: net click then device click attaches", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": {
-      ...responses["/api/topology"],
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
       networks: [{ name: "net1", subnets: ["a"], attach: [] }],
     },
   });
@@ -478,8 +487,8 @@ test("connect tool links network-first: net click then device click attaches", a
 test("connect tool rejects network-to-network with an explicit banner", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": {
-      ...responses["/api/topology"],
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
       links: [],
       networks: [
         { name: "net1", subnets: ["a"], attach: [] },
@@ -557,8 +566,8 @@ test("context menu deletes a node", async () => {
 test("filtered link menu item names it a filtered wire", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": {
-      ...responses["/api/topology"],
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
       links: [{ a: { device: "r1" }, b: { device: "r2" }, filter: { aExports: ["a"], bExports: [] } }],
     },
   });
@@ -645,7 +654,7 @@ test("popover clamp measures real size after unhide", async () => {
 test("popover follows camera panning like the scene", async () => {
   const { canvas, doc, ids, pump } = bootTopology({
     ...responses,
-    "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 1 } },
+    "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 1 } },
   });
   await tick();
   fire(ids["tool-device"], "click", {});
@@ -782,8 +791,8 @@ test("clicking an attachment line selects it and the trash removes the attach", 
 // объединение с пустыми списками членов рамки не получает
 const unionsResponses = {
   ...responses,
-  "/api/topology": {
-    ...responses["/api/topology"],
+  "/api/drafts/d1/topology": {
+    ...responses["/api/drafts/d1/topology"],
     unions: [{ name: "office", devices: ["r1", "r2"], networks: ["net1"] }],
   },
 };
@@ -804,7 +813,7 @@ test("union frames render as bounding boxes behind the graph", async () => {
 
 test("palette colors differ between unions and follow document order", async () => {
   const resp = JSON.parse(JSON.stringify(unionsResponses));
-  resp["/api/topology"].unions = [
+  resp["/api/drafts/d1/topology"].unions = [
     { name: "a", devices: ["r1"] },
     { name: "b", devices: ["r2"] },
   ];
@@ -835,7 +844,7 @@ test("no union frames when topology has none", async () => {
 test("context menu assigns a node to a union and removes it back", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: [] }] },
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], unions: [{ name: "office", devices: [] }] },
   });
   await tick();
   fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y }); // r1
@@ -853,7 +862,7 @@ test("context menu assigns a node to a union and removes it back", async () => {
 test("union submenu lists locations and shows a placeholder when none are available", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: ["r1"] }] },
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], unions: [{ name: "office", devices: ["r1"] }] },
   });
   await tick();
   fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y }); // r1
@@ -878,8 +887,8 @@ test("union submenu lists locations and shows a placeholder when none are availa
 test("union submenu with several candidates shows a search field that filters the list", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": {
-      ...responses["/api/topology"],
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
       unions: [{ name: "dmz", devices: [] }, { name: "lan", devices: [] }, { name: "office", devices: [] }],
     },
   });
@@ -905,7 +914,7 @@ test("union submenu with several candidates shows a search field that filters th
 test("union submenu with a single candidate renders no search field", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: [] }] },
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], unions: [{ name: "office", devices: [] }] },
   });
   await tick();
   fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
@@ -919,7 +928,7 @@ test("union submenu with a single candidate renders no search field", async () =
 test("context menu keeps union items above the danger delete item", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: [] }] },
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], unions: [{ name: "office", devices: [] }] },
   });
   await tick();
   fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
@@ -936,7 +945,7 @@ test("context menu keeps union items above the danger delete item", async () => 
 test("network nodes get union assignment in the context menu too", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office" }] },
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], unions: [{ name: "office" }] },
   });
   await tick();
   fire(page.canvas, "contextmenu", { clientX: AT.net1.x, clientY: AT.net1.y });
@@ -949,7 +958,7 @@ test("network nodes get union assignment in the context menu too", async () => {
 test("deleting a node scrubs it from union membership", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/topology": { ...responses["/api/topology"], unions: [{ name: "office", devices: ["r1"] }] },
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], unions: [{ name: "office", devices: ["r1"] }] },
   });
   await tick();
   clickNode(page, "r1");
@@ -961,8 +970,8 @@ test("deleting a node scrubs it from union membership", async () => {
 
 const filteredResponses = {
   ...responses,
-  "/api/topology": {
-    ...responses["/api/topology"],
+  "/api/drafts/d1/topology": {
+    ...responses["/api/drafts/d1/topology"],
     links: [{ a: { device: "r1" }, b: { device: "r2" }, filter: { aExports: ["office"], bExports: ["dmz"] } }],
   },
 };
@@ -1029,14 +1038,14 @@ test("minimap stays hidden when the scene fits the viewport", async () => {
 });
 
 test("minimap appears when the scene overflows the viewport", async () => {
-  const page = bootTopology({ ...responses, "/api/layout": { camera: { x: 0, y: 0, z: 5 } } });
+  const page = bootTopology({ ...responses, "/api/drafts/d1/layout": { camera: { x: 0, y: 0, z: 5 } } });
   await tick();
   page.pump();
   assert.equal(page.minimapCanvas.hidden, false);
 });
 
 test("clicking the minimap recenters the page camera on the clicked point, keeping zoom", async () => {
-  const page = bootTopology({ ...responses, "/api/layout": { camera: { x: 0, y: 0, z: 5 } } });
+  const page = bootTopology({ ...responses, "/api/drafts/d1/layout": { camera: { x: 0, y: 0, z: 5 } } });
   await tick();
   page.pump();
   const expected = JSON.parse(page.get(`
@@ -1056,7 +1065,7 @@ test("clicking the minimap recenters the page camera on the clicked point, keepi
 test("a freshly created node pops in and settles", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 2 } },
+    "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 2 } },
   });
   await tick();
   fire(page.ids["tool-device"], "click", {});
@@ -1156,8 +1165,8 @@ test("device context menu has no Редактировать item", async () => {
 test("applying a filter from the link panel updates the topology and marks it dirty", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/link-exports?link=0&side=a": { entities: [{ name: "office", cidr: "10.0.0.0/24" }] },
-    "/api/link-exports?link=0&side=b": { entities: [] },
+    "/api/drafts/d1/link-exports?link=0&side=a": { entities: [{ name: "office", cidr: "10.0.0.0/24" }] },
+    "/api/drafts/d1/link-exports?link=0&side=b": { entities: [] },
   });
   await tick();
   assert.equal(page.get("DirtyGuard.isDirty()"), false, "clean after boot");
@@ -1188,4 +1197,17 @@ test("cancel closes the link panel without touching the topology", async () => {
   fire(findBtn(panel, (b) => String(b.textContent).trim() === "Отмена"), "click", {});
   assert.ok(panel.hidden, "panel closed");
   assert.equal(page.get("DirtyGuard.isDirty()"), false, "no changes recorded");
+});
+
+test("read-only (no active draft) blocks the topology save and the layout autosave", async () => {
+  const responses = {
+    "/api/versions/current/topology": { devices: [], links: [], networks: [], sets: [], unions: [] },
+    "/api/versions/current/subnets": { subnets: [] },
+    "/api/versions/current/layout": {},
+  };
+  const { ids, calls } = bootTopology(responses, null);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  fire(ids["topo-save"], "click", {});
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(!calls.some((c) => c.method === "PUT"), "read-only tab never writes the topology");
 });

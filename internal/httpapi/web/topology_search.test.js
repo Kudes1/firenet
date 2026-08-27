@@ -70,7 +70,9 @@ function fire(target, type, ev) {
   if (type === "click" && target.onclick) target.onclick(ev);
 }
 
-function bootTopology(responses) {
+function bootTopology(responses, draftID = "d1") {
+  const draftStore = draftID ? { "firenet-draft-id": draftID } : {};
+  const calls = [];
   const ctx = makeCtx();
   const canvas = Object.assign(makeEl("canvas"), {
     clientWidth: 1200,
@@ -102,7 +104,11 @@ function bootTopology(responses) {
       dispatchEvent() {},
     },
     localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: {
+      getItem: (k) => (k in draftStore ? draftStore[k] : null),
+      setItem: (k, v) => { draftStore[k] = v; },
+      removeItem: (k) => { delete draftStore[k]; },
+    },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     dispatchEvent() {},
@@ -117,7 +123,10 @@ function bootTopology(responses) {
     clearTimeout,
     Promise,
     console,
-    fetch: async (p) => ({ ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(responses[p] ?? null)) }),
+    fetch: async (p, opts) => {
+      calls.push({ path: p, method: opts?.method || "GET" });
+      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(responses[p] ?? null)) };
+    },
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
@@ -130,7 +139,7 @@ function bootTopology(responses) {
   }
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
   return {
-    canvas, ctx, doc, ids, get: (expr) => vm.runInContext(expr, sandbox), sandbox,
+    canvas, ctx, doc, ids, get: (expr) => vm.runInContext(expr, sandbox), sandbox, calls,
     // pump исполняет кадры до исчерпания очереди (твин камеры дошёл до цели)
     pump() {
       while (rafQueue.length) {
@@ -157,7 +166,7 @@ function search(ids, q) {
 }
 
 const responses = {
-  "/api/topology": {
+  "/api/drafts/d1/topology": {
     devices: [{ name: "r1", kind: "router" }, { name: "sw1", kind: "switch" }],
     links: [],
     networks: [
@@ -166,10 +175,10 @@ const responses = {
     ],
     unions: [{ name: "office-union", devices: ["r1"] }],
   },
-  "/api/subnets": {
+  "/api/drafts/d1/subnets": {
     subnets: [{ name: "office", cidr: "10.0.0.0/24" }, { name: "guest", cidr: "192.168.5.0/24" }],
   },
-  "/api/layout": {},
+  "/api/drafts/d1/layout": {},
 };
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));

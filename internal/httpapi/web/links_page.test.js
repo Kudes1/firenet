@@ -10,6 +10,7 @@ function bootPage(failPut = false) {
   const factories = {};
   const calls = [];
   const banners = [];
+  const store = { "firenet-draft-id": "d1" };
   const docListeners = {};
   const notify = (event) => {
     if (event.type === "notify") banners.push(event.detail);
@@ -28,7 +29,11 @@ function bootPage(failPut = false) {
     document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
     window: { dispatchEvent: notify },
     localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = v; },
+      removeItem: (k) => { delete store[k]; },
+    },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
     dispatchEvent: notify,
@@ -38,14 +43,14 @@ function bootPage(failPut = false) {
     console,
     fetch: async (path_, opts) => {
       calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
-      if (path_ === "/api/topology") {
+      if (path_ === "/api/drafts/d1/topology") {
         if (failPut && opts?.method === "PUT") return { ok: false, status: 422, json: async () => ({ error: "x" }) };
         return { ok: true, status: 200, json: async () => calls.find((c) => c.method === "PUT")?.body || topoFixture };
       }
-      if (path_ === "/api/subnets") {
+      if (path_ === "/api/drafts/d1/subnets") {
         return { ok: true, status: 200, json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }] }) };
       }
-      if (path_?.startsWith("/api/link-exports")) {
+      if (path_?.startsWith("/api/drafts/d1/link-exports")) {
         const q = new URLSearchParams(path_.split("?")[1]);
         const i = Number(q.get("link"));
         if (failPut && i === 0) return { ok: false, status: 500, json: async () => ({ error: "x" }) };
@@ -73,7 +78,7 @@ function bootPage(failPut = false) {
   const page = factories.linksPage();
   page.$nextTick = (fn) => fn();
   page.$refs = { dialog: { close: () => calls.push({ path: "dialog.close" }), showModal: () => calls.push({ path: "dialog.showModal" }) } };
-  return { page, calls, banners };
+  return { page, calls, banners, store };
 }
 
 async function bootLoadedPage(failPut = false) {
@@ -146,8 +151,8 @@ test("openEdit copies current exports into the draft and fetches candidates", as
   const { page, calls } = await bootLoadedPage();
   await page.openEdit(1);
   assert.deepEqual(plain(page.draft), { index: 1, aExports: ["NA"], bExports: ["NC"] });
-  assert.ok(calls.some((c) => c.path === "/api/link-exports?link=1&side=a"), "candidates fetched for side a");
-  assert.ok(calls.some((c) => c.path === "/api/link-exports?link=1&side=b"), "candidates fetched for side b");
+  assert.ok(calls.some((c) => c.path === "/api/drafts/d1/link-exports?link=1&side=a"), "candidates fetched for side a");
+  assert.ok(calls.some((c) => c.path === "/api/drafts/d1/link-exports?link=1&side=b"), "candidates fetched for side b");
   await page.openEdit(0);
   assert.deepEqual(plain(page.draft), { index: 0, aExports: [], bExports: [] });
 });
@@ -160,7 +165,7 @@ test("saveDraft writes edited exports preserving the rest verbatim", async () =>
 
   await page.saveDraft();
 
-  const put = calls.find((c) => c.path === "/api/topology" && c.method === "PUT");
+  const put = calls.find((c) => c.path === "/api/drafts/d1/topology" && c.method === "PUT");
   assert.deepEqual(put.body.links[0], { a: { device: "m" }, b: { device: "d" }, filter: { aExports: ["NA"], bExports: [] } });
   // untouched filtered link preserved as-is
   assert.deepEqual(put.body.links[1], { a: { device: "m" }, b: { device: "o" }, filter: { aExports: ["NA"], bExports: ["NC"] } });
@@ -283,4 +288,13 @@ test("openCombo keeps search when the same side reopens", async () => {
   assert.equal(page.combo.cursor, 1, "cursor survives refocus");
   page.openCombo("b"); // switching sides resets
   assert.deepEqual(plain(page.combo), { side: "b", search: "", cursor: 0 });
+});
+
+test("saveDraft is blocked while read-only (no active draft)", async () => {
+  const { page, calls, store } = await bootLoadedPage();
+  delete store["firenet-draft-id"];
+  page.openEdit(0);
+  page.draft.aExports = ["NA"];
+  await page.saveDraft();
+  assert.equal(calls.filter((c) => c.method === "PUT").length, 0);
 });
