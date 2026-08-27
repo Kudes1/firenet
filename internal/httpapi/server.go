@@ -43,6 +43,7 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	apiMux.HandleFunc("POST /api/drafts", h.createDraft)
 	apiMux.HandleFunc("GET /api/drafts", h.listDrafts)
 	apiMux.HandleFunc("DELETE /api/drafts/{id}", h.deleteDraft)
+	apiMux.HandleFunc("GET /api/drafts/{id}", h.getDraft)
 	apiMux.HandleFunc("GET /api/drafts/{id}/diff", h.draftDiff)
 	apiMux.Handle("POST /api/drafts/{id}/confirm", auth.RequireAdmin(http.HandlerFunc(h.confirmDraft)))
 	apiMux.HandleFunc("GET /api/drafts/{id}/topology", h.getDraftTopology)

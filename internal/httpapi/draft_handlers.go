@@ -77,6 +77,14 @@ func (h *handlers) deleteDraft(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *handlers) getDraft(w http.ResponseWriter, r *http.Request) {
+	d, ok := h.resolveDraftForAccess(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, toDraftResponse(d))
+}
+
 type entityDiffResponse struct {
 	Kind   string          `json:"kind"`
 	Key    string          `json:"key"`

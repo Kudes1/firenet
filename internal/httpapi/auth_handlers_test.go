@@ -200,3 +200,91 @@ func TestDeleteLastAdminIsRejected(t *testing.T) {
 		t.Fatalf("got status %d, want 400", rec.Code)
 	}
 }
+
+func TestGetDraft(t *testing.T) {
+	srv, users := newUnauthenticatedTestServer(t)
+	ctx := context.Background()
+
+	// Create owner user and draft
+	if _, err := users.CreateUser(ctx, "owner", "password-1", auth.RoleUser); err != nil {
+		t.Fatalf("CreateUser owner: %v", err)
+	}
+
+	// Create unrelated user
+	if _, err := users.CreateUser(ctx, "unrelated", "password-2", auth.RoleUser); err != nil {
+		t.Fatalf("CreateUser unrelated: %v", err)
+	}
+
+	ownerCookie := loginAndGetCookie(t, srv, "owner", "password-1")
+	unrelatedCookie := loginAndGetCookie(t, srv, "unrelated", "password-2")
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+
+	// Create owner handler
+	ownerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.AddCookie(ownerCookie)
+		srv.ServeHTTP(w, r)
+	})
+
+	// Create unrelated handler
+	unrelatedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.AddCookie(unrelatedCookie)
+		srv.ServeHTTP(w, r)
+	})
+
+	// Create admin handler
+	adminHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.AddCookie(adminCookie)
+		srv.ServeHTTP(w, r)
+	})
+
+	// Create a draft as owner user (we need to call the API)
+	createBody, _ := json.Marshal(createDraftRequest{Name: "work"})
+	req := httptest.NewRequest(http.MethodPost, "/api/drafts", bytes.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(ownerCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create draft failed: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	var draftResp draftResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &draftResp); err != nil {
+		t.Fatalf("decode draft response: %v", err)
+	}
+	draftID := draftResp.ID
+
+	// Test: owner can access the draft
+	rec = httptest.NewRecorder()
+	ownerHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/drafts/"+draftID, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got draftResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.ID != draftID || got.Name != "work" || got.Status != "open" {
+		t.Fatalf("draft = %+v", got)
+	}
+
+	// Test: admin can access the draft
+	rec = httptest.NewRecorder()
+	adminHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/drafts/"+draftID, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin access: status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	// Test: unrelated user gets 403
+	rec = httptest.NewRecorder()
+	unrelatedHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/drafts/"+draftID, nil))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("unrelated user: status = %d, want 403, body = %s", rec.Code, rec.Body)
+	}
+
+	// Test: missing draft gets 404
+	rec = httptest.NewRecorder()
+	ownerHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/drafts/00000000-0000-0000-0000-000000000000", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing draft: status = %d, want 404, body = %s", rec.Code, rec.Body)
+	}
+}
