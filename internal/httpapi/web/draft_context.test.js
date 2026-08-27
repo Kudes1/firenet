@@ -75,3 +75,21 @@ test("Api.put sends the revision from the last Api.get and updates it from the r
   await Api.put("/api/drafts/draft-1/topology", { devices: [] });
   assert.equal(requests[2].headers["X-Draft-Revision"], "4");
 });
+
+test("Api.post sends the revision from the last Api.get and updates it from the response", async () => {
+  const { Api, sandbox } = loadCommon({ "firenet-draft-id": "draft-1" });
+  const requests = [];
+  sandbox.fetch = async (url, opts) => {
+    requests.push({ url, headers: opts?.headers || {} });
+    if (!opts) {
+      return { ok: true, status: 200, headers: { get: (h) => (h === "X-Draft-Revision" ? "3" : null) }, json: async () => ({}) };
+    }
+    return { ok: true, status: 200, headers: { get: (h) => (h === "X-Draft-Revision" ? "4" : null) }, json: async () => ({}) };
+  };
+  await Api.get("/api/drafts/draft-1/topology");
+  await Api.post("/api/drafts/draft-1/topology/operations", { kind: "create-device" });
+  assert.equal(requests[1].headers["X-Draft-Revision"], "3");
+
+  await Api.post("/api/drafts/draft-1/topology/operations", { kind: "create-device" });
+  assert.equal(requests[2].headers["X-Draft-Revision"], "4");
+});
