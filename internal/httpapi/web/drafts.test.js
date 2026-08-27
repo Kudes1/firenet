@@ -26,6 +26,7 @@ function bootDrafts(fixture = {}) {
   const me = fixture.me ?? { username: "alice", role: "user" };
   const diffs = fixture.diffs ?? [{ kind: "subnet", key: "a", change: "modified", conflict: false }];
   const confirmStatus = fixture.confirmStatus ?? 200;
+  const confirmBody = fixture.confirmBody ?? (confirmStatus === 409 ? { conflicts: [{ kind: "subnet", key: "a" }] } : { version: 6 });
 
   const tbody = makeEl("tbody");
   const ids = {
@@ -60,6 +61,7 @@ function bootDrafts(fixture = {}) {
     },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
+    confirm: () => fixture.confirmResult ?? true,
     fetch: async (url, opts) => {
       calls.push({ path: url, method: opts?.method || "GET" });
       if (url === "/api/me") return { ok: true, status: 200, headers: { get: () => null }, json: async () => me };
@@ -67,10 +69,7 @@ function bootDrafts(fixture = {}) {
         return { ok: true, status: 200, headers: { get: () => null }, json: async () => diffs };
       }
       if (url.startsWith("/api/drafts/") && url.endsWith("/confirm")) {
-        if (confirmStatus === 409) {
-          return { ok: false, status: 409, headers: { get: () => null }, json: async () => ({ conflicts: [{ kind: "subnet", key: "a" }] }) };
-        }
-        return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ version: 6 }) };
+        return { ok: confirmStatus === 200, status: confirmStatus, headers: { get: () => null }, json: async () => confirmBody };
       }
       if (opts?.method === "DELETE") {
         return { ok: true, status: 204, headers: { get: () => null }, json: async () => null };
@@ -79,6 +78,9 @@ function bootDrafts(fixture = {}) {
         return { ok: true, status: 201, headers: { get: () => null }, json: async () => ({ id: "new", owner: "alice", name: JSON.parse(opts.body).name, baseVersion: 5, status: "open" }) };
       }
       if (url.startsWith("/api/drafts")) {
+        if (fixture.draftsFail) {
+          return { ok: false, status: 500, headers: { get: () => null }, json: async () => ({ error: "boom" }) };
+        }
         return { ok: true, status: 200, headers: { get: () => null }, json: async () => drafts };
       }
       return { ok: false, status: 404, headers: { get: () => null }, json: async () => ({}) };
@@ -133,12 +135,56 @@ test("confirmSelected on success clears the selection and shows the new version"
   assert.ok(banners.some((b) => b.message.includes("версия 6")));
 });
 
-test("confirmSelected on a 409 keeps the diff open and reloads it", async () => {
+test("confirmSelected on success clears this tab's active draft id when it matches the confirmed draft", async () => {
+  const { get, store } = bootDrafts({ confirmStatus: 200 });
+  store["firenet-draft-id"] = "d1";
+  await get(`Drafts.loadDiff({ id: "d1", name: "office" })`);
+  await get("Drafts.confirmSelected()");
+  assert.equal(store["firenet-draft-id"], undefined, "tab must drop out of the now-merged draft");
+});
+
+test("confirmSelected on success leaves a different tab's active draft id untouched", async () => {
+  const { get, store } = bootDrafts({ confirmStatus: 200 });
+  store["firenet-draft-id"] = "other-draft";
+  await get(`Drafts.loadDiff({ id: "d1", name: "office" })`);
+  await get("Drafts.confirmSelected()");
+  assert.equal(store["firenet-draft-id"], "other-draft");
+});
+
+test("confirmSelected on a 409 conflict keeps the diff open, reloads it, and refreshes the table", async () => {
   const { get, banners } = bootDrafts({ confirmStatus: 409 });
   await get(`Drafts.loadDiff({ id: "d1", name: "office" })`);
+  assert.equal(get("Drafts.drafts").length, 0, "table not yet loaded before the confirm attempt");
   await get("Drafts.confirmSelected()");
   assert.equal(get("Drafts.selected").id, "d1");
   assert.ok(banners.some((b) => b.message.includes("конфликт")));
+  assert.equal(get("Drafts.drafts").length, 1, "status column refreshed after pgstore marks the draft conflicted");
+});
+
+test("confirmSelected on a non-conflict 409 shows the error and does not reload the diff", async () => {
+  const { get, banners, calls } = bootDrafts({
+    confirmStatus: 409,
+    confirmBody: { error: "версия черновика устарела" },
+  });
+  await get(`Drafts.loadDiff({ id: "d1", name: "office" })`);
+  const diffCallsBefore = calls.filter((c) => c.path === "/api/drafts/d1/diff").length;
+  await get("Drafts.confirmSelected()");
+  assert.ok(banners.some((b) => b.message.includes("версия черновика устарела")));
+  assert.ok(!banners.some((b) => b.message.includes("конфликт")), "must not claim a conflict that isn't one");
+  const diffCallsAfter = calls.filter((c) => c.path === "/api/drafts/d1/diff").length;
+  assert.equal(diffCallsAfter, diffCallsBefore, "no conflicts to show, so the diff isn't reloaded");
+});
+
+test("refresh shows a banner when loading the drafts list fails", async () => {
+  const { get, banners } = bootDrafts({ draftsFail: true });
+  await get("Drafts.refresh()");
+  assert.ok(banners.some((b) => b.message.includes("Не удалось загрузить список черновиков")));
+});
+
+test("deleteDraft asks for confirmation and is a no-op when declined", async () => {
+  const { get, calls } = bootDrafts({ confirmResult: false });
+  await get(`Drafts.deleteDraft("d1")`);
+  assert.ok(!calls.some((c) => c.method === "DELETE"), "declining the confirm must not delete");
 });
 
 test("deleteDraft clears a matching active draft id and refreshes", async () => {

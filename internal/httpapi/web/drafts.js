@@ -71,8 +71,12 @@ const Drafts = (() => {
   }
 
   async function refresh() {
-    drafts = await Api.get("/api/drafts" + (all ? "?all=1" : ""));
-    renderTable();
+    try {
+      drafts = await Api.get("/api/drafts" + (all ? "?all=1" : ""));
+      renderTable();
+    } catch (e) {
+      showBanner("Не удалось загрузить список черновиков: " + e.message);
+    }
   }
 
   function selectDraft(draft) {
@@ -95,6 +99,8 @@ const Drafts = (() => {
   // response carries {conflicts: [...]}, not Api's generic {error: "..."}
   // shape — the same move users.js already makes for its admin-only DELETE.
   async function deleteDraft(id) {
+    const draft = drafts.find((d) => d.id === id);
+    if (!confirm(`Удалить черновик «${draft ? draft.name : id}»? Изменения будут потеряны.`)) return;
     const res = await fetch(`/api/drafts/${id}`, { method: "DELETE" });
     if (res.status === 401) {
       window.location.href = loginRedirectURL(window.location.pathname, window.location.search);
@@ -135,8 +141,19 @@ const Drafts = (() => {
       return;
     }
     if (res.status === 409) {
-      showBanner("В черновике есть конфликты — проверьте их перед подтверждением.", "error");
-      await loadDiff(selected);
+      const body = await res.json();
+      if (Array.isArray(body.conflicts)) {
+        // pgstore.Confirm marks the draft's status "conflict" before
+        // returning 409, so the table's status column is now stale too.
+        showBanner("В черновике есть конфликты — проверьте их перед подтверждением.", "error");
+        await loadDiff(selected);
+        await refresh();
+      } else {
+        // Not every 409 is a conflict (revision mismatch, duplicate name,
+        // a confirm race) — those carry a plain {error} body, not
+        // {conflicts}, and there is nothing new to show in the diff.
+        showBanner("Не удалось подтвердить черновик: " + (body.error || `HTTP ${res.status}`));
+      }
       return;
     }
     if (!res.ok) {
@@ -145,6 +162,7 @@ const Drafts = (() => {
     }
     const { version } = await res.json();
     showBanner(`Черновик подтверждён как версия ${version}`, "ok");
+    if (currentDraftID() === selected.id) setCurrentDraftID(null);
     selected = null;
     renderDiff();
     await refresh();

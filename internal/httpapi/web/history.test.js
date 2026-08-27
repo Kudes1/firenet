@@ -60,7 +60,12 @@ function bootHistory(fixture = {}) {
     fetch: async (url, opts) => {
       calls.push({ path: url, method: opts?.method || "GET" });
       if (url === "/api/me") return { ok: true, status: 200, headers: { get: () => null }, json: async () => me };
-      if (url === "/api/versions?limit=50") return { ok: true, status: 200, headers: { get: () => null }, json: async () => versions };
+      if (url === "/api/versions?limit=50") {
+        if (fixture.versionsFail) {
+          return { ok: false, status: 500, headers: { get: () => null }, json: async () => ({ error: "boom" }) };
+        }
+        return { ok: true, status: 200, headers: { get: () => null }, json: async () => versions };
+      }
       if (url.startsWith("/api/versions/diff")) return { ok: true, status: 200, headers: { get: () => null }, json: async () => diffs };
       if (/^\/api\/versions\/\d+\/restore$/.test(url)) {
         return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ version: restoreVersion }) };
@@ -126,4 +131,10 @@ test("restore is a no-op when the confirmation dialog is declined", async () => 
   await get("History.boot()");
   await get("History.restore(3)");
   assert.ok(!calls.some((c) => c.path === "/api/versions/3/restore"));
+});
+
+test("refresh shows a banner when loading the version list fails", async () => {
+  const { get, banners } = bootHistory({ versionsFail: true });
+  await get("History.refresh()");
+  assert.ok(banners.some((b) => b.message.includes("Не удалось загрузить историю версий")));
 });

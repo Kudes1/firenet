@@ -66,8 +66,12 @@ const History = (() => {
   }
 
   async function refresh() {
-    versions = await Api.get("/api/versions?limit=50");
-    renderList();
+    try {
+      versions = await Api.get("/api/versions?limit=50");
+      renderList();
+    } catch (e) {
+      showBanner("Не удалось загрузить историю версий: " + e.message);
+    }
   }
 
   // showDiff compares a version to the one immediately before it in this
