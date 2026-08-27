@@ -380,7 +380,11 @@ const NAV_ICONS = {
 // buildNav renders the shared sidebar shell (brand, collapsible nav with
 // icons, theme toggle, banner host). The collapsed state is kept in
 // localStorage so it survives reloads and page switches.
-function buildNav(active) {
+async function buildNav(active) {
+  const me = await fetch("/api/me")
+    .then((res) => (res.ok ? res.json() : null))
+    .catch(() => null);
+
   document.documentElement.dataset.theme =
     localStorage.getItem("firenet-theme") ||
     (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
@@ -450,7 +454,9 @@ function buildNav(active) {
     wrap.append(body);
     nav.append(wrap);
   });
-  NAV_STANDALONE.forEach((l) => nav.append(makeLink(l)));
+  NAV_STANDALONE
+    .filter((l) => l.id !== "users" || me?.role === "admin")
+    .forEach((l) => nav.append(makeLink(l)));
   aside.append(nav);
 
   const toggle = document.createElement("button");
@@ -501,12 +507,7 @@ function buildNav(active) {
   userBox.append(userName, logoutBtn);
   aside.append(userBox);
 
-  fetch("/api/me")
-    .then((res) => (res.ok ? res.json() : null))
-    .then((me) => {
-      if (me) userName.textContent = me.username + (me.role === "admin" ? " · admin" : "");
-    })
-    .catch(() => {});
+  if (me) userName.textContent = me.username + (me.role === "admin" ? " · admin" : "");
 
   const banner = document.createElement("div");
   banner.id = "error-banner";

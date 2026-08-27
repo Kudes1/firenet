@@ -11,6 +11,18 @@ const State = {
   searchFade: 0, // прогресс затемнения поиска (твин updateSearch)
 };
 
+function normalizeTopology(topo) {
+  topo ||= {};
+  return {
+    ...topo,
+    devices: topo.devices || [],
+    links: topo.links || [],
+    networks: topo.networks || [],
+    sets: topo.sets || [],
+    unions: topo.unions || [],
+  };
+}
+
 // Topology renders devices/links/networks on a canvas the user builds
 // the network on directly. A network is one L2 segment: click a device,
 // then a network node, to attach the segment to that device. Subnet
@@ -907,7 +919,7 @@ const Topology = (() => {
     document.getElementById("topo-save").addEventListener("click", async () => {
       try {
         assertEditable();
-        State.topology = await Api.put(apiPath("topology"), State.topology);
+        State.topology = normalizeTopology(await Api.put(apiPath("topology"), State.topology));
         showBanner("Топология сохранена", "ok");
         DirtyGuard.markClean();
         render();
@@ -920,7 +932,7 @@ const Topology = (() => {
   async function boot() {
     try {
       const [topo, subnetsDoc] = await Promise.all([Api.get(apiPath("topology")), Api.get(apiPath("subnets"))]);
-      State.topology = topo;
+      State.topology = normalizeTopology(topo);
       State.subnets = subnetsDoc.subnets || [];
     } catch (e) {
       showBanner("Не удалось загрузить топологию: " + e.message);

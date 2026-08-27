@@ -74,6 +74,7 @@ function fire(target, type, ev) {
 function bootTopology(responses, draftID = "d1") {
   const draftStore = draftID ? { "firenet-draft-id": draftID } : {};
   const calls = [];
+  const events = [];
   const ctx = makeCtx();
   const canvas = Object.assign(makeEl("canvas"), {
     clientWidth: 1200,
@@ -110,7 +111,7 @@ function bootTopology(responses, draftID = "d1") {
     document: doc,
     window: {
       addEventListener(t, fn) { (doc.listeners["win-" + t] ||= []).push(fn); },
-      dispatchEvent() {},
+      dispatchEvent(ev) { events.push(ev); },
     },
     localStorage: { getItem: () => null, setItem() {} },
     sessionStorage: {
@@ -119,7 +120,7 @@ function bootTopology(responses, draftID = "d1") {
       removeItem: (k) => { delete draftStore[k]; },
     },
     matchMedia: () => ({ matches: false }),
-    CustomEvent: class {},
+    CustomEvent: class { constructor(type, init = {}) { this.type = type; this.detail = init.detail; } },
     dispatchEvent() {},
     confirm: () => false,
     prompt: () => null,
@@ -135,7 +136,8 @@ function bootTopology(responses, draftID = "d1") {
     // clone: production mutates loaded state, responses must stay pristine
     fetch: async (p, opts) => {
       calls.push({ path: p, method: opts?.method || "GET" });
-      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(responses[p] ?? null)) };
+      const response = typeof responses[p] === "function" ? responses[p](opts) : responses[p];
+      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(response ?? null)) };
     },
   };
   sandbox.globalThis = sandbox;
@@ -157,7 +159,7 @@ function bootTopology(responses, draftID = "d1") {
       rafQueue.splice(0).forEach((fn) => fn(clock));
     }
   };
-  return { canvas, ctx, doc, ids, get, sandbox, pump, minimapCanvas, minimapCtx, calls };
+  return { canvas, ctx, doc, ids, get, sandbox, pump, minimapCanvas, minimapCtx, calls, events };
 }
 
 const texts = (get) => get("State.list.filter((i) => i.text).map((i) => i.text)");
@@ -250,6 +252,34 @@ test("topology tolerates empty project", async () => {
   await tick();
   assert.equal(get("State.list.length"), 0, "empty display list for empty project");
   assert.ok(ids["topo-delete"].disabled, "trash disabled without nodes");
+});
+
+test("topology normalizes null collections from an empty draft", async () => {
+  const { get } = bootTopology({
+    "/api/drafts/d1/topology": { devices: null, links: null, networks: null, sets: null, unions: null },
+    "/api/drafts/d1/subnets": { subnets: null },
+    "/api/drafts/d1/layout": {},
+  });
+  await tick();
+  assert.deepEqual(JSON.parse(get("JSON.stringify(State.topology)")), {
+    devices: [], links: [], networks: [], sets: [], unions: [],
+  });
+});
+
+test("topology normalizes null collections returned after saving", async () => {
+  const { ids, get, events } = bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": (opts) => opts?.method === "PUT"
+      ? { devices: null, links: null, networks: null, sets: null, unions: null }
+      : { devices: [], links: [], networks: [], sets: [], unions: [] },
+  });
+  await tick();
+  fire(ids["topo-save"], "click", {});
+  await tick();
+  assert.deepEqual(JSON.parse(get("JSON.stringify(State.topology)")), {
+    devices: [], links: [], networks: [], sets: [], unions: [],
+  });
+  assert.equal(JSON.stringify(events.at(-1).detail), '{"message":"Топология сохранена","kind":"ok"}');
 });
 
 test("camera from layout is applied to the canvas view", async () => {

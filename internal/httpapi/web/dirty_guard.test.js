@@ -88,8 +88,8 @@ function fire(target, type, ev) {
 
 // clickNavLink builds the shared sidebar and simulates a click on its first
 // nav link (inside the first group), returning whether the default was prevented.
-function clickNavLink(ctx, doc) {
-  ctx.sandbox.buildNav("topology");
+async function clickNavLink(ctx, doc) {
+  await ctx.sandbox.buildNav("topology");
   const aside = doc.body.children[0];
   const nav = aside.children.find((n) => n.tag === "nav");
   let link = null;
@@ -102,17 +102,17 @@ function clickNavLink(ctx, doc) {
 
 const noop = () => {};
 
-test("clean page navigates without confirmation", () => {
+test("clean page navigates without confirmation", async () => {
   const ctx = loadCommon({ confirmResult: false });
   const { DirtyGuard } = ctx.sandbox;
   const doc = makeDoc();
   DirtyGuard.arm(noop);
   DirtyGuard.markClean();
   assert.equal(DirtyGuard.isDirty(), false);
-  assert.equal(clickNavLink(ctx, ctx.doc), false, "navigation not blocked");
+  assert.equal(await clickNavLink(ctx, ctx.doc), false, "navigation not blocked");
 });
 
-test("dirty page blocks navigation until confirmed", () => {
+test("dirty page blocks navigation until confirmed", async () => {
   const ctx = loadCommon({ confirmResult: false });
   const { DirtyGuard } = ctx.sandbox;
   let data = { devices: [] };
@@ -120,7 +120,7 @@ test("dirty page blocks navigation until confirmed", () => {
   DirtyGuard.markClean();
   data.devices.push({ name: "r1" });
   assert.equal(DirtyGuard.isDirty(), true);
-  assert.equal(clickNavLink(ctx, ctx.doc), true, "navigation blocked");
+  assert.equal(await clickNavLink(ctx, ctx.doc), true, "navigation blocked");
   assert.equal(ctx.location.href, "http://x/ui/topology", "no redirect happened");
 
   const ctxYes = loadCommon({ confirmResult: true });
@@ -129,7 +129,7 @@ test("dirty page blocks navigation until confirmed", () => {
   dg2.arm(() => data2);
   dg2.markClean();
   data2.devices.push({ name: "r1" });
-  clickNavLink(ctxYes, ctxYes.doc); // default always prevented, redirect instead
+  await clickNavLink(ctxYes, ctxYes.doc); // default always prevented, redirect instead
   assert.equal(ctxYes.location.href, "/ui/topology", "confirmed navigation redirects to the clicked link");
 });
 

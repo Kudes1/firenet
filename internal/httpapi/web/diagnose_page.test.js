@@ -221,6 +221,19 @@ test("boot builds the canvas display list and draws a frame", async () => {
   assert.ok(ctx.calls.some((c) => c[0] === "setTransform"), "frame drawn through the camera transform");
 });
 
+test("diagnostics normalizes empty topology collections from the API", async () => {
+  const { get } = bootDiagnose({
+    ...responses,
+    "/api/drafts/d1/topology": { devices: null, links: null, networks: null, sets: null, unions: null },
+    "/api/drafts/d1/subnets": { subnets: null },
+  });
+  await tick();
+  assert.deepEqual(JSON.parse(get("JSON.stringify(Diagnose.state.topology)")), {
+    devices: [], links: [], networks: [], sets: [], unions: [],
+  });
+  assert.equal(get("Diagnose.state.list.length"), 0, "empty topology renders an empty map");
+});
+
 test("wheel zooms around the cursor", async () => {
   const { canvas, frames, get } = bootDiagnose({
     ...responses,

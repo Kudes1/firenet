@@ -650,7 +650,14 @@ const Diagnose = (() => {
       const [topo, subnetsDoc, layout] = await Promise.all([
         Api.get(apiPath("topology")), Api.get(apiPath("subnets")), Api.get(apiPath("layout")),
       ]);
-      state.topology = topo;
+      state.topology = {
+        ...topo,
+        devices: topo.devices || [],
+        links: topo.links || [],
+        networks: topo.networks || [],
+        sets: topo.sets || [],
+        unions: topo.unions || [],
+      };
       state.subnets = subnetsDoc.subnets || [];
       state.layout = { devices: layout.devices || {}, networks: layout.networks || layout.subnets || {}, links: layout.links || {} };
       state.camera = layout.camera && layout.camera.z > 0
