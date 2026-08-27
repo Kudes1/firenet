@@ -17,8 +17,9 @@ const NetMap = (() => {
   // label). Unknown kinds fall back to a plain rectangle without a glyph.
   // Colors live in style.css (--kind-*).
   const KINDS = {
-    router: { rx: 16, glyph: "M2.5 6a3.5 3.5 0 1 1 0 .01M9 3.5h3m0 0-1.4-1.4M12 3.5l-1.4 1.4M9 8.5h3m0 0-1.4-1.4M12 8.5l-1.4 1.4" },
-    switch: { rx: 2, glyph: "M1 4h10m0 0-2-2m2 2-2 2M11 8H1m0 0 2-2m-2 2 2 2" },
+    // glyphs adapted from icons/*.svg (svgrepo.com), 24x24 grid scaled x0.5
+    router: { rx: 16, glyph: "M6 10.5V6M6 10.5L7.5 9M6 10.5L4.5 9M6 6V1.5M6 6H1.5M6 6H10.5M6 1.5L4.5 3M6 1.5L7.5 3M1.5 6L3 7.5M1.5 6L3 4.5M10.5 6L9 4.5M10.5 6L9 7.5" },
+    switch: { rx: 2, glyph: "M9 10L10.5 8.5M10.5 8.5L9 7M10.5 8.5H8.5C7.1193 8.5 6 7.3807 6 6C6 4.61929 4.88071 3.5 3.5 3.5H1.5M9 2L10.5 3.5M10.5 3.5L9 5M10.5 3.5L8.5 3.5C7.9372 3.5 7.41785 3.68597 7 3.999815M1.5 8.5H3.5C4.062805 8.5 4.58217 8.31385 5 8" },
   };
 
   function center(map, name, w, h) {

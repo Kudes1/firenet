@@ -24,3 +24,5 @@ vendor/
 .serena/
 .superpowers/
 .worktrees/
+
+.env

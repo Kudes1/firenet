@@ -178,10 +178,22 @@ const LinkPanel = (() => {
     const b = box();
     if (!b || !s) return;
     b.innerHTML = "";
-    const title = document.createElement("div");
-    title.setAttribute("class", "link-panel-title");
+    const header = document.createElement("header");
+    header.setAttribute("class", "diag-panel-header");
+    const title = document.createElement("strong");
     title.textContent = `Связь ${s.link.a.device} ↔ ${s.link.b.device}`;
-    title.addEventListener("mousedown", onDragStart);
+    const close = document.createElement("button");
+    close.setAttribute("type", "button");
+    close.setAttribute("class", "diag-panel-close");
+    close.setAttribute("title", "Закрыть");
+    close.setAttribute("aria-label", "Закрыть");
+    close.textContent = "×";
+    close.addEventListener("mousedown", (e) => e.stopPropagation());
+    close.addEventListener("click", hide);
+    header.append(title, close);
+    header.addEventListener("mousedown", onDragStart);
+    const body = document.createElement("div");
+    body.setAttribute("class", "diag-panel-body");
     const toggle = document.createElement("button");
     toggle.setAttribute("type", "button");
     toggle.setAttribute("class", "secondary btn-sm");
@@ -194,19 +206,20 @@ const LinkPanel = (() => {
       }
       render();
     });
-    b.append(title, toggle);
+    body.append(toggle);
     if (s.filter) {
       const grid = document.createElement("div");
       grid.setAttribute("class", "link-panel-grid");
       grid.append(sideColumn("a"), sideColumn("b"));
-      b.append(grid);
+      body.append(grid);
     } else {
       const hint = document.createElement("p");
       hint.setAttribute("class", "hint");
       hint.textContent = "Обычная связь даёт полную связность между устройствами.";
-      b.append(hint);
+      body.append(hint);
     }
-    b.append(actions());
+    body.append(actions());
+    b.append(header, body);
     place();
   }
 

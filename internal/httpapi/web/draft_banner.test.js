@@ -28,10 +28,15 @@ function loadCommon(store, opts = {}) {
   doc.createElement = (tag) => makeEl(tag);
   doc.addEventListener = () => {};
   const posted = [];
+  const localStore = opts.localStore || {};
   const sandbox = {
     document: doc,
     window: { prompt: () => opts.promptResult, location: { reload() {} } },
-    localStorage: { getItem: () => null, setItem() {} },
+    localStorage: {
+      getItem: (k) => (k in localStore ? localStore[k] : null),
+      setItem: (k, v) => { localStore[k] = v; },
+      removeItem: (k) => { delete localStore[k]; },
+    },
     sessionStorage: {
       getItem: (k) => (k in store ? store[k] : null),
       setItem: (k, v) => { store[k] = v; },
@@ -58,7 +63,7 @@ function loadCommon(store, opts = {}) {
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "common.js"), "utf8"), sandbox, { filename: "common.js" });
   const { renderDraftBanner } = vm.runInContext("({ renderDraftBanner })", sandbox);
-  return { renderDraftBanner, doc, posted, sandbox };
+  return { renderDraftBanner, doc, posted, sandbox, localStore };
 }
 
 test("shows a read-only banner with the current version and an 'open draft' action", async () => {
@@ -95,5 +100,20 @@ test("falls back to read-only if the active draft no longer exists", async () =>
   sandbox.window.location.reload = () => { reloaded = true; };
   await renderDraftBanner();
   assert.equal(sandbox.sessionStorage.getItem("firenet-draft-id"), null);
+  assert.ok(reloaded, "page reloads to pick up read-only state");
+});
+
+test("falls back to read-only if the active draft was merged in another tab", async () => {
+  const { renderDraftBanner, sandbox, localStore } = loadCommon(
+    {},
+    { draftStatus: "merged", localStore: { "firenet-last-draft-id": "draft-1" } },
+  );
+  let reloaded = false;
+  sandbox.window.location.reload = () => { reloaded = true; };
+
+  await renderDraftBanner();
+
+  assert.equal(sandbox.sessionStorage.getItem("firenet-draft-id"), null);
+  assert.equal(localStore["firenet-last-draft-id"], undefined);
   assert.ok(reloaded, "page reloads to pick up read-only state");
 });

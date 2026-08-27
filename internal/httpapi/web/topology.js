@@ -43,6 +43,27 @@ function normalizeCamera(camera) {
   return camera && camera.z > 0 ? { ...Camera.create(), ...camera } : Camera.create();
 }
 
+function cameraStorageKey() {
+  return "firenet-topology-camera:" + (currentDraftID() || "current");
+}
+
+function loadCamera() {
+  try {
+    const camera = JSON.parse(localStorage.getItem(cameraStorageKey()));
+    return camera && camera.z > 0 ? normalizeCamera(camera) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCamera(camera) {
+  try {
+    localStorage.setItem(cameraStorageKey(), JSON.stringify(camera));
+  } catch {
+    // The topology remains usable if browser storage is unavailable.
+  }
+}
+
 // --- applyTopologyOp: client-side mirror of applyTopologyOperation ---
 // (internal/httpapi/topology_operations.go). Pure: never mutates snapshot,
 // always returns a new {topology, layout}. This is TopologySync's `apply`
@@ -254,6 +275,12 @@ const Topology = (() => {
     minimap.update();
   }
 
+  function setCamera(camera) {
+    State.camera = camera;
+    applyCamera();
+    saveCamera(camera);
+  }
+
   function ensureLayout() {
     TopoScene.ensureLayout(State.topology, State.layout);
   }
@@ -321,18 +348,15 @@ const Topology = (() => {
   }
 
   // setupCamera wires wheel zoom (anchored at the cursor) and pan by
-  // middle/right-button drag via the shared CameraControls. Every camera
-  // change enqueues a "set-camera" op; TopologySync coalesces same-target
-  // moves queued before the first one sends (see topology_sync.js's
-  // moveKey), so a fast pan/zoom collapses to one write per round trip
-  // instead of flooding the operations endpoint. Left button stays free
-  // for selection and node dragging (setupSelection).
+  // middle/right-button drag via the shared CameraControls. Camera state
+  // belongs to this browser and is stored locally; it is not a topology
+  // operation. Left button stays free for selection and node dragging
+  // (setupSelection).
   function setupCamera() {
     camControls = CameraControls.wire(canvas(), {
       getCam: () => State.camera,
-      setCam: (c) => { State.camera = c; applyCamera(); },
+      setCam: setCamera,
       buttons: [1, 2],
-      onChange: () => enqueueOp({ kind: "set-camera", camera: State.camera }),
       onDragEnd: (moved, button) => {
         if (button === 2 && !moved && ctxPending) showContextMenu(ctxPending.at, ctxPending.items);
         ctxPending = null;
@@ -376,6 +400,16 @@ const Topology = (() => {
       });
       return input;
     };
+    // flipIfClipped переоткрывает подменю налево, если справа для него не
+    // хватает места до правого края .canvas-wrap (он же обрезает подменю
+    // через overflow: hidden) — иначе у правого края экрана подменю просто
+    // срезается. mouseenter стреляет уже после применения :hover, так что
+    // getBoundingClientRect тут возвращает актуальные, а не нулевые размеры.
+    const flipIfClipped = (sub) => {
+      sub.classList.remove("submenu-left");
+      const bound = menu.closest(".canvas-wrap")?.getBoundingClientRect();
+      if (bound && sub.getBoundingClientRect().right > bound.right) sub.classList.add("submenu-left");
+    };
     const fill = (parent, entries) => {
       entries.forEach((it) => {
         if (it.children) {
@@ -386,11 +420,14 @@ const Topology = (() => {
           if (it.searchable) {
             const search = searchField(sub);
             sub.append(search);
-            wrap.addEventListener("mouseenter", () => search.focus());
           }
           wrap.append(mkItem(it.label, null, null, true), sub);
           fill(sub, it.children);
           parent.append(wrap);
+          wrap.addEventListener("mouseenter", () => {
+            flipIfClipped(sub);
+            if (it.searchable) sub.querySelector(".ctx-search").focus();
+          });
         } else {
           parent.append(mkItem(...it));
         }
@@ -486,16 +523,18 @@ const Topology = (() => {
     return items;
   }
 
-  // Контекстное меню канвы: правый клик по объекту в режиме select.
+  // Контекстное меню канвы: ПКМ по объекту в режиме select или по связи
+  // в режиме connect.
   // Платформы шлют contextmenu в разное время: пока ПКМ зажата (Linux)
   // ждём чистый mouseup через ctxPending, после отпускания открываем сразу.
   function setupContextMenu() {
     canvas().addEventListener("contextmenu", (e) => {
-      if (State.tool !== "select") return;
+      if (State.tool !== "select" && State.tool !== "connect") return;
       e.preventDefault();
       const hit = HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z);
       const isNode = hit && (hit.nodeType === "device" || hit.nodeType === "network");
-      if (!hit || !(isNode || hit.id.startsWith("link:") || hit.id.startsWith("attach:"))) return;
+      const isConnection = hit && (hit.id.startsWith("link:") || hit.id.startsWith("attach:"));
+      if (!hit || !(isNode || isConnection) || (State.tool === "connect" && !isConnection)) return;
       const at = screenPoint(e);
       const items = menuItemsFor(hit.ref, hit.nodeType, at);
       if (camControls && camControls.isRightDown()) ctxPending = { items, at };
@@ -758,6 +797,7 @@ const Topology = (() => {
   }
 
   function setTool(tool) {
+    if (isReadOnly() && tool !== State.tool) return;
     State.tool = tool;
     cancelPending();
     hidePopover();
@@ -770,8 +810,11 @@ const Topology = (() => {
   }
 
   function setupTools() {
+    const readOnly = isReadOnly();
     TOOLS.forEach((t) => {
-      document.getElementById("tool-" + t).addEventListener("click", () => setTool(t));
+      const btn = document.getElementById("tool-" + t);
+      btn.disabled = readOnly;
+      btn.addEventListener("click", () => setTool(t));
     });
     document.getElementById("topo-fit").addEventListener("click", fitMap);
     canvas().addEventListener("click", (e) => {
@@ -977,7 +1020,7 @@ const Topology = (() => {
       popping = true;
       requestAnimationFrame(popStep);
     }
-    setTool("select");
+    render();
   }
 
   function cancelPending() {
@@ -1005,7 +1048,7 @@ const Topology = (() => {
     const cur = { ...State.camera };
     const tw = Tween.create();
     tw.to(cur, to, ms);
-    animate("cam", tw, () => { State.camera = { ...cur }; applyCamera(); });
+    animate("cam", tw, () => setCamera({ ...cur }));
   }
 
   // fitMap вписывает всю топологию во вьюпорт анимацией камеры
@@ -1195,9 +1238,26 @@ const Topology = (() => {
   function renderSyncStatus(status) {
     const el = document.getElementById("topo-sync-status");
     if (!el) return;
-    const text = status === "saving" ? "Сохраняется…" : status === "error" ? "Ошибка синхронизации" : "Сохранено";
-    el.textContent = text;
-    el.setAttribute("class", "sync-status" + (status === "error" ? " error" : ""));
+    const states = {
+      saved: {
+        label: "Сохранено",
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></svg>',
+      },
+      saving: {
+        label: "Сохраняется…",
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-4M4 13a8 8 0 0 0 14.9 4"/><path d="M5 3v4h4M19 21v-4h-4"/></svg>',
+      },
+      error: {
+        label: "Ошибка синхронизации",
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2z"/><path d="M12 9v4M12 17h.01"/></svg>',
+      },
+    };
+    const state = states[status] || states.saved;
+    el.innerHTML = state.icon;
+    el.setAttribute("class", "sync-status " + status);
+    el.setAttribute("data-status", status);
+    el.setAttribute("aria-label", state.label);
+    el.setAttribute("title", state.label);
     if (status === "error") {
       showBanner("Не удалось сохранить последнее изменение: черновик мог измениться в другой вкладке, либо прервалась связь. Повторите действие.");
     }
@@ -1232,6 +1292,7 @@ const Topology = (() => {
   }
 
   async function boot() {
+    renderSyncStatus("saved");
     try {
       const [topo, subnetsDoc] = await Promise.all([Api.get(apiPath("topology")), Api.get(apiPath("subnets"))]);
       State.topology = normalizeTopology(topo);
@@ -1245,7 +1306,7 @@ const Topology = (() => {
     } catch {
       State.layout = normalizeLayout({});
     }
-    State.camera = State.layout.camera;
+    State.camera = loadCamera() || State.layout.camera;
     theme = CanvasTheme.fromComputed(getComputedStyle(document.documentElement));
     view = CanvasView.create(canvas(), {
       getList: () => State.list,
@@ -1260,7 +1321,7 @@ const Topology = (() => {
         ...State.topology.networks.map((n) => netCenter(n.name)),
       ].filter(Boolean),
       getCam: () => State.camera,
-      setCam: (c) => { State.camera = c; applyCamera(); enqueueOp({ kind: "set-camera", camera: c }); },
+      setCam: setCamera,
       getViewport: () => { const r = canvas().getBoundingClientRect(); return { w: r.width, h: r.height }; },
       getTheme: () => theme,
     });
@@ -1279,7 +1340,6 @@ const Topology = (() => {
       onState: (snapshot) => {
         State.topology = snapshot.topology;
         State.layout = snapshot.layout;
-        State.camera = normalizeCamera(snapshot.layout.camera);
         reconcileSelection();
         render();
       },

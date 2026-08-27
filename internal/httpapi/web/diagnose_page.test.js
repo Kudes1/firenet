@@ -646,6 +646,8 @@ test("expandFlow marks the allowed route half-open when there is no return path"
   for (const name of ["MAIN", "sw1", "r1", "r2", "sw2", "OFFICE"]) {
     assert.ok(f.half.has(name), `${name} is marked half-open without a return path`);
   }
+  assert.equal(f.ok.size, 0, "a one-way report leaves ok empty — mergeFlows relies on this to know when to promote");
+  assert.equal(f.okE.size, 0);
 });
 
 test("expandFlow leaves half empty when a return path exists", async () => {
@@ -922,12 +924,18 @@ test("resolveSpreadSources treats unmatched input as a literal IP", async () => 
   assert.deepEqual(out, [{ ip: "10.0.0.5", subnetName: null }]);
 });
 
-test("mergeFlows unions ok/deny/edge/half sets from several reports", async () => {
+test("mergeFlows unions ok/deny/edge/half sets from several reports and promotes half to ok when another pair round-trips through the same element", async () => {
   const { get } = bootDiagnose(responses);
   await tick();
   const out = JSON.parse(get(`JSON.stringify((() => {
-    const f1 = { hl: new Set(["a", "r1"]), ok: new Set(["a", "r1"]), deny: new Map(), okE: new Set(["a\\0r1"]), denyE: new Set(), half: new Set(["r1"]), halfE: new Set(["a\\0r1"]) };
-    const f2 = { hl: new Set(["a", "r2"]), ok: new Set(["a"]), deny: new Map([["r2", { rule: "x", reason: "y" }]]), okE: new Set(), denyE: new Set(["a\\0r2"]), half: new Set(), halfE: new Set() };
+    // f1: one-way-only pair — "a" and "r1" (and the edge between them) are
+    // only reachable, no return route (expandFlow's real invariant: a
+    // one-way report leaves ok/okE empty and puts everything in half/halfE).
+    const f1 = { hl: new Set(["a", "r1"]), ok: new Set(), deny: new Map(), okE: new Set(), denyE: new Set(), half: new Set(["a", "r1"]), halfE: new Set(["a\\0r1"]) };
+    // f2: a different pair that round-trips through "a" and the same edge
+    // fully (e.g. a second gateway with a mirrored route back) — this must
+    // win over f1's half marking for the elements they share.
+    const f2 = { hl: new Set(["a", "r2"]), ok: new Set(["a"]), deny: new Map([["r2", { rule: "x", reason: "y" }]]), okE: new Set(["a\\0r1"]), denyE: new Set(["a\\0r2"]), half: new Set(), halfE: new Set() };
     const m = Diagnose.mergeFlows([f1, f2]);
     return {
       hl: [...m.hl].sort(), ok: [...m.ok].sort(), denyKeys: [...m.deny.keys()], okE: [...m.okE], denyE: [...m.denyE],
@@ -935,12 +943,12 @@ test("mergeFlows unions ok/deny/edge/half sets from several reports", async () =
     };
   })())`));
   assert.deepEqual(out.hl, ["a", "r1", "r2"]);
-  assert.deepEqual(out.ok, ["a", "r1"]);
+  assert.deepEqual(out.ok, ["a"], "\"a\" is promoted to full green: f2 shows a return path through it");
   assert.deepEqual(out.denyKeys, ["r2"]);
-  assert.deepEqual(out.okE, ["a\0r1"]);
+  assert.deepEqual(out.okE, ["a\0r1"], "the shared edge is promoted too");
   assert.deepEqual(out.denyE, ["a\0r2"]);
-  assert.deepEqual(out.half, ["r1"]);
-  assert.deepEqual(out.halfE, ["a\0r1"]);
+  assert.deepEqual(out.half, ["r1"], "\"r1\" stays half: no other pair shows a return path through it");
+  assert.deepEqual(out.halfE, [], "the edge no longer has any un-promoted half mark left");
 });
 
 const spreadSubnets = {
@@ -948,6 +956,7 @@ const spreadSubnets = {
     { name: "main", cidr: "10.0.0.0/24" },
     { name: "office-net", cidr: "10.0.1.0/24" },
     { name: "dmz", cidr: "10.0.2.0/24" },
+    { name: "branch-net", cidr: "10.0.3.0/24" },
   ],
 };
 const spreadTopo = {
@@ -957,6 +966,10 @@ const spreadTopo = {
     { name: "MAIN", subnets: ["main"], attach: [{ device: "r1" }] },
     { name: "OFFICE", subnets: ["office-net"], attach: [{ device: "r1" }] },
     { name: "DMZ", subnets: ["dmz"], attach: [{ device: "r2" }] },
+    // BRANCH — второй сосед r1 (как office-net), но с returnPathAllowed:false:
+    // проверяет, что общий узел/ребро r1↔main красится зелёным, раз через
+    // него же ходит и полноценная двусторонняя пара (office-net).
+    { name: "BRANCH", subnets: ["branch-net"], attach: [{ device: "r1" }] },
   ],
 };
 const spreadResponses = {
@@ -964,27 +977,35 @@ const spreadResponses = {
   "/api/drafts/d1/topology": spreadTopo,
   "/api/drafts/d1/subnets": spreadSubnets,
   "/api/drafts/d1/diagnose": (body) => {
-    if (body.dst === "10.0.1.0") {
+    if (body.src === "10.0.1.0") {
       return {
-        srcSubnet: "main", dstSubnet: "office-net", note: "", paths: [{
-          nodes: [{ kind: 1, name: "main" }, { kind: 0, name: "r1" }, { kind: 1, name: "office-net" }],
+        srcSubnet: "office-net", dstSubnet: "main", note: "", paths: [{
+          nodes: [{ kind: 1, name: "office-net" }, { kind: 0, name: "r1" }, { kind: 1, name: "main" }],
           routers: [{ router: "r1", action: "allow", reason: "ok" }], verdict: "allow",
         }],
       };
     }
-    if (body.dst === "10.0.2.0") {
+    if (body.src === "10.0.2.0") {
       return {
-        srcSubnet: "main", dstSubnet: "dmz", note: "", paths: [{
-          nodes: [{ kind: 1, name: "main" }, { kind: 0, name: "r1" }, { kind: 0, name: "r2" }, { kind: 1, name: "dmz" }],
+        srcSubnet: "dmz", dstSubnet: "main", note: "", paths: [{
+          nodes: [{ kind: 1, name: "dmz" }, { kind: 0, name: "r2" }, { kind: 0, name: "r1" }, { kind: 1, name: "main" }],
           routers: [
-            { router: "r1", action: "allow", reason: "ok" },
             { router: "r2", action: "deny", matchedRule: "block-dmz", reason: "запрещено" },
+            { router: "r1", action: "allow", reason: "ok" },
           ],
           verdict: "deny",
         }],
       };
     }
-    throw new Error("unexpected dst " + body.dst);
+    if (body.src === "10.0.3.0") {
+      return {
+        srcSubnet: "branch-net", dstSubnet: "main", note: "", returnPathAllowed: false, paths: [{
+          nodes: [{ kind: 1, name: "branch-net" }, { kind: 0, name: "r1" }, { kind: 1, name: "main" }],
+          routers: [{ router: "r1", action: "allow", reason: "ok" }], verdict: "allow",
+        }],
+      };
+    }
+    throw new Error("unexpected src " + body.src);
   },
 };
 
@@ -993,7 +1014,7 @@ test("the source datalist lists every network and subnet name", async () => {
   await tick();
   await frames(1);
   const names = ids["spread-sources"].children.map((o) => o.value).sort();
-  assert.deepEqual(names, ["DMZ", "MAIN", "OFFICE", "dmz", "main", "office-net"]);
+  assert.deepEqual(names, ["BRANCH", "DMZ", "MAIN", "OFFICE", "branch-net", "dmz", "main", "office-net"]);
 });
 
 test("spread panel starts closed while the path panel starts open", async () => {
@@ -1015,28 +1036,38 @@ test("spread form queries every other subnet and highlights what's reachable", a
   fire(ids["spread-form"], "submit", {});
   await tick();
   const posts = calls.filter((c) => c.path === "/api/drafts/d1/diagnose");
-  assert.equal(posts.length, 2, "one call per non-source subnet");
+  assert.equal(posts.length, 3, "one call per non-source subnet");
   assert.deepEqual(
-    posts.map((c) => c.body).sort((a, b) => a.dst.localeCompare(b.dst)),
+    posts.map((c) => c.body).sort((a, b) => a.src.localeCompare(b.src)),
     [
-      { src: "10.0.0.0", dst: "10.0.1.0", proto: "", dstPorts: [] },
-      { src: "10.0.0.0", dst: "10.0.2.0", proto: "", dstPorts: [] },
+      { src: "10.0.1.0", dst: "10.0.0.0", proto: "", dstPorts: [] },
+      { src: "10.0.2.0", dst: "10.0.0.0", proto: "", dstPorts: [] },
+      { src: "10.0.3.0", dst: "10.0.0.0", proto: "", dstPorts: [] },
     ],
   );
   await frames(10);
   const ok = JSON.parse(get("JSON.stringify([...Diagnose.state.flow.ok])"));
+  const half = JSON.parse(get("JSON.stringify([...Diagnose.state.flow.half])"));
   const deny = JSON.parse(get("JSON.stringify([...Diagnose.state.flow.deny.keys()])"));
+  const denyE = JSON.parse(get("JSON.stringify([...Diagnose.state.flow.denyE])"));
   // подсети адресуются на карте по имени владеющей сети (MAIN/OFFICE/DMZ),
   // не по собственному имени подсети — как и в диагностике одного пути.
-  assert.ok(ok.includes("MAIN"), "source network itself is reachable");
-  assert.ok(ok.includes("OFFICE") && ok.includes("r1"), "allowed route toward office-net is lit");
-  assert.ok(deny.includes("r2"), "r2 is the boundary where dmz is blocked");
-  assert.ok(!ok.includes("DMZ"), "dmz itself is not lit past the denied hop");
+  assert.ok(ok.includes("MAIN"), "the inspected network itself is lit");
+  assert.ok(ok.includes("OFFICE") && ok.includes("r1"), "office-net already routes to main — fully lit");
+  assert.ok(deny.includes("r2"), "r2 is where dmz's route toward main is blocked");
+  assert.ok(denyE.includes("r1\0r2"), "propagation beyond the deny boundary is not lit");
+  // branch-net has no return path of its own, but office-net round-trips
+  // through the very same r1: the shared node must come out green, not
+  // yellow — only branch-net itself, which nothing else vouches for, stays
+  // half-open.
+  assert.ok(ok.includes("r1"), "r1 is promoted to green: office-net already round-trips through it");
+  assert.ok(half.includes("BRANCH"), "branch-net itself has no return path and nothing promotes it");
+  assert.ok(!half.includes("r1"), "r1 is not left half-open just because branch-net alone can't reach back");
   assert.ok(!ids["spread-summary"].hidden);
   assert.match(String(ids["spread-summary"]._text || ""), /main/);
   // достижимость считает физический путь, а не вердикт фаервола: к dmz путь
   // есть (хоть и deny), поэтому он тоже в счётчике.
-  assert.match(String(ids["spread-summary"]._text || ""), /3 из 3/);
+  assert.match(String(ids["spread-summary"]._text || ""), /4 из 4/);
 });
 
 test("reset button also clears the spread result", async () => {

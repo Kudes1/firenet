@@ -226,13 +226,13 @@ test("show clamps the panel inside the canvas bounds", () => {
   assert.equal(page.box.style.top, "8px", "top clamps to the margin");
 });
 
-test("dragging the title moves the panel and further renders keep the new position", () => {
+test("dragging the header moves the panel and further renders keep the new position", () => {
   const page = boot();
   showPanel(page, plainLink);
   assert.equal(page.box.style.left, "114px");
   assert.equal(page.box.style.top, "60px");
-  const title = findAll(page.box, (n) => n.attrs.class === "link-panel-title")[0];
-  fire(title, "mousedown", { button: 0, clientX: 114, clientY: 60 });
+  const header = findAll(page.box, (n) => n.attrs.class === "diag-panel-header")[0];
+  fire(header, "mousedown", { button: 0, clientX: 114, clientY: 60 });
   fire(page.doc, "mousemove", { clientX: 164, clientY: 90 });
   assert.equal(page.box.style.left, "164px", "panel follows the pointer horizontally");
   assert.equal(page.box.style.top, "90px", "panel follows the pointer vertically");
@@ -253,8 +253,8 @@ test("dragging a panel clamped to the canvas edge tracks the pointer immediately
       { x: 1000, y: 50 }, { w: 1200, h: 800 })
   `);
   assert.equal(page.box.style.left, "820px", "opens clamped to the right edge (1200 - 380 width)");
-  const title = findAll(page.box, (n) => n.attrs.class === "link-panel-title")[0];
-  fire(title, "mousedown", { button: 0, clientX: 820, clientY: 60 });
+  const header = findAll(page.box, (n) => n.attrs.class === "diag-panel-header")[0];
+  fire(header, "mousedown", { button: 0, clientX: 820, clientY: 60 });
   fire(page.doc, "mousemove", { clientX: 810, clientY: 60 });
   assert.equal(page.box.style.left, "810px", "panel follows a 10px drag away from the edge immediately");
 });

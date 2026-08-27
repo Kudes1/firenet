@@ -166,7 +166,7 @@ function applyOperationFake(store, op) {
   }
 }
 
-function bootTopology(responses, draftID = "d1") {
+function bootTopology(responses, draftID = "d1", localStore = {}) {
   const draftStore = draftID ? { "firenet-draft-id": draftID } : {};
   const calls = [];
   const events = [];
@@ -183,6 +183,7 @@ function bootTopology(responses, draftID = "d1") {
     getContext: () => minimapCtx,
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 180, height: 120 }),
   });
+  const syncStatus = makeEl("span");
   const ids = {};
   const doc = {
     readyState: "loading",
@@ -191,7 +192,8 @@ function bootTopology(responses, draftID = "d1") {
     documentElement: { dataset: {} },
     // stable registry: production code resolves widgets by id repeatedly
     getElementById: (id) =>
-      id === "topo-canvas" ? canvas : id === "topo-minimap" ? minimapCanvas : (ids[id] ||= makeEl("div")),
+      id === "topo-canvas" ? canvas : id === "topo-minimap" ? minimapCanvas
+        : id === "topo-sync-status" ? syncStatus : (ids[id] ||= makeEl("div")),
     createElement: (tag) => makeEl(tag),
     addEventListener(t, fn) { (doc.listeners[t] ||= []).push(fn); },
     removeEventListener(t, fn) {
@@ -232,7 +234,10 @@ function bootTopology(responses, draftID = "d1") {
       addEventListener(t, fn) { (doc.listeners["win-" + t] ||= []).push(fn); },
       dispatchEvent(ev) { events.push(ev); },
     },
-    localStorage: { getItem: () => null, setItem() {} },
+    localStorage: {
+      getItem: (k) => (k in localStore ? localStore[k] : null),
+      setItem: (k, v) => { localStore[k] = v; },
+    },
     sessionStorage: {
       getItem: (k) => (k in draftStore ? draftStore[k] : null),
       setItem: (k, v) => { draftStore[k] = v; },
@@ -419,6 +424,17 @@ test("camera from layout is applied to the canvas view", async () => {
   assert.deepEqual(JSON.parse(get("JSON.stringify(State.camera)")), { x: -100, y: -50, z: 2 });
 });
 
+test("local camera supersedes the server layout for the same draft", async () => {
+  const localStore = { "firenet-topology-camera:d1": JSON.stringify({ x: 40, y: 30, z: 1.5 }) };
+  const { get } = bootTopology({
+    ...responses,
+    "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
+  }, "d1", localStore);
+  await tick();
+
+  assert.deepEqual(JSON.parse(get("JSON.stringify(State.camera)")), { x: 40, y: 30, z: 1.5 });
+});
+
 test("wheel zooms around the cursor", async () => {
   const { canvas, get, pump } = bootTopology({
     ...responses,
@@ -448,6 +464,23 @@ test("middle-button drag pans the camera", async () => {
   fire(doc, "mouseup", {});
   pump(); // пан применяется кадром rAF
   assert.deepEqual(JSON.parse(get("JSON.stringify(State.camera)")), { x: 60, y: 30, z: 1 });
+});
+
+test("panning the camera stores its position locally without a topology operation", async () => {
+  const localStore = {};
+  const page = bootTopology({
+    ...responses,
+    "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: 0, y: 0, z: 1 } },
+  }, "d1", localStore);
+  await tick();
+
+  fire(page.canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
+  fire(page.doc, "mousemove", { clientX: 160, clientY: 130 });
+  fire(page.doc, "mouseup", {});
+  page.pump();
+
+  assert.deepEqual(JSON.parse(localStore["firenet-topology-camera:d1"]), { x: 60, y: 30, z: 1 });
+  assert.deepEqual(postedOps(page), []);
 });
 
 test("node dragging accounts for camera zoom", async () => {
@@ -481,6 +514,15 @@ test("toolbar switches the active tool", async () => {
   assert.equal(ids["tool-select"].attrs.class, "tool");
 });
 
+test("topology shows a saved sync icon before its initial requests finish", () => {
+  const page = bootTopology(responses);
+
+  const status = page.doc.getElementById("topo-sync-status");
+  assert.equal(status.attrs["data-status"], "saved");
+  assert.equal(status.attrs["aria-label"], "Сохранено");
+  assert.match(status.innerHTML, /<svg\b/);
+});
+
 test("device tool creates a device at the clicked world position", async () => {
   const { canvas, ids, get, pump } = bootTopology({
     ...responses,
@@ -497,6 +539,7 @@ test("device tool creates a device at the clicked world position", async () => {
   pump(); // pop-анимация добегает: геометрия финальная
   const dev = byId(get, "device:r3");
   assert.ok(dev, "device created");
+  assert.equal(ids["tool-device"].attrs.class, "tool active", "device tool remains active after creation");
   // world position of the click: (300, 200); node is centred on the cursor
   assert.equal(dev.geom.x, 300 - 70, "device placed centred at the clicked world point");
   assert.equal(dev.geom.y, 200 - 30);
@@ -527,6 +570,17 @@ test("connect tool links two devices with click-click", async () => {
   clickNode(page, "r1");
   clickNode(page, "r2");
   assert.ok(byId(page.get, "link:r1|r2"), "wire rendered for the new link");
+});
+
+test("connect tool opens the edit panel for a link on right-click", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.ids["tool-connect"], "click", {});
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+  assert.ok(edit, "edit item shown in connect mode");
+  fire(edit, "click", {});
+  assert.ok(!page.ids["link-panel"].hidden, "link panel opened");
 });
 
 test("click selects a node, background click clears selection", async () => {
@@ -1318,6 +1372,20 @@ test("right-click on a link offers Редактировать and opens the link
   assert.equal(panel.style.left, "224px", "anchored near the click point");
 });
 
+test("link panel uses the diagnostic header and close action", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  const panel = page.ids["link-panel"];
+  const header = panel.children.find((el) => el.tag === "header" && el.attrs.class === "diag-panel-header");
+  assert.ok(header, "panel has the diagnostic-style header");
+  const close = header.children.find((el) => el.attrs.class === "diag-panel-close");
+  assert.ok(close, "header has a close button");
+  fire(close, "click", {});
+  assert.ok(panel.hidden, "close button hides the panel");
+});
+
 test("device context menu has no Редактировать item", async () => {
   const page = bootTopology(responses);
   await tick();
@@ -1436,6 +1504,24 @@ test("read-only (no active draft) never persists edits: no operations POST, no l
   await tick();
   assert.ok(!page.calls.some((c) => c.method === "POST"), "read-only tab never posts an operation");
   assert.equal(page.get("State.topology.devices.length"), 0, "no local edit either — nothing to persist");
+});
+
+test("read-only topology disables editing tools and keeps select mode", async () => {
+  const roResponses = {
+    "/api/versions/current/topology": { devices: [], links: [], networks: [], sets: [], unions: [] },
+    "/api/versions/current/subnets": { subnets: [] },
+    "/api/versions/current/layout": {},
+  };
+  const page = bootTopology(roResponses, null);
+  await tick();
+
+  for (const tool of ["select", "connect", "device", "network"]) {
+    assert.equal(page.ids[`tool-${tool}`].disabled, true, `${tool} is disabled`);
+    fire(page.ids[`tool-${tool}`], "click", {});
+  }
+  fire(page.doc, "keydown", { key: "c" });
+
+  assert.equal(page.get("State.tool"), "select", "read-only mode cannot change the active tool");
 });
 
 // --- операции: точный состав отправленных команд ---

@@ -6,11 +6,15 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function loadCommon(store = {}) {
+function loadCommon(store = {}, localStore = {}) {
   const sandbox = {
     document: { addEventListener() {} },
     window: {},
-    localStorage: { getItem: () => null, setItem() {} },
+    localStorage: {
+      getItem: (k) => (k in localStore ? localStore[k] : null),
+      setItem: (k, v) => { localStore[k] = v; },
+      removeItem: (k) => { delete localStore[k]; },
+    },
     sessionStorage: {
       getItem: (k) => (k in store ? store[k] : null),
       setItem: (k, v) => { store[k] = v; },
@@ -23,7 +27,7 @@ function loadCommon(store = {}) {
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "common.js"), "utf8"), sandbox, { filename: "common.js" });
   const names = vm.runInContext("({ currentDraftID, setCurrentDraftID, isReadOnly, apiPath, assertEditable, ReadOnlyError, Api })", sandbox);
-  return { ...names, sandbox, store };
+  return { ...names, sandbox, store, localStore };
 }
 
 test("currentDraftID/setCurrentDraftID round-trip through sessionStorage", () => {
@@ -34,6 +38,47 @@ test("currentDraftID/setCurrentDraftID round-trip through sessionStorage", () =>
   assert.equal(currentDraftID(), "draft-1");
   setCurrentDraftID(null);
   assert.equal(currentDraftID(), null);
+});
+
+test("currentDraftID restores the last draft from localStorage in a new session", () => {
+  const { currentDraftID } = loadCommon({}, { "firenet-last-draft-id": "draft-1" });
+  assert.equal(currentDraftID(), "draft-1");
+});
+
+test("restored draft remains fixed in its tab after another tab selects a draft", () => {
+  const localStore = { "firenet-last-draft-id": "draft-a" };
+  const firstTab = loadCommon({}, localStore);
+  assert.equal(firstTab.currentDraftID(), "draft-a");
+
+  const secondTab = loadCommon({}, localStore);
+  secondTab.setCurrentDraftID("draft-b");
+
+  assert.equal(firstTab.currentDraftID(), "draft-a");
+});
+
+test("setCurrentDraftID stores the active draft as the last draft", () => {
+  const { setCurrentDraftID, localStore } = loadCommon();
+  setCurrentDraftID("draft-1");
+  assert.equal(localStore["firenet-last-draft-id"], "draft-1");
+});
+
+test("clearing the active draft clears its persisted last-draft value", () => {
+  const { setCurrentDraftID, localStore } = loadCommon(
+    { "firenet-draft-id": "draft-1" },
+    { "firenet-last-draft-id": "draft-1" },
+  );
+  setCurrentDraftID(null);
+  assert.equal(localStore["firenet-last-draft-id"], undefined);
+});
+
+test("clearing a tab draft keeps another last draft and makes the tab read-only", () => {
+  const { currentDraftID, setCurrentDraftID, localStore } = loadCommon(
+    { "firenet-draft-id": "draft-a" },
+    { "firenet-last-draft-id": "draft-b" },
+  );
+  setCurrentDraftID(null);
+  assert.equal(currentDraftID(), null);
+  assert.equal(localStore["firenet-last-draft-id"], "draft-b");
 });
 
 test("isReadOnly reflects whether a draft is active", () => {

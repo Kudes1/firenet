@@ -94,13 +94,16 @@ const Diagnose = (() => {
   // дроп случается на самом роутере, а не на подходе к нему), denyE — рёбра
   // за точкой запрета, deny — карта «роутер → {rule, reason}» для точек
   // запрета, hl — весь путь целиком (для приглушения остального). half/halfE
-  // повторяют ok/okE, когда у report.returnPathAllowed === false: сеть
-  // симметрична по построению (Build зеркалит Allow фильтрованных связей в
-  // обе стороны), поэтому отсутствие обратного пути — это firewall-правило
-  // без встречного разрешения (нет mirror/ответного правила), а не разрыв
-  // маршрута; на карте это красится жёлтым — «доступно только в одну сторону».
-  // Запрет сильнее разрешения: элемент с deny-вердиктом и всё за ним на
-  // запрещённом маршруте никогда не попадают в ok.
+  // забирают содержимое ok/okE (а не просто копируют — иначе один и тот же
+  // элемент оказался бы одновременно и «half», и «ok» уже внутри одного
+  // отчёта), когда report.returnPathAllowed === false: обратного пути нет
+  // либо потому что его не пропускает firewall (нет mirror/встречного
+  // правила), либо потому что маршрут в обратную сторону вообще не
+  // анонсирован (пересечение фильтрованной связи проверяется только по
+  // назначению, см. graph.AllSimplePaths) — на карте оба случая красятся
+  // одинаково жёлтым, «доступно только в одну сторону». Запрет сильнее
+  // разрешения: элемент с deny-вердиктом и всё за ним на запрещённом
+  // маршруте никогда не попадают ни в ok, ни в half.
   function expandFlow(report, topology) {
     const hl = expandHighlight(report, topology);
     if (!hl) return null;
@@ -138,6 +141,8 @@ const Diagnose = (() => {
     if (report.returnPathAllowed === false) {
       ok.forEach((n) => half.add(n));
       okE.forEach((k) => halfE.add(k));
+      ok.clear();
+      okE.clear();
     }
     return { hl, ok, deny, okE, denyE, half, halfE };
   }
@@ -165,8 +170,14 @@ const Diagnose = (() => {
 
   // mergeFlows объединяет несколько expandFlow (один на пару источник×подсеть-
   // назначения) в одну разметку карты. Приоритет запрета над разрешением уже
-  // встроен в flowMark (проверяет deny/denyE раньше ok/okE), поэтому здесь
-  // достаточно простого объединения множеств без повторного вычитания.
+  // встроен в flowMark (проверяет deny/denyE раньше ok/okE), поэтому для них
+  // достаточно простого объединения множеств. half/halfE — иначе: один и тот
+  // же элемент карты может лежать на пути одной пары (нет обратного маршрута
+  // — half) и одновременно на пути другой пары того же среза (обратный
+  // маршрут есть — ok): например, узел с двумя шлюзами, один из которых
+  // зеркалит связь, а другой — нет. Раз для элемента есть хоть одна пара
+  // с полной двусторонней связностью, он красится зелёным целиком, поэтому
+  // ok вычитается из half/halfE уже после объединения всех пар.
   function mergeFlows(flows) {
     const hl = new Set(), ok = new Set(), okE = new Set(), denyE = new Set();
     const half = new Set(), halfE = new Set();
@@ -180,6 +191,8 @@ const Diagnose = (() => {
       f.halfE.forEach((k) => halfE.add(k));
       f.deny.forEach((v, k) => { if (!deny.has(k)) deny.set(k, v); });
     });
+    ok.forEach((n) => half.delete(n));
+    okE.forEach((k) => halfE.delete(k));
     return { hl, ok, deny, okE, denyE, half, halfE };
   }
 
@@ -606,24 +619,30 @@ const Diagnose = (() => {
     return n ? n.name : null;
   };
 
-  // runSpread опрашивает /api/diagnose от каждого резолвленного источника до
-  // каждой другой подсети топологии (любой трафик, без фильтра по протоколу/
-  // портам) и объединяет результаты в одну разметку карты. Подсеть считается
-  // достижимой, если существует хотя бы один физический путь до неё от любого
-  // источника, — это проверка маршрутизации, а не фаерволла: вердикт
+  // runSpread опрашивает /api/diagnose от каждой другой подсети топологии до
+  // каждого резолвленного узла инструмента (любой трафик, без фильтра по
+  // протоколу/портам) и объединяет результаты в одну разметку карты.
+  // Источник и назначение диагностики здесь — подсеть-кандидат и сама
+  // проверяемая сеть соответственно (а не наоборот): инструмент показывает,
+  // куда докатился анонс/реэкспорт проверяемой сети — то есть кто уже умеет
+  // до неё доехать, — а не куда способен дотянуться трафик, рождённый в ней
+  // самой (это была бы обратная, «исходящая» связность). Подсеть считается
+  // достижимой, если существует хотя бы один физический путь до проверяемой
+  // сети от кандидата, — это проверка маршрутизации, а не фаерволла: вердикт
   // правила (allow/deny/return) на достижимость не влияет. Отдельные подсети
-  // источника на карте адресуются по имени владеющей сети (см. ownerNetwork).
+  // проверяемой сети на карте адресуются по имени владеющей сети (см.
+  // ownerNetwork).
   async function runSpread(ev) {
     ev.preventDefault();
     const input = document.getElementById("spread-src").value.trim();
     const sources = resolveSpreadSources(input, state.subnets, state.topology.networks);
     const selfNames = new Set(sources.map((s) => s.subnetName).filter(Boolean));
     const candidates = state.subnets.map((s) => s.name).filter((n) => !selfNames.has(n));
-    const dstIp = (name) => baseIp(state.subnets.find((s) => s.name === name).cidr);
+    const ipOf = (name) => baseIp(state.subnets.find((s) => s.name === name).cidr);
     const pairs = sources.flatMap((src) => candidates.map((dstName) => ({ src, dstName })));
     try {
       const reports = await Promise.all(
-        pairs.map(({ src, dstName }) => Api.post(apiPath("diagnose"), { src: src.ip, dst: dstIp(dstName), proto: "", dstPorts: [] })),
+        pairs.map(({ src, dstName }) => Api.post(apiPath("diagnose"), { src: ipOf(dstName), dst: src.ip, proto: "", dstPorts: [] })),
       );
       const flows = reports.map((r) => expandFlow(r, state.topology)).filter(Boolean);
       const merged = mergeFlows(flows);

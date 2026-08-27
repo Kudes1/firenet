@@ -303,8 +303,23 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   box-shadow: var(--shadow);
 }
 .toolbar-sep { width: 1px; height: 22px; background: var(--border); margin: 0 2px; }
-.sync-status { font-size: 0.78rem; color: var(--muted); padding: 0 var(--space-2); white-space: nowrap; }
+.sync-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: var(--muted);
+}
+.sync-status svg { width: 20px; height: 20px; }
+.sync-status.saving { color: var(--accent); }
+.sync-status.saving svg {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: sync-status-spin 1s linear infinite;
+}
 .sync-status.error { color: var(--danger); }
+@keyframes sync-status-spin { to { transform: rotate(360deg); } }
 .tool {
   display: inline-flex;
   align-items: center;
@@ -385,31 +400,16 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   position: absolute;
   z-index: 10;
   width: 380px;
-  max-height: 70vh;
-  overflow-y: auto;
+  max-width: calc(100% - 2 * var(--space-3));
+  max-height: calc(100% - 2 * var(--space-3));
+  display: flex;
+  flex-direction: column;
   background: var(--panel-bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow);
-  padding: var(--space-3);
 }
 .link-panel[hidden] { display: none; }
-.link-panel-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-weight: 600;
-  font-size: 0.9rem;
-  cursor: move;
-  user-select: none;
-  margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-3)) var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--panel-bg-hover);
-  border-bottom: 1px solid var(--border);
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-}
-.link-panel-title:hover { background: var(--border); }
-.link-panel-title::before { content: "⠿"; opacity: 0.6; }
 .link-panel-grid { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-2); }
 .link-panel .member-add { margin: var(--space-2) 0 var(--space-3); }
 .link-panel .modal-actions {
@@ -480,6 +480,10 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 }
 .ctx-search:focus { outline: none; border-color: var(--accent); }
 .ctx-sub:hover .submenu, .ctx-sub:focus-within .submenu { display: flex; }
+/* при нехватке места справа (см. flipIfClipped в topology.js) подменю
+   открывается в другую сторону, чтобы не обрезаться overflow: hidden
+   у .canvas-wrap */
+.submenu.submenu-left { left: auto; right: 100%; }
 
 /* canvas tooltip (filtered wire exports, diagnostic deny point) */
 .topo-tooltip,

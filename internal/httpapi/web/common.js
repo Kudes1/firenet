@@ -59,19 +59,35 @@ const DirtyGuard = (() => {
 })();
 
 // --- draft context ---
-// sessionStorage (not localStorage) so each browser tab can hold a
-// different draft: a user editing draft A in one tab and draft B in
-// another must not clobber each other's context.
+// sessionStorage keeps the context per tab, while localStorage remembers
+// the last draft for a new browser session.
 const DRAFT_ID_KEY = "firenet-draft-id";
+const LAST_DRAFT_ID_KEY = "firenet-last-draft-id";
+const READONLY_DRAFT_CONTEXT_KEY = "firenet-draft-readonly";
 
 function currentDraftID() {
-  return sessionStorage.getItem(DRAFT_ID_KEY) || null;
+  const draftID = sessionStorage.getItem(DRAFT_ID_KEY);
+  if (draftID) return draftID;
+  if (sessionStorage.getItem(READONLY_DRAFT_CONTEXT_KEY)) return null;
+  const lastDraftID = localStorage.getItem(LAST_DRAFT_ID_KEY);
+  if (lastDraftID) sessionStorage.setItem(DRAFT_ID_KEY, lastDraftID);
+  return lastDraftID || null;
 }
 
 function setCurrentDraftID(id) {
+  const activeID = currentDraftID();
   lastDraftRevision = null;
-  if (id) sessionStorage.setItem(DRAFT_ID_KEY, id);
-  else sessionStorage.removeItem(DRAFT_ID_KEY);
+  if (id) {
+    sessionStorage.setItem(DRAFT_ID_KEY, id);
+    sessionStorage.removeItem(READONLY_DRAFT_CONTEXT_KEY);
+    localStorage.setItem(LAST_DRAFT_ID_KEY, id);
+    return;
+  }
+  sessionStorage.removeItem(DRAFT_ID_KEY);
+  sessionStorage.setItem(READONLY_DRAFT_CONTEXT_KEY, "1");
+  if (localStorage.getItem(LAST_DRAFT_ID_KEY) === activeID) {
+    localStorage.removeItem(LAST_DRAFT_ID_KEY);
+  }
 }
 
 function isReadOnly() {
@@ -92,6 +108,11 @@ async function renderDraftBanner() {
     try {
       draft = await Api.get(`/api/drafts/${draftID}`);
     } catch {
+      setCurrentDraftID(null);
+      window.location.reload();
+      return;
+    }
+    if (draft.status === "merged") {
       setCurrentDraftID(null);
       window.location.reload();
       return;
