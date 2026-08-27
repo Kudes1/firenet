@@ -31,7 +31,7 @@
 - Produces `topologyOperation` with `Kind`, `Device`, `Network`, `Link`, `Union`, `Filter`, names, attach endpoint, and layout payload.
 - Produces `applyTopologyOperation(projectdoc.ProjectDoc, topologyOperation) (projectdoc.ProjectDoc, error)`.
 
-- [ ] **Step 1: Write failing tests for command application**
+- [x] **Step 1: Write failing tests for command application**
 
 ```go
 func TestApplyTopologyOperation_CreateLinkAndSetFilter(t *testing.T) {
@@ -50,11 +50,11 @@ func TestApplyTopologyOperation_CreateLinkAndSetFilter(t *testing.T) {
 
 Cover device deletion cascading to links/attachments, attach/detach, union membership, clearing a filter, layout position, unknown kind, and unknown link.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `go test ./internal/httpapi -run '^TestApplyTopologyOperation_' -count=1`
 
-- [ ] **Step 3: Implement the minimal pure dispatcher**
+- [x] **Step 3: Implement the minimal pure dispatcher**
 
 ```go
 func canonicalLink(a, b string) (string, string) {
@@ -73,11 +73,11 @@ func linkIndex(links []LinkDoc, a, b string) int {
 
 Each switch case changes only fields named by its command. Cross-document validation remains in the HTTP handler.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `go test ./internal/httpapi -run '^TestApplyTopologyOperation_' -count=1`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add internal/httpapi/dto.go internal/httpapi/topology_operations.go internal/httpapi/topology_operations_test.go
@@ -97,7 +97,7 @@ git commit -m "feat(httpapi): add topology draft operations"
 - Produces `editorSnapshot{Topology TopologyDoc; Layout projectdoc.LayoutDoc}` with `X-Draft-Revision`.
 - Changes link candidates to `GET link-exports?a=<device>&b=<device>&side=a|b`.
 
-- [ ] **Step 1: Write failing HTTP tests**
+- [x] **Step 1: Write failing HTTP tests**
 
 ```go
 func TestPostTopologyOperation_ReturnsCanonicalSnapshot(t *testing.T) {
@@ -111,11 +111,11 @@ func TestPostTopologyOperation_ReturnsCanonicalSnapshot(t *testing.T) {
 
 Add literal tests for 409 on stale revision without a draft change, 422 on an invalid filtered link, shared topology/layout revision, and candidates resolved by endpoints after sorted storage round-trip.
 
-- [ ] **Step 2: Verify RED in an isolated Docker test database**
+- [ ] **Step 2: Verify RED in an isolated Docker test database** — исторический шаг: после реализации его нельзя воспроизвести без временного отката кода.
 
 Run: `go test ./internal/httpapi -run '^(TestPostTopologyOperation_|TestGetLinkExports_)' -count=1`.
 
-- [ ] **Step 3: Implement the handler**
+- [x] **Step 3: Implement the handler**
 
 ```go
 func (h *handlers) postDraftTopologyOperation(w http.ResponseWriter, r *http.Request) {
@@ -138,11 +138,11 @@ func (h *handlers) postDraftTopologyOperation(w http.ResponseWriter, r *http.Req
 
 Resolve the candidate link with `linkIndex`; never accept an array offset. Use the post-read revision because it matches the response even if another write committed meanwhile.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `go test ./internal/httpapi -run '^(TestPostTopologyOperation_|TestGetLinkExports|TestPutTopology_)' -count=1`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add internal/httpapi/server.go internal/httpapi/handlers.go internal/httpapi/handlers_test.go internal/httpapi/topology_operations.go
@@ -161,7 +161,7 @@ git commit -m "feat(httpapi): synchronize topology operations in drafts"
 - Produces `TopologySync.create({read, write, apply, onState, onStatus, reload})`.
 - Methods: `seed(snapshot)`, `enqueue(operation)`, `idle()`, `pending()`.
 
-- [ ] **Step 1: Write failing node tests**
+- [x] **Step 1: Write failing node tests**
 
 ```js
 test("queue serializes commands and projects later pending commands over a canonical response", async () => {
@@ -180,11 +180,11 @@ test("queue serializes commands and projects later pending commands over a canon
 
 Add cases for coalesced queued layout commands, 409 reload and pending discard, 422 rollback, network-error status, and `Api.post` sending/updating the revision header.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `node --test 'internal/httpapi/web/topology_sync.test.js' 'internal/httpapi/web/draft_context.test.js'`
 
-- [ ] **Step 3: Implement queue and API header support**
+- [x] **Step 3: Implement queue and API header support**
 
 ```js
 function enqueue(op) { pending = coalesce(pending, op); publish(); if (!inFlight) void drain(); }
@@ -200,7 +200,7 @@ async function drain() {
 
 `publish()` applies every pending command over the confirmed snapshot. `reconcile()` reloads topology/layout, clears pending, and reports the failure without replaying a potentially invalid action.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run: `node --test 'internal/httpapi/web/topology_sync.test.js' 'internal/httpapi/web/draft_context.test.js'`
 
@@ -222,7 +222,7 @@ git commit -m "feat(web): add topology draft operation queue"
 - Consumes: `TopologySync`, operation endpoint, endpoint-pair candidate API.
 - Produces: UI state projected by the queue and immediate sync status instead of a bulk Save button.
 
-- [ ] **Step 1: Write failing canvas regressions**
+- [x] **Step 1: Write failing canvas regressions**
 
 ```js
 test("creating a link persists it before filter candidates are requested", async () => {
@@ -236,15 +236,15 @@ test("creating a link persists it before filter candidates are requested", async
 
 Add response-reordering, set/clear filter, delete, attach, union membership, coalesced node/waypoint drag, and no unsaved-navigation prompt after a confirmed command.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `node --test 'internal/httpapi/web/topology_render.test.js' 'internal/httpapi/web/link_panel.test.js'`
 
-- [ ] **Step 3: Refactor the canvas**
+- [x] **Step 3: Refactor the canvas**
 
 Seed the queue after initial topology/layout load. Make `onState` replace `State.topology`, `State.layout`, and camera, then rebuild the scene and remove selections whose objects disappeared. Replace direct writes in `createNode`, connects, attachments, `setUnion`, `deleteSelection`, filter application, node drag, waypoint editing, and camera callbacks with `enqueue`; enqueue layout only on drag end. Replace index-based `LinkPanel` data with `{a, b}`. Remove `DirtyGuard.arm` and `topo-save` behavior; render an accessible sync status.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run: `node --test 'internal/httpapi/web/topology_render.test.js' 'internal/httpapi/web/link_panel.test.js' 'internal/httpapi/web/topology_sync.test.js'`
 
@@ -258,19 +258,19 @@ git commit -m "feat(web): persist topology canvas operations immediately"
 **Files:**
 - Modify: `README.md` only if it tells users to save topology manually.
 
-- [ ] **Step 1: Create and use an isolated test database**
+- [x] **Step 1: Create and use an isolated test database**
 
 Check that `firenet_test_topology_sync` does not exist, create it in Compose service `db`, and point `FIRENET_TEST_DATABASE_URL` to it. Never use the running `firenet` database because `dbtest.Open` truncates tables.
 
-- [ ] **Step 2: Run Go verification in order**
+- [x] **Step 2: Run Go verification in order**
 
 Run in one-off Docker containers: `go build ./...`; `go vet ./...`; `gofmt -l .`; `go test ./...` with the isolated database over `firenet_default`.
 
-- [ ] **Step 3: Run JS verification and remove temporary state**
+- [x] **Step 3: Run JS verification and remove temporary state**
 
 Run: `docker run --rm -v /home/kudes/repos/firenet:/src -w /src node:22-alpine node --test 'internal/httpapi/web/*.test.js'`. Drop `firenet_test_topology_sync`, run `git diff --check`, and confirm only task files changed.
 
-- [ ] **Step 4: Commit documentation only if it changed**
+- [x] **Step 4: Commit documentation only if it changed** — README не менялся.
 
 ```sh
 git add README.md
