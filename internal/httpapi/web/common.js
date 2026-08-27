@@ -347,6 +347,8 @@ const NAV_GROUPS = [
 const NAV_STANDALONE = [
   { id: "diagnose", href: "/ui/diagnose", label: "Диагностика" },
   { id: "users", href: "/ui/users", label: "Пользователи" },
+  { id: "drafts", href: "/ui/drafts", label: "Черновики" },
+  { id: "history", href: "/ui/history", label: "История" },
 ];
 
 const svgOpen = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
@@ -361,6 +363,8 @@ const NAV_ICONS = {
   compile: svgOpen + '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
   diagnose: svgOpen + '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
   users: svgOpen + '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 8a3 3 0 1 1 0 6"/><path d="M21 20c0-2.5-1.6-4.6-4-5.5"/></svg>',
+  drafts: svgOpen + '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
+  history: svgOpen + '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 3"/></svg>',
 };
 
 // buildNav renders the shared sidebar shell (brand, collapsible nav with
