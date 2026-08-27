@@ -32,6 +32,12 @@ type Report struct {
 	DstSubnet string       `json:"dstSubnet"`
 	Note      string       `json:"note"`
 	Paths     []PathResult `json:"paths"`
+	// ReturnPathAllowed reports whether traffic can also flow dst->src (any
+	// protocol, unrestricted ports). The network layer is always symmetric
+	// by construction (Build mirrors every filtered-link Allow both ways),
+	// so this can only be false because of one-directional firewall rules
+	// (no matching return rule or Mirror) — never because of routing.
+	ReturnPathAllowed bool `json:"returnPathAllowed"`
 }
 
 type PathResult struct {
@@ -100,6 +106,7 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 			Verdict: rules.ActionAllow,
 			Note:    "трафик не пересекает управляемые роутеры (L2-сегмент)",
 		}}
+		rep.ReturnPathAllowed = true
 		return rep, nil
 	}
 
@@ -107,10 +114,33 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 	for _, rs := range sets {
 		byDevice[rs.Device] = rs
 	}
+	paths, err := pathResults(byDevice, g, limits, srcName, dstName, flow)
+	if err != nil {
+		return nil, err
+	}
+	rep.Paths = paths
+
+	// Reply traffic of the same session: addresses and ports swap the way
+	// Mirror expands a rule (dst port becomes src port and vice versa).
+	backFlow := Flow{Src: flow.Dst, Dst: flow.Src, Proto: flow.Proto, SrcPorts: flow.DstPorts, DstPorts: flow.SrcPorts}
+	back, err := pathResults(byDevice, g, limits, dstName, srcName, backFlow)
+	if err != nil {
+		return nil, err
+	}
+	rep.ReturnPathAllowed = returnPathAllowed(back)
+	return rep, nil
+}
+
+// pathResults enumerates every simple path from srcName to dstName and
+// verdicts it against flow, same as Run's forward computation — Run calls
+// this once forward and once more with names and flow endpoints swapped to
+// check the return direction.
+func pathResults(byDevice map[string]compiler.DeviceRuleset, g *graph.Graph, limits graph.Limits, srcName, dstName string, flow Flow) ([]PathResult, error) {
 	paths, err := g.AllSimplePaths(graph.SubnetNode(srcName), graph.SubnetNode(dstName), limits)
 	if err != nil {
 		return nil, err
 	}
+	out := make([]PathResult, 0, len(paths))
 	for _, p := range paths {
 		pr := PathResult{Nodes: p.Nodes, Routers: []RouterVerdict{}}
 		denied, returned := false, false
@@ -132,9 +162,21 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 		default:
 			pr.Verdict = rules.ActionAllow
 		}
-		rep.Paths = append(rep.Paths, pr)
+		out = append(out, pr)
 	}
-	return rep, nil
+	return out, nil
+}
+
+// returnPathAllowed reports whether at least one path back avoids an
+// explicit deny verdict. Denying every path back is the only way this can
+// be false, since route existence itself is guaranteed symmetric.
+func returnPathAllowed(paths []PathResult) bool {
+	for _, p := range paths {
+		if p.Verdict != rules.ActionDeny {
+			return true
+		}
+	}
+	return false
 }
 
 // verdict walks the chain graph starting at the primary chain: jump descends,

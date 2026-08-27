@@ -63,6 +63,21 @@ rules:
   - {name: unrelated, src: [dmz], dst: [office], proto: udp, action: allow}
 `
 
+const diagRulesAllowBothWays = `
+defaultAction: allow
+chainName: FIRENET-FWD
+chainPosition: top
+rules: []
+`
+
+const diagRulesMirror = `
+defaultAction: deny
+chainName: FIRENET-FWD
+chainPosition: top
+rules:
+  - {name: office-dmz-both-ways, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: allow, mirror: true}
+`
+
 func loadTopo(t *testing.T) (*topology.Topology, *graph.Graph) {
 	t.Helper()
 	topo, err := topology.Load(strings.NewReader(diagTopology))
@@ -264,5 +279,43 @@ func TestRun_SameSubnetIsL2(t *testing.T) {
 	p := rep.Paths[0]
 	if len(p.Nodes) != 1 || len(p.Routers) != 0 || p.Note == "" {
 		t.Fatalf("degenerate path expected, got %+v", p)
+	}
+}
+
+// A one-directional rule (no mirror) permits office->dmz but leaves dmz->office
+// on the default deny: the network path back exists (Build mirrors every
+// filtered-link Allow), but firewall policy makes it one-way.
+func TestRun_ReturnPathAllowed_FalseForOneDirectionalRule(t *testing.T) {
+	rep := runDiag(t, diagRulesAllow, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
+	if rep.ReturnPathAllowed {
+		t.Fatal("one-directional rule must not report a return path")
+	}
+}
+
+func TestRun_ReturnPathAllowed_TrueWhenDefaultAllowsBothWays(t *testing.T) {
+	rep := runDiag(t, diagRulesAllowBothWays, "10.0.0.5", "10.0.1.7", "")
+	if !rep.ReturnPathAllowed {
+		t.Fatal("default-allow policy must permit traffic both ways")
+	}
+}
+
+func TestRun_ReturnPathAllowed_TrueWithMirroredRule(t *testing.T) {
+	rep := runDiag(t, diagRulesMirror, "10.0.0.5", "10.0.1.7", rules.ProtoTCP, "443")
+	if !rep.ReturnPathAllowed {
+		t.Fatal("mirrored rule must permit the return direction too")
+	}
+}
+
+func TestRun_ReturnPathAllowed_TrueForSameSubnet(t *testing.T) {
+	rep := runDiag(t, diagRulesAllow, "10.0.0.5", "10.0.0.9", "")
+	if !rep.ReturnPathAllowed {
+		t.Fatal("same L2 segment must trivially allow return traffic")
+	}
+}
+
+func TestRun_ReturnPathAllowed_FalseWhenFullyUnreachable(t *testing.T) {
+	rep := runDiag(t, diagRulesAllow, "10.0.0.5", "10.0.2.7", "")
+	if rep.ReturnPathAllowed {
+		t.Fatal("an isolated subnet has no path in either direction")
 	}
 }
