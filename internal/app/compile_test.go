@@ -177,6 +177,75 @@ rules:
 	}
 }
 
+const chainedReExportTopology = `
+devices:
+  - {name: m, kind: router}
+  - {name: d, kind: router}
+  - {name: o, kind: router}
+links:
+  - a: {device: m}
+    b: {device: d}
+    filter: {a-exports: [NA], b-exports: [NB]}
+  - a: {device: o}
+    b: {device: d}
+    filter: {a-exports: [NC], b-exports: [NB, NA]}
+networks:
+  - {name: NA, subnets: [a], attach: [{device: m}]}
+  - {name: NB, subnets: [b], attach: [{device: d}]}
+  - {name: NC, subnets: [c], attach: [{device: o}]}
+`
+
+const chainedReExportSubnets = `
+subnets:
+  - {name: a, cidr: 10.0.20.0/24}
+  - {name: b, cidr: 10.0.21.0/24}
+  - {name: c, cidr: 10.0.22.0/24}
+`
+
+// d re-exports NA (learned from m) toward o (b-exports includes NA on the
+// o-d link) — o can now reach m. Nothing announces NC back toward m on the
+// m-d link, so the reverse direction has no route at all: filtered links
+// model per-direction route advertisement, not a symmetric ACL pair.
+func TestCompile_ChainedReExportPlacesRuleForWorkingDirection(t *testing.T) {
+	rules := `
+defaultAction: deny
+rules:
+  - {name: office-to-market, src: [NC], dst: [NA], action: allow}
+`
+	out, err := Compile(context.Background(), discardLogger(), CompileOptions{
+		TopologyYAML: []byte(chainedReExportTopology),
+		SubnetsYAML:  []byte(chainedReExportSubnets),
+		RulesYAML:    []byte(rules),
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	got := names(out)
+	want := []string{"d", "m", "o"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("chained re-export places on %v, want %v", got, want)
+	}
+}
+
+func TestCompile_ChainedReExportPlacesNoRuleWithoutSymmetricAnnouncement(t *testing.T) {
+	rules := `
+defaultAction: deny
+rules:
+  - {name: market-to-office, src: [NA], dst: [NC], action: allow}
+`
+	out, err := Compile(context.Background(), discardLogger(), CompileOptions{
+		TopologyYAML: []byte(chainedReExportTopology),
+		SubnetsYAML:  []byte(chainedReExportSubnets),
+		RulesYAML:    []byte(rules),
+	})
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("market has no route back to office without a symmetric announcement, got devices: %v", names(out))
+	}
+}
+
 func names(out []CompiledDevice) []string {
 	var s []string
 	for _, d := range out {
