@@ -811,6 +811,240 @@ func TestGetLinkExports_ExcludesEntitiesLearnedOverOtherFilteredLinks(t *testing
 	}
 }
 
+func TestPostTopologyOperation_ReturnsCanonicalSnapshot(t *testing.T) {
+	h, _, id := newTestServer(t)
+	// The brief's literal example links r2-r1, but the fixture already
+	// has an r1-r2 link and topology.Validate rejects a duplicate pair
+	// regardless of side order; seed a third device so create-link has a
+	// genuinely new pair to add.
+	seed := doJSON(t, h, http.MethodPost, draftPath(id, "topology/operations"), map[string]any{
+		"kind": "create-device", "device": map[string]string{"name": "r3", "kind": "router"},
+	})
+	if seed.Code != http.StatusOK {
+		t.Fatalf("seed device: status=%d body=%s", seed.Code, seed.Body)
+	}
+	rec := doJSON(t, h, http.MethodPost, draftPath(id, "topology/operations"), map[string]any{
+		"kind": "create-link", "link": map[string]any{"a": map[string]string{"device": "r3"}, "b": map[string]string{"device": "r1"}},
+	})
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Draft-Revision") == "" {
+		t.Fatalf("status=%d header=%q", rec.Code, rec.Header())
+	}
+	var snap struct {
+		Topology TopologyDoc `json:"topology"`
+		Layout   LayoutDoc   `json:"layout"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(snap.Topology.Links) != 2 {
+		t.Fatalf("want 2 links (fixture's r1-r2 plus the new r3-r1) in canonical snapshot, got %+v", snap.Topology.Links)
+	}
+}
+
+func TestPostTopologyOperation_StaleRevisionReturnsConflict(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+
+	getRec := doJSON(t, h, http.MethodGet, draftPath(draftID, "topology"), nil)
+	staleRevision := getRec.Header().Get("X-Draft-Revision")
+	if staleRevision == "" {
+		t.Fatal("expected an initial X-Draft-Revision")
+	}
+
+	// A first operation moves the draft off staleRevision.
+	first := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations"), map[string]any{
+		"kind": "create-device", "device": map[string]string{"name": "sw1", "kind": "switch"},
+	})
+	if first.Code != http.StatusOK {
+		t.Fatalf("seed operation: status = %d, body = %s", first.Code, first.Body)
+	}
+
+	// Retrying against the now-stale revision must conflict, independent
+	// of whether the retried operation itself would otherwise apply.
+	body := marshalJSON(t, map[string]any{"kind": "create-device", "device": map[string]string{"name": "sw2", "kind": "switch"}})
+	req := httptest.NewRequest(http.MethodPost, draftPath(draftID, "topology/operations"), bytes.NewReader(body))
+	req.Header.Set("X-Draft-Revision", staleRevision)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPostTopologyOperation_InvalidFilteredLinkIsUnprocessable(t *testing.T) {
+	h, projects, draftID := newTestServer(t)
+	seed := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations"), map[string]any{
+		"kind": "create-device", "device": map[string]string{"name": "r3", "kind": "router"},
+	})
+	if seed.Code != http.StatusOK {
+		t.Fatalf("seed device: status=%d body=%s", seed.Code, seed.Body)
+	}
+	before := marshalJSON(t, readDraftDoc(t, projects, draftID).Topology)
+
+	rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations"), map[string]any{
+		"kind": "create-link",
+		"link": map[string]any{
+			"a":      map[string]string{"device": "r3"},
+			"b":      map[string]string{"device": "r1"},
+			"filter": map[string]any{"aExports": []string{"ghost"}, "bExports": []string{"n-dmz"}},
+		},
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if msg := errorBody(t, rec); !strings.Contains(msg, "unknown export entity") {
+		t.Fatalf("unexpected error body: %s", msg)
+	}
+	after := marshalJSON(t, readDraftDoc(t, projects, draftID).Topology)
+	if !bytes.Equal(before, after) {
+		t.Fatalf("rejected operation must not be persisted")
+	}
+}
+
+func TestPostTopologyOperation_SharesRevisionWithLayout(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+
+	rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations"), map[string]any{
+		"kind": "set-device-position", "deviceName": "r1", "position": map[string]float64{"x": 5, "y": 6},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	opRevision := rec.Header().Get("X-Draft-Revision")
+
+	var snap struct {
+		Topology TopologyDoc `json:"topology"`
+		Layout   LayoutDoc   `json:"layout"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if snap.Layout.Devices["r1"] != (LayoutPoint{X: 5, Y: 6}) {
+		t.Fatalf("layout position not applied: %+v", snap.Layout)
+	}
+
+	// One draft revision covers both topology and layout: the plain GETs
+	// for each must report the same revision the operation just produced.
+	topoRec := doJSON(t, h, http.MethodGet, draftPath(draftID, "topology"), nil)
+	if got := topoRec.Header().Get("X-Draft-Revision"); got != opRevision {
+		t.Fatalf("topology revision %q != operation revision %q", got, opRevision)
+	}
+	layoutRec := doJSON(t, h, http.MethodGet, draftPath(draftID, "layout"), nil)
+	if got := layoutRec.Header().Get("X-Draft-Revision"); got != opRevision {
+		t.Fatalf("layout revision %q != operation revision %q", got, opRevision)
+	}
+}
+
+func TestPostTopologyOperation_LinkCandidatesResolveByEndpointsAfterSortedRoundTrip(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+
+	// The fixture's r1-r2 link is already at storage index 0. Add a
+	// second link whose canonical key ("a0|z9") sorts before "r1|r2", so
+	// pgstore's alphabetic reconstruction moves it to index 0 instead: a
+	// stale array index would now resolve to the wrong link.
+	for _, dev := range []string{"a0", "z9"} {
+		rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations"), map[string]any{
+			"kind": "create-device", "device": map[string]string{"name": dev, "kind": "router"},
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("create device %s: status = %d, body = %s", dev, rec.Code, rec.Body)
+		}
+	}
+	rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations"), map[string]any{
+		"kind": "create-link", "link": map[string]any{"a": map[string]string{"device": "z9"}, "b": map[string]string{"device": "a0"}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create link: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var snap struct {
+		Topology TopologyDoc `json:"topology"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	first := snap.Topology.Links[0]
+	if (first.A.Device != "a0" && first.B.Device != "a0") || (first.A.Device != "z9" && first.B.Device != "z9") {
+		t.Fatalf("expected canonical key sort (\"a0|z9\" < \"r1|r2\") to put a0-z9 first, got %+v", snap.Topology.Links)
+	}
+
+	// The original r1-r2 link still resolves correctly by endpoint pair,
+	// even though it's no longer at index 0.
+	got := doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?a=r1&b=r2&side=a"), nil)
+	if got.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", got.Code, got.Body)
+	}
+	var out struct {
+		Entities []EntityDoc `json:"entities"`
+	}
+	if err := json.Unmarshal(got.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := []EntityDoc{{Name: "n-office"}, {Name: "office", CIDR: "10.0.0.0/24"}}
+	if !slices.EqualFunc(out.Entities, want, func(a, b EntityDoc) bool { return a == b }) {
+		t.Fatalf("entities = %+v, want %+v", out.Entities, want)
+	}
+}
+
+func TestGetLinkExports_ResolvesByEndpointPair(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?a=r1&b=r2&side=a"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Entities []EntityDoc `json:"entities"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := []EntityDoc{{Name: "n-office"}, {Name: "office", CIDR: "10.0.0.0/24"}}
+	if !slices.EqualFunc(got.Entities, want, func(a, b EntityDoc) bool { return a == b }) {
+		t.Fatalf("entities = %+v, want %+v", got.Entities, want)
+	}
+
+	// Order of a/b doesn't matter: the pair is canonicalized before lookup.
+	rec = doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?a=r2&b=r1&side=b"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestGetLinkExports_LegacyIndexQueryStillWorks(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?link=0&side=a"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Entities []EntityDoc `json:"entities"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := []EntityDoc{{Name: "n-office"}, {Name: "office", CIDR: "10.0.0.0/24"}}
+	if !slices.EqualFunc(got.Entities, want, func(a, b EntityDoc) bool { return a == b }) {
+		t.Fatalf("entities = %+v, want %+v", got.Entities, want)
+	}
+}
+
+func TestGetLinkExports_UnknownEndpointPairIs404(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?a=r1&b=ghost&side=a"), nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
+func TestGetLinkExports_MissingEndpointFallsBackToLegacyAndRejectsIncomplete(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+	// Only "a" present (no "b"): not a valid endpoint-pair query, and
+	// there's no legacy "link" param either, so this is 422, not a silent
+	// fallback to link index 0.
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?a=r1&side=a"), nil)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
 func TestDiagnoseHandler(t *testing.T) {
 	h, _, draftID := newTestServer(t)
 	diagnosePath := draftPath(draftID, "diagnose")

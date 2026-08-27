@@ -184,13 +184,13 @@ const Api = {
     return res.json();
   },
   async post(path, body) {
-    const res = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const headers = { "Content-Type": "application/json" };
+    if (lastDraftRevision) headers["X-Draft-Revision"] = lastDraftRevision;
+    const res = await fetch(path, { method: "POST", headers, body: JSON.stringify(body) });
     if (res.status === 401) return redirectToLogin();
     if (!res.ok) throw await apiError(res);
+    const rev = res.headers?.get("X-Draft-Revision");
+    if (rev) lastDraftRevision = rev;
     return res.status === 204 ? null : res.json();
   },
   async put(path, body) {

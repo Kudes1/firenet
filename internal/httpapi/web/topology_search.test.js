@@ -133,7 +133,7 @@ function bootTopology(responses, draftID = "d1") {
   for (const f of [
     "common.js", "camera.js", "minimap.js", "camera_input.js", "netmap.js", "tween.js",
     "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
-    "net_info.js", "link_panel.js", "topology.js",
+    "net_info.js", "link_panel.js", "topology_sync.js", "topology.js",
   ]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }

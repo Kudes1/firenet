@@ -71,6 +71,101 @@ function fire(target, type, ev) {
   if (type === "click" && target.onclick) target.onclick(ev);
 }
 
+// canonicalPair/layoutKey/linkAt mirror the server's link identity
+// (endpoint pair, not array position) closely enough for the fake below.
+const canonicalPair = (a, b) => (a > b ? [b, a] : [a, b]);
+const layoutKey = (a, b) => canonicalPair(a, b).join("|");
+const linkAt = (links, a, b) => links.findIndex((l) => layoutKey(l.a.device, l.b.device) === layoutKey(a, b));
+const dropStr = (arr, s) => (arr || []).filter((v) => v !== s);
+
+// applyOperationFake is a minimal host-side mirror of
+// internal/httpapi/topology_operations.go's applyTopologyOperation (and,
+// independently, topology.js's own client-side applyTopologyOp) — good
+// enough to stand in for the server in these tests without hand-writing a
+// canned response per operation. Mutates store.topology/store.layout in
+// place; unknown kinds are a no-op like the real server would 422 before
+// ever getting here.
+function applyOperationFake(store, op) {
+  const topo = store.topology;
+  const layout = store.layout;
+  switch (op.kind) {
+    case "create-device": topo.devices.push(op.device); break;
+    case "delete-device": {
+      topo.devices = topo.devices.filter((d) => d.name !== op.deviceName);
+      topo.links = topo.links.filter((l) => {
+        if (l.a.device === op.deviceName || l.b.device === op.deviceName) {
+          delete layout.links[layoutKey(l.a.device, l.b.device)];
+          return false;
+        }
+        return true;
+      });
+      topo.networks.forEach((n) => { n.attach = (n.attach || []).filter((a) => a.device !== op.deviceName); });
+      (topo.unions || []).forEach((u) => { u.devices = dropStr(u.devices, op.deviceName); });
+      delete layout.devices[op.deviceName];
+      break;
+    }
+    case "create-network": topo.networks.push(op.network); break;
+    case "delete-network":
+      topo.networks = topo.networks.filter((n) => n.name !== op.networkName);
+      (topo.unions || []).forEach((u) => { u.networks = dropStr(u.networks, op.networkName); });
+      delete layout.networks[op.networkName];
+      break;
+    case "create-link": topo.links.push(op.link); break;
+    case "delete-link": {
+      const i = linkAt(topo.links, op.link.a.device, op.link.b.device);
+      if (i >= 0) { delete layout.links[layoutKey(op.link.a.device, op.link.b.device)]; topo.links.splice(i, 1); }
+      break;
+    }
+    case "set-link-filter": {
+      const i = linkAt(topo.links, op.link.a.device, op.link.b.device);
+      if (i >= 0) topo.links[i] = { ...topo.links[i], filter: op.filter };
+      break;
+    }
+    case "clear-link-filter": {
+      const i = linkAt(topo.links, op.link.a.device, op.link.b.device);
+      if (i >= 0) { const { filter, ...rest } = topo.links[i]; topo.links[i] = rest; }
+      break;
+    }
+    case "create-union": (topo.unions ||= []).push(op.union); break;
+    case "delete-union": topo.unions = (topo.unions || []).filter((u) => u.name !== op.unionName); break;
+    case "attach-network": {
+      const n = topo.networks.find((x) => x.name === op.networkName);
+      if (n) n.attach = [...(n.attach || []), op.attach];
+      break;
+    }
+    case "detach-network": {
+      const n = topo.networks.find((x) => x.name === op.networkName);
+      if (n) n.attach = (n.attach || []).filter((a) => a.device !== op.attach.device);
+      break;
+    }
+    case "union-add-device": {
+      const u = (topo.unions || []).find((x) => x.name === op.unionName);
+      if (u) u.devices = [...(u.devices || []), op.deviceName];
+      break;
+    }
+    case "union-remove-device": {
+      const u = (topo.unions || []).find((x) => x.name === op.unionName);
+      if (u) u.devices = dropStr(u.devices, op.deviceName);
+      break;
+    }
+    case "union-add-network": {
+      const u = (topo.unions || []).find((x) => x.name === op.unionName);
+      if (u) u.networks = [...(u.networks || []), op.networkName];
+      break;
+    }
+    case "union-remove-network": {
+      const u = (topo.unions || []).find((x) => x.name === op.unionName);
+      if (u) u.networks = dropStr(u.networks, op.networkName);
+      break;
+    }
+    case "set-device-position": layout.devices[op.deviceName] = op.position; break;
+    case "set-network-position": layout.networks[op.networkName] = op.position; break;
+    case "set-link-waypoints": layout.links[layoutKey(op.link.a.device, op.link.b.device)] = op.waypoints; break;
+    case "set-camera": layout.camera = op.camera; break;
+    default: break;
+  }
+}
+
 function bootTopology(responses, draftID = "d1") {
   const draftStore = draftID ? { "firenet-draft-id": draftID } : {};
   const calls = [];
@@ -107,6 +202,30 @@ function bootTopology(responses, draftID = "d1") {
   // управляемые кадры: rAF-очередь + фейковые часы для твинов и pop
   let clock = 0;
   const rafQueue = [];
+  // opsStore backs the default POST .../topology/operations response: a
+  // mutable clone of whatever the topology/layout GET fixtures resolve to,
+  // advanced by applyOperationFake on every posted op. Lazily seeded on the
+  // first POST so it reflects the fixtures exactly as boot() read them.
+  // A test that needs to control the exact server response (e.g. one
+  // exercising the server's canonical link order) still can — this only
+  // fires when `responses` has no explicit entry for the operations path.
+  const opsPath = `/api/drafts/${draftID}/topology/operations`;
+  let opsStore = null;
+  const seedOpsStore = () => {
+    if (opsStore) return;
+    const topoResp = typeof responses[`/api/drafts/${draftID}/topology`] === "function"
+      ? responses[`/api/drafts/${draftID}/topology`]() : responses[`/api/drafts/${draftID}/topology`];
+    const layoutResp = typeof responses[`/api/drafts/${draftID}/layout`] === "function"
+      ? responses[`/api/drafts/${draftID}/layout`]() : responses[`/api/drafts/${draftID}/layout`];
+    const t = topoResp || {};
+    const l = layoutResp || {};
+    opsStore = {
+      topology: JSON.parse(JSON.stringify({
+        devices: t.devices || [], links: t.links || [], networks: t.networks || [], sets: t.sets || [], unions: t.unions || [],
+      })),
+      layout: JSON.parse(JSON.stringify({ devices: l.devices || {}, networks: l.networks || {}, links: l.links || {}, camera: l.camera || null })),
+    };
+  };
   const sandbox = {
     document: doc,
     window: {
@@ -135,7 +254,12 @@ function bootTopology(responses, draftID = "d1") {
     console,
     // clone: production mutates loaded state, responses must stay pristine
     fetch: async (p, opts) => {
-      calls.push({ path: p, method: opts?.method || "GET" });
+      calls.push({ path: p, method: opts?.method || "GET", body: opts?.body });
+      if (p === opsPath && opts?.method === "POST" && !(opsPath in responses)) {
+        seedOpsStore();
+        applyOperationFake(opsStore, JSON.parse(opts.body));
+        return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(opsStore)) };
+      }
       const response = typeof responses[p] === "function" ? responses[p](opts) : responses[p];
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(response ?? null)) };
     },
@@ -145,7 +269,7 @@ function bootTopology(responses, draftID = "d1") {
   for (const f of [
     "common.js", "camera.js", "minimap.js", "camera_input.js", "netmap.js", "tween.js",
     "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
-    "net_info.js", "link_panel.js", "topology.js",
+    "net_info.js", "link_panel.js", "topology_sync.js", "topology.js",
   ]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
   }
@@ -266,20 +390,24 @@ test("topology normalizes null collections from an empty draft", async () => {
   });
 });
 
-test("topology normalizes null collections returned after saving", async () => {
-  const { ids, get, events } = bootTopology({
+test("topology normalizes null collections returned by the operations endpoint", async () => {
+  const page = bootTopology({
     ...responses,
-    "/api/drafts/d1/topology": (opts) => opts?.method === "PUT"
-      ? { devices: null, links: null, networks: null, sets: null, unions: null }
-      : { devices: [], links: [], networks: [], sets: [], unions: [] },
+    "/api/drafts/d1/topology": { devices: [], links: [], networks: [], sets: [], unions: [] },
+    "/api/drafts/d1/topology/operations": {
+      topology: { devices: null, links: null, networks: null, sets: null, unions: null },
+      layout: { devices: null, networks: null, links: null, camera: null },
+    },
   });
   await tick();
-  fire(ids["topo-save"], "click", {});
+  fire(page.ids["tool-device"], "click", {});
+  fire(page.canvas, "click", { clientX: 300, clientY: 200 });
+  page.ids["node-name-input"].value = "r3";
+  fire(page.ids["node-name-form"], "submit", {});
   await tick();
-  assert.deepEqual(JSON.parse(get("JSON.stringify(State.topology)")), {
+  assert.deepEqual(JSON.parse(page.get("JSON.stringify(State.topology)")), {
     devices: [], links: [], networks: [], sets: [], unions: [],
   });
-  assert.equal(JSON.stringify(events.at(-1).detail), '{"message":"Топология сохранена","kind":"ok"}');
 });
 
 test("camera from layout is applied to the canvas view", async () => {
@@ -711,15 +839,20 @@ test("popover cancels on Escape", async () => {
   assert.ok(ids["node-popover"].hidden, "popover closed");
 });
 
-test("creating a node marks the page dirty for DirtyGuard", async () => {
-  const { canvas, doc, ids, get } = bootTopology(responses);
+// Every edit now persists immediately through the operations queue instead
+// of a bulk Save button, so DirtyGuard is never armed for this page: no
+// "leave without saving?" prompt can fire after a confirmed command.
+test("no unsaved-navigation prompt after a confirmed command: DirtyGuard is never armed on this page", async () => {
+  const { canvas, ids, get } = bootTopology(responses);
   await tick();
   assert.equal(get("DirtyGuard.isDirty()"), false, "clean after boot");
   fire(ids["tool-device"], "click", {});
   fire(canvas, "click", { clientX: 300, clientY: 200 });
   ids["node-name-input"].value = "r3";
   fire(ids["node-name-form"], "submit", {});
-  assert.equal(get("DirtyGuard.isDirty()"), true, "unsaved node makes the page dirty");
+  await tick();
+  assert.ok(byId(get, "device:r3"), "node created and persisted");
+  assert.equal(get("DirtyGuard.isDirty()"), false, "DirtyGuard.arm was never called on /ui/topology");
 });
 
 // --- delete button (trash) ---
@@ -1192,30 +1325,60 @@ test("device context menu has no Редактировать item", async () => {
   assert.ok(!findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "no edit item for a device");
 });
 
-test("applying a filter from the link panel updates the topology and marks it dirty", async () => {
+test("applying a filter from the link panel persists it via set-link-filter, addressed by endpoint pair", async () => {
   const page = bootTopology({
     ...responses,
-    "/api/drafts/d1/link-exports?link=0&side=a": { entities: [{ name: "office", cidr: "10.0.0.0/24" }] },
-    "/api/drafts/d1/link-exports?link=0&side=b": { entities: [] },
+    "/api/drafts/d1/link-exports?a=r1&b=r2&side=a": { entities: [{ name: "office", cidr: "10.0.0.0/24" }] },
+    "/api/drafts/d1/link-exports?a=r1&b=r2&side=b": { entities: [] },
   });
   await tick();
-  assert.equal(page.get("DirtyGuard.isDirty()"), false, "clean after boot");
   fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
   fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
   const panel = page.ids["link-panel"];
   fire(findBtn(panel, (b) => String(b.textContent).trim() === "Сделать фильтрованной"), "click", {});
   await tick();
+  assert.ok(page.calls.some((c) => /link-exports\?a=r1&b=r2&side=a/.test(c.path)), "candidates fetched by endpoint pair");
   const select = findBtn(panel, (n) => n.tag === "select");
   select.value = "office";
   fire(select, "change", {});
   fire(findBtn(panel, (b) => String(b.textContent).trim() === "Применить"), "click", {});
+  // local projection updates immediately, before the write round-trips
   assert.deepEqual(
     JSON.parse(page.get("JSON.stringify(State.topology.links[0].filter)")),
     { aExports: ["office"], bExports: [] },
-    "filter applied to the in-memory topology",
+    "filter applied to the projected topology",
   );
   assert.ok(panel.hidden, "panel closes after apply");
-  assert.equal(page.get("DirtyGuard.isDirty()"), true, "unsaved filter marks the page dirty");
+  await tick();
+  const posted = page.calls.filter((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST");
+  assert.equal(posted.length, 1, "one set-link-filter operation sent");
+  assert.deepEqual(
+    JSON.parse(page.get("JSON.stringify(State.topology.links[0].filter)")),
+    { aExports: ["office"], bExports: [] },
+    "filter still reflected after the server confirms",
+  );
+});
+
+test("clearing a filter from the link panel sends clear-link-filter", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
+      links: [{ a: { device: "r1" }, b: { device: "r2" }, filter: { aExports: ["office"], bExports: [] } }],
+    },
+    "/api/drafts/d1/link-exports?a=r1&b=r2&side=a": { entities: [] },
+    "/api/drafts/d1/link-exports?a=r1&b=r2&side=b": { entities: [] },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  const panel = page.ids["link-panel"];
+  fire(findBtn(panel, (b) => String(b.textContent).trim() === "Вернуть обычную"), "click", {});
+  fire(findBtn(panel, (b) => String(b.textContent).trim() === "Применить"), "click", {});
+  assert.equal(page.get("State.topology.links[0].filter"), undefined, "filter cleared in the projection");
+  await tick();
+  const opCall = page.calls.find((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST");
+  assert.ok(opCall, "clear-link-filter operation sent");
 });
 
 test("cancel closes the link panel without touching the topology", async () => {
@@ -1226,18 +1389,302 @@ test("cancel closes the link panel without touching the topology", async () => {
   const panel = page.ids["link-panel"];
   fire(findBtn(panel, (b) => String(b.textContent).trim() === "Отмена"), "click", {});
   assert.ok(panel.hidden, "panel closed");
-  assert.equal(page.get("DirtyGuard.isDirty()"), false, "no changes recorded");
+  assert.equal(page.get("State.topology.links[0].filter"), undefined, "no changes recorded");
 });
 
-test("read-only (no active draft) blocks the topology save and the layout autosave", async () => {
-  const responses = {
+// «Редактировать» на только что созданной связи недоступно, пока create-link
+// не подтверждён сервером — настройка фильтра требует сохранённой топологии
+// (design spec, "Клиентский поток").
+test("editing a just-created link is unavailable until its create-link operation confirms", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], links: [] },
+  });
+  await tick();
+  fire(page.ids["tool-connect"], "click", {});
+  clickNode(page, "r1");
+  clickNode(page, "r2");
+  // Checked synchronously, before the fetch microtask settles: write() is
+  // in flight (default fake server's response is still an unresolved
+  // promise at this point), so the create-link op is genuinely pending.
+  assert.ok(page.calls.some((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST"), "create-link posted");
+  fire(page.ids["tool-select"], "click", {}); // context menu only opens in "select" mode
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+  assert.ok(edit, "menu item still present");
+  assert.ok(edit.disabled, "disabled while the create is still pending");
+  fire(edit, "click", {});
+  assert.ok(page.ids["link-panel"].hidden, "panel does not open for a pending link");
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  const edit2 = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+  assert.ok(!edit2.disabled, "edit becomes available once the create confirms");
+});
+
+test("read-only (no active draft) never persists edits: no operations POST, no local projection change", async () => {
+  const roResponses = {
     "/api/versions/current/topology": { devices: [], links: [], networks: [], sets: [], unions: [] },
     "/api/versions/current/subnets": { subnets: [] },
     "/api/versions/current/layout": {},
   };
-  const { ids, calls } = bootTopology(responses, null);
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  fire(ids["topo-save"], "click", {});
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.ok(!calls.some((c) => c.method === "PUT"), "read-only tab never writes the topology");
+  const page = bootTopology(roResponses, null);
+  await tick();
+  fire(page.ids["tool-device"], "click", {});
+  fire(page.canvas, "click", { clientX: 300, clientY: 200 });
+  page.ids["node-name-input"].value = "r3";
+  fire(page.ids["node-name-form"], "submit", {});
+  await tick();
+  assert.ok(!page.calls.some((c) => c.method === "POST"), "read-only tab never posts an operation");
+  assert.equal(page.get("State.topology.devices.length"), 0, "no local edit either — nothing to persist");
+});
+
+// --- операции: точный состав отправленных команд ---
+
+// postedOps returns every operation body posted to the operations endpoint,
+// in send order — the queue drains strictly sequentially (topology_sync.js),
+// so this is also the wire order.
+const postedOps = (page) => page.calls
+  .filter((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST")
+  .map((c) => JSON.parse(c.body));
+
+test("attaching a device to a network sends attach-network", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
+      networks: [{ name: "net1", subnets: ["a"], attach: [] }],
+    },
+  });
+  await tick();
+  fire(page.ids["tool-connect"], "click", {});
+  clickNode(page, "net1");
+  clickNode(page, "r2");
+  await tick();
+  assert.deepEqual(postedOps(page), [
+    { kind: "attach-network", networkName: "net1", attach: { device: "r2" } },
+  ]);
+});
+
+// Deleting a device together with its own link/attachment must not also
+// send delete-link/detach-network for those — the server's delete-device
+// cascade already drops them, and a redundant op would 422 ("unknown
+// link"/"not attached"). See deleteSelection's ruling in topology.js.
+test("deleting a device selected together with its link/attach sends only delete-device — no doomed follow-up ops", async () => {
+  const page = bootTopology(responses); // r1-r2 link, net1 attached to r1
+  await tick();
+  clickNode(page, "r1"); // select r1
+  // select the link and the attachment alongside r1 directly on State.selection
+  page.get(`
+    (() => {
+      const l = State.list.find((i) => i.id === "link:r1|r2").ref;
+      const a = State.list.find((i) => i.id === "attach:net1|r1").ref;
+      State.selection.add(l);
+      State.selection.add(a);
+    })()
+  `);
+  page.sandbox.confirm = () => true;
+  fire(page.ids["topo-delete"], "click", {});
+  await tick();
+  assert.deepEqual(postedOps(page), [
+    { kind: "delete-device", deviceName: "r1" },
+  ]);
+});
+
+test("deleting a link that does not involve a deleted device sends its own delete-link", async () => {
+  const page = bootTopology(responses); // r1-r2 link
+  await tick();
+  const p = page.get(`(() => {
+    const s = State.list.find((i) => i.id === "link:r1|r2").geom.segs[0];
+    return { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 };
+  })()`);
+  fire(page.canvas, "mousedown", { button: 0, clientX: p.x, clientY: p.y });
+  fire(page.doc, "mouseup", {});
+  page.sandbox.confirm = () => true;
+  fire(page.ids["topo-delete"], "click", {});
+  await tick();
+  assert.deepEqual(postedOps(page), [
+    { kind: "delete-link", link: { a: { device: "r1" }, b: { device: "r2" } } },
+  ]);
+});
+
+test("reassigning union membership sends remove-from-old then add-to-new", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
+      unions: [{ name: "a", devices: ["r1"] }, { name: "b", devices: [] }],
+    },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  const assignB = findBtn(ctxMenu(page), (b) => String(b.textContent).includes("«b»"));
+  fire(assignB, "click", {});
+  await tick();
+  assert.deepEqual(postedOps(page), [
+    { kind: "union-remove-device", unionName: "a", deviceName: "r1" },
+    { kind: "union-add-device", unionName: "b", deviceName: "r1" },
+  ]);
+});
+
+// --- stale object references in context-menu closures (a publish happens
+// between menu-open and menu-click: any node drag, or any other queued op
+// confirming, synchronously swaps State.topology with fresh clone
+// instances — see cloneSnapshot/TopologySync.publish) ---
+
+test("context menu delete survives a publish that happened after the menu opened (stale object reference)", async () => {
+  const page = bootTopology(responses); // r1-r2 link, net1 attached to r1
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.net1.x, clientY: AT.net1.y }); // menu captures net1
+  const del = findBtn(ctxMenu(page), (b) => String(b.textContent).startsWith("Удалить"));
+  assert.ok(del, "delete item present");
+
+  // A publish happens while the menu is still open: dragging r1 enqueues
+  // set-device-position, which synchronously swaps State.topology with
+  // freshly cloned instances, staling the net1 reference the menu's delete
+  // item captured at build time.
+  fire(page.canvas, "mousedown", { button: 0, clientX: AT.r1.x, clientY: AT.r1.y });
+  fire(page.doc, "mousemove", { clientX: AT.r1.x + 20, clientY: AT.r1.y + 10 });
+  fire(page.doc, "mouseup", {});
+
+  fire(del, "click", {}); // must not throw, and must actually delete net1
+  await tick();
+  assert.ok(!texts(page.get).includes("net1"), "net1 actually removed, not silently dropped");
+  assert.ok(
+    postedOps(page).some((op) => op.kind === "delete-network" && op.networkName === "net1"),
+    "delete-network op sent for net1",
+  );
+});
+
+test("context menu union assignment survives a publish that happened after the menu opened (stale target index)", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
+      unions: [{ name: "a", devices: ["r1"] }, { name: "b", devices: [] }],
+    },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  const assignB = findBtn(ctxMenu(page), (b) => String(b.textContent).includes("«b»"));
+  assert.ok(assignB, "assign-to-b item present");
+
+  // A publish happens while the menu is still open: dragging r2 enqueues
+  // set-device-position, swapping State.topology.unions with fresh
+  // instances, staling the target union object/index the menu captured.
+  fire(page.canvas, "mousedown", { button: 0, clientX: AT.r2.x, clientY: AT.r2.y });
+  fire(page.doc, "mousemove", { clientX: AT.r2.x + 20, clientY: AT.r2.y + 10 });
+  fire(page.doc, "mouseup", {});
+
+  fire(assignB, "click", {});
+  await tick();
+  assert.deepEqual(
+    postedOps(page).filter((op) => op.kind.startsWith("union-")),
+    [
+      { kind: "union-remove-device", unionName: "a", deviceName: "r1" },
+      { kind: "union-add-device", unionName: "b", deviceName: "r1" },
+    ],
+    "membership actually reassigned to b, not silently stripped from every union",
+  );
+});
+
+test("dragging a node sends one coalesced set-device-position, not one per mousemove", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  const p = AT.r1;
+  fire(page.canvas, "mousedown", { button: 0, clientX: p.x, clientY: p.y });
+  fire(page.doc, "mousemove", { clientX: p.x + 10, clientY: p.y + 5 });
+  fire(page.doc, "mousemove", { clientX: p.x + 25, clientY: p.y + 15 });
+  fire(page.doc, "mousemove", { clientX: p.x + 40, clientY: p.y + 20 });
+  fire(page.doc, "mouseup", {});
+  await tick();
+  const ops = postedOps(page);
+  assert.equal(ops.length, 1, "one operation for the whole drag, not per mousemove");
+  assert.equal(ops[0].kind, "set-device-position");
+  assert.deepEqual(ops[0].deviceName, "r1");
+  assert.deepEqual(ops[0].position, { x: 40 + 40, y: 40 + 20 }); // r1 starts at (40,40)
+});
+
+test("two quick drags queued before the first write resolves coalesce into a single trailing write", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  const p = AT.r1;
+  // First drag: enqueues and starts sending immediately (queue empties into
+  // "sending" before this synchronous block ends).
+  fire(page.canvas, "mousedown", { button: 0, clientX: p.x, clientY: p.y });
+  fire(page.doc, "mousemove", { clientX: p.x + 10, clientY: p.y + 10 });
+  fire(page.doc, "mouseup", {});
+  // Second and third drags happen before any microtask runs: both queue
+  // while the first write is still in flight, so moveKey coalescing
+  // (topology_sync.js) collapses them into one trailing operation.
+  fire(page.canvas, "mousedown", { button: 0, clientX: p.x + 10, clientY: p.y + 10 });
+  fire(page.doc, "mousemove", { clientX: p.x + 20, clientY: p.y + 15 });
+  fire(page.doc, "mouseup", {});
+  fire(page.canvas, "mousedown", { button: 0, clientX: p.x + 20, clientY: p.y + 15 });
+  fire(page.doc, "mousemove", { clientX: p.x + 35, clientY: p.y + 25 });
+  fire(page.doc, "mouseup", {});
+  await tick();
+  const ops = postedOps(page);
+  assert.equal(ops.length, 2, "first drag sends immediately, the next two coalesce into one trailing write");
+  assert.equal(ops[1].position.x, 40 + 35, "final write carries the last queued position");
+});
+
+test("waypoint drag sends one coalesced set-link-waypoints, not one per mousemove", async () => {
+  const page = bootTopology(responses);
+  await tick();
+  fire(page.canvas, "dblclick", { clientX: LINK_MID.x, clientY: LINK_MID.y });
+  await tick(); // the addWaypoint op's own write settles before dragging starts
+  const before = postedOps(page).length; // addWaypoint already sent its own set-link-waypoints
+  fire(page.canvas, "mousedown", { button: 0, clientX: LINK_MID.x, clientY: LINK_MID.y });
+  fire(page.doc, "mousemove", { clientX: LINK_MID.x, clientY: LINK_MID.y - 10 });
+  fire(page.doc, "mousemove", { clientX: LINK_MID.x, clientY: LINK_MID.y - 20 });
+  fire(page.doc, "mousemove", { clientX: LINK_MID.x, clientY: LINK_MID.y - 30 });
+  fire(page.doc, "mouseup", {});
+  await tick();
+  const ops = postedOps(page).slice(before);
+  assert.equal(ops.length, 1, "drag itself sends one operation, not one per mousemove");
+  assert.equal(ops[0].kind, "set-link-waypoints");
+  assert.deepEqual(ops[0].link, { a: { device: "r1" }, b: { device: "r2" } });
+});
+
+// Ответ сервера — канонический источник истины: даже если клиент отправлял
+// связи в одном порядке, ответ с иным (каноническим) порядком должен
+// полностью заменить локальную проекцию, а не просто дополнить её — иначе
+// массивный индекс (a не канонический ключ) снова стал бы нестабильной
+// идентичностью связи (design spec).
+test("the server's canonical response order replaces the client's local optimistic append order", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
+      devices: [...responses["/api/drafts/d1/topology"].devices, { name: "r3", kind: "router" }],
+    },
+    "/api/drafts/d1/layout": { devices: { r1: { x: 40, y: 40 }, r2: { x: 240, y: 40 }, r3: { x: 440, y: 40 } }, networks: {}, links: {} },
+    "/api/drafts/d1/topology/operations": (opts) => {
+      const op = JSON.parse(opts.body);
+      // Client applies create-link locally by appending; the server instead
+      // hands back the new link FIRST (its own canonical sort) — the
+      // confirmed order must win over the local append order.
+      return {
+        topology: {
+          devices: [{ name: "r1", kind: "router" }, { name: "r2", kind: "router" }, { name: "r3", kind: "router" }],
+          links: [op.link, { a: { device: "r1" }, b: { device: "r2" } }],
+          networks: [{ name: "net1", subnets: ["a"], attach: [{ device: "r1" }] }],
+          sets: [], unions: [],
+        },
+        layout: { devices: { r1: { x: 40, y: 40 }, r2: { x: 240, y: 40 }, r3: { x: 440, y: 40 } }, networks: {}, links: {}, camera: null },
+      };
+    },
+  });
+  await tick();
+  fire(page.ids["tool-connect"], "click", {});
+  fire(page.canvas, "mousedown", { button: 0, clientX: 510, clientY: 70 }); // r3 center: box (440,40)+140x60
+  fire(page.doc, "mouseup", {});
+  fire(page.canvas, "mousedown", { button: 0, clientX: AT.r2.x, clientY: AT.r2.y });
+  fire(page.doc, "mouseup", {});
+  await tick();
+  assert.deepEqual(
+    page.get(`JSON.stringify(State.topology.links.map((l) => l.a.device + "-" + l.b.device))`),
+    JSON.stringify(["r3-r2", "r1-r2"]),
+    "confirmed order matches the server's response, not the client's local append order",
+  );
 });

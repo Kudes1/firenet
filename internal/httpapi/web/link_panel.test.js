@@ -102,17 +102,14 @@ const plainLink = { a: { device: "r1" }, b: { device: "r2" } };
 const filteredLink = { a: { device: "r1" }, b: { device: "r2" }, filter: { aExports: ["office"], bExports: [] } };
 
 function showPanel(page, link, opts = {}) {
-  const applied = [];
-  const fetched = [];
   page.get(`globalThis.__applied = []`);
   page.get(`globalThis.__fetched = []`);
   page.get(`
     LinkPanel.show(
       ${JSON.stringify(link)},
-      ${opts.index ?? 0},
       {
         subnets: ${JSON.stringify(subnets)},
-        fetchExports: (i, side) => { globalThis.__fetched.push([i, side]); return Promise.resolve(${JSON.stringify(opts.candidates ?? { a: [{ name: "guests", cidr: "10.0.1.0/24" }], b: [] })}[side]); },
+        fetchExports: (side) => { globalThis.__fetched.push(side); return Promise.resolve(${JSON.stringify(opts.candidates ?? { a: [{ name: "guests", cidr: "10.0.1.0/24" }], b: [] })}[side]); },
         onApply: (filter) => globalThis.__applied.push(filter),
       },
       { x: 100, y: 50 },
@@ -141,7 +138,7 @@ test("show opens an already-filtered link with export/import columns and fetches
   const { fetched } = showPanel(page, filteredLink);
   await Promise.resolve();
   assert.ok(findBtn(page.box, "Вернуть обычную"), "offers to revert to a plain link");
-  assert.deepEqual(fetched().sort(), [[0, "a"], [0, "b"]], "loads candidates for both sides");
+  assert.deepEqual(fetched().sort(), ["a", "b"], "loads candidates for both sides");
   assert.ok(texts(page.box).includes("office"), "existing export shown");
 });
 
@@ -151,7 +148,7 @@ test("toggling to filtered starts with empty exports and loads candidates", asyn
   fire(findBtn(page.box, "Сделать фильтрованной"), "click");
   await Promise.resolve();
   assert.ok(findBtn(page.box, "Вернуть обычную"), "now shows the revert button");
-  assert.deepEqual(fetched().sort(), [[0, "a"], [0, "b"]], "candidates fetched on toggle");
+  assert.deepEqual(fetched().sort(), ["a", "b"], "candidates fetched on toggle");
 });
 
 test("toggling back to plain drops the filter and export columns", async () => {
@@ -221,7 +218,7 @@ test("show clamps the panel inside the canvas bounds", () => {
   const page = boot();
   page.get(`globalThis.__applied = []`);
   page.get(`
-    LinkPanel.show(${JSON.stringify(plainLink)}, 0,
+    LinkPanel.show(${JSON.stringify(plainLink)},
       { subnets: [], fetchExports: () => Promise.resolve([]), onApply: () => {} },
       { x: 5000, y: -50 }, { w: 1200, h: 800 })
   `);
@@ -251,7 +248,7 @@ test("dragging a panel clamped to the canvas edge tracks the pointer immediately
   const page = boot();
   page.get(`globalThis.__applied = []`);
   page.get(`
-    LinkPanel.show(${JSON.stringify(plainLink)}, 0,
+    LinkPanel.show(${JSON.stringify(plainLink)},
       { subnets: [], fetchExports: () => Promise.resolve([]), onApply: () => {} },
       { x: 1000, y: 50 }, { w: 1200, h: 800 })
   `);
@@ -291,7 +288,7 @@ test("failed candidate fetch clears candidates and reports via showBanner", asyn
   const page = boot();
   page.get(`globalThis.__applied = []`);
   page.get(`
-    LinkPanel.show(${JSON.stringify(filteredLink)}, 0,
+    LinkPanel.show(${JSON.stringify(filteredLink)},
       { subnets: ${JSON.stringify(subnets)}, fetchExports: () => Promise.reject(new Error("boom")), onApply: () => {} },
       { x: 0, y: 0 }, { w: 1200, h: 800 })
   `);
