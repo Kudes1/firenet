@@ -17,7 +17,7 @@ document.addEventListener("alpine:init", () => {
 
     async init() {
       try {
-        const [doc, topo] = await Promise.all([Api.get("/api/subnets"), Api.get("/api/topology")]);
+        const [doc, topo] = await Promise.all([Api.get(apiPath("subnets")), Api.get(apiPath("topology"))]);
         const owner = {};
         (topo.networks || []).forEach((n) => (n.subnets || []).forEach((s) => (owner[s] = n.name)));
         this.rows = (doc.subnets || []).map((s) => ({ name: s.name, cidr: s.cidr, description: s.description || "", owner: owner[s.name] || "" }));
@@ -97,9 +97,10 @@ document.addEventListener("alpine:init", () => {
 
     async persist(next) {
       try {
-        const doc = await Api.put("/api/subnets", { subnets: next.map(({ name, cidr, description }) => ({ name, cidr, ...(description ? { description } : {}) })) });
+        assertEditable();
+        const doc = await Api.put(apiPath("subnets"), { subnets: next.map(({ name, cidr, description }) => ({ name, cidr, ...(description ? { description } : {}) })) });
         const owner = {};
-        const topo = await Api.get("/api/topology");
+        const topo = await Api.get(apiPath("topology"));
         (topo.networks || []).forEach((n) => (n.subnets || []).forEach((s) => (owner[s] = n.name)));
         this.rows = doc.subnets.map((s) => ({ name: s.name, cidr: s.cidr, description: s.description || "", owner: owner[s.name] || "" }));
         showBanner("Подсети сохранены", "ok");

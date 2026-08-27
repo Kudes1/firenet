@@ -89,7 +89,8 @@ const topoFixture = {
   networks: [{ name: "office", subnets: ["a"], attach: [{ device: "r1" }] }],
 };
 
-function bootDiagnose(responses, savedStore) {
+function bootDiagnose(responses, savedStore, draftID = "d1") {
+  const draftStore = draftID ? { "firenet-draft-id": draftID } : {};
   const ctx = makeCtx();
   const canvas = Object.assign(makeEl("canvas"), {
     clientWidth: 1200,
@@ -130,9 +131,9 @@ function bootDiagnose(responses, savedStore) {
       removeItem: (k) => { delete store[k]; },
     },
     sessionStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = String(v); },
-      removeItem: (k) => { delete store[k]; },
+      getItem: (k) => (k in draftStore ? draftStore[k] : null),
+      setItem: (k, v) => { draftStore[k] = v; },
+      removeItem: (k) => { delete draftStore[k]; },
     },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
@@ -179,9 +180,9 @@ function bootDiagnose(responses, savedStore) {
 }
 
 const responses = {
-  "/api/topology": topoFixture,
-  "/api/subnets": { subnets: [{ name: "a", cidr: "10.0.0.0/24" }] },
-  "/api/layout": {},
+  "/api/drafts/d1/topology": topoFixture,
+  "/api/drafts/d1/subnets": { subnets: [{ name: "a", cidr: "10.0.0.0/24" }] },
+  "/api/drafts/d1/layout": {},
 };
 
 const sampleReport = {
@@ -223,7 +224,7 @@ test("boot builds the canvas display list and draws a frame", async () => {
 test("wheel zooms around the cursor", async () => {
   const { canvas, frames, get } = bootDiagnose({
     ...responses,
-    "/api/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
+    "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
   });
   await tick();
   await frames(1);
@@ -284,13 +285,13 @@ test("camera changes are not persisted to /api/layout", async () => {
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
   await frames(1);
   fire(doc, "mouseup", {});
-  assert.ok(!calls.some((c) => c.path === "/api/layout" && c.method === "PUT"), "read-only page never writes layout");
+  assert.ok(!calls.some((c) => c.path === "/api/drafts/d1/layout" && c.method === "PUT"), "read-only page never writes layout");
 });
 
 test("map shows subnet names, network labels and union frames", async () => {
   const { frames, get } = bootDiagnose({
     ...responses,
-    "/api/topology": {
+    "/api/drafts/d1/topology": {
       devices: topoFixture.devices,
       links: topoFixture.links,
       networks: topoFixture.networks,
@@ -437,7 +438,7 @@ const switchedReport = {
 };
 
 test("highlight covers the full path: networks, switches, links and attaches", async () => {
-  const { get, frames } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { get, frames } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
@@ -477,7 +478,7 @@ const collidingReport = {
 };
 
 test("a network and a router sharing one name still light the switch between them", async () => {
-  const { get, frames } = bootDiagnose({ ...responses, "/api/topology": collidingTopo });
+  const { get, frames } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": collidingTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(collidingReport)})`);
@@ -491,7 +492,7 @@ test("a network and a router sharing one name still light the switch between the
 });
 
 test("form submit posts to /api/diagnose and renders the report", async () => {
-  const { ids, calls } = bootDiagnose({ ...responses, "/api/diagnose": sampleReport });
+  const { ids, calls } = bootDiagnose({ ...responses, "/api/drafts/d1/diagnose": sampleReport });
   await tick();
   // form inputs are resolved by id at submit time; seed the registry
   for (const id of ["diag-src", "diag-dst", "diag-proto", "diag-dstports"]) ids[id] ||= makeEl("input");
@@ -501,7 +502,7 @@ test("form submit posts to /api/diagnose and renders the report", async () => {
   ids["diag-dstports"].value = "443, 8080";
   fire(ids["diag-form"], "submit", {});
   await tick();
-  const post = calls.find((c) => c.path === "/api/diagnose");
+  const post = calls.find((c) => c.path === "/api/drafts/d1/diagnose");
   assert.ok(post && post.method === "POST");
   assert.deepEqual(post.body, { src: "10.0.0.5", dst: "10.0.1.7", proto: "tcp", dstPorts: ["443", "8080"] });
   const cards = ids["diag-paths"].children.filter((c) => c.className === "diag-path");
@@ -574,7 +575,7 @@ const denyReport = {
 };
 
 test("expandFlow colors the route green up to the denying router", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
   const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
@@ -586,7 +587,7 @@ test("expandFlow colors the route green up to the denying router", async () => {
 });
 
 test("allowed path lights the whole route including destination", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
   const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
@@ -599,7 +600,7 @@ test("allowed path lights the whole route including destination", async () => {
 test("a denying router never turns green, even via another allowed path", async () => {
   const rep = JSON.parse(JSON.stringify(denyReport));
   rep.paths.push(JSON.parse(JSON.stringify(switchedReport.paths[0])));
-  const { get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
   const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
@@ -610,7 +611,7 @@ test("a denying router never turns green, even via another allowed path", async 
 // The drop happens ON the denying router, so the hop leading into it has
 // been fully traversed and stays green; only segments past it turn red.
 test("hop into the denying router stays green, segments beyond it turn red", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
   const mark = get("Diagnose.flowMark(Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology))");
@@ -623,7 +624,7 @@ test("hop into the denying router stays green, segments beyond it turn red", asy
 
 // переход потока анимируется через flowFade: старт прозрачный, финал — полный
 test("report flow fades in over animated frames", async () => {
-  const { get, frames } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { get, frames } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
@@ -633,7 +634,7 @@ test("report flow fades in over animated frames", async () => {
 });
 
 test("map paints flow segments and marks the deny point with a tooltip", async () => {
-  const { get, frames } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { get, frames } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
@@ -655,7 +656,7 @@ test("map paints flow segments and marks the deny point with a tooltip", async (
 });
 
 test("hovering the denying router shows a delayed tooltip", async () => {
-  const { canvas, ids, frames, get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { canvas, ids, frames, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
@@ -680,7 +681,7 @@ test("hovering the denying router shows a delayed tooltip", async () => {
 });
 
 test("reset toolbar button is disabled until a diagnosis produces a result", async () => {
-  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   assert.equal(ids["diag-tool-reset"].disabled, true, "nothing to reset yet");
@@ -691,7 +692,7 @@ test("reset toolbar button is disabled until a diagnosis produces a result", asy
 });
 
 test("reset button clears the report and the map highlight", async () => {
-  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
@@ -708,7 +709,7 @@ test("reset button clears the report and the map highlight", async () => {
 });
 
 test("reset during the flow fade-in does not get overwritten by the stale animation", async () => {
-  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/topology": switchedTopo });
+  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
@@ -881,9 +882,9 @@ const spreadTopo = {
 };
 const spreadResponses = {
   ...responses,
-  "/api/topology": spreadTopo,
-  "/api/subnets": spreadSubnets,
-  "/api/diagnose": (body) => {
+  "/api/drafts/d1/topology": spreadTopo,
+  "/api/drafts/d1/subnets": spreadSubnets,
+  "/api/drafts/d1/diagnose": (body) => {
     if (body.dst === "10.0.1.0") {
       return {
         srcSubnet: "main", dstSubnet: "office-net", note: "", paths: [{
@@ -934,7 +935,7 @@ test("spread form queries every other subnet and highlights what's reachable", a
   ids["spread-src"].value = "main";
   fire(ids["spread-form"], "submit", {});
   await tick();
-  const posts = calls.filter((c) => c.path === "/api/diagnose");
+  const posts = calls.filter((c) => c.path === "/api/drafts/d1/diagnose");
   assert.equal(posts.length, 2, "one call per non-source subnet");
   assert.deepEqual(
     posts.map((c) => c.body).sort((a, b) => a.dst.localeCompare(b.dst)),

@@ -549,7 +549,7 @@ const Diagnose = (() => {
     ev.preventDefault();
     const ports = document.getElementById("diag-dstports").value.split(",").map((s) => s.trim()).filter(Boolean);
     try {
-      const report = await Api.post("/api/diagnose", {
+      const report = await Api.post(apiPath("diagnose"), {
         src: document.getElementById("diag-src").value.trim(),
         dst: document.getElementById("diag-dst").value.trim(),
         proto: document.getElementById("diag-proto").value,
@@ -598,7 +598,7 @@ const Diagnose = (() => {
     const pairs = sources.flatMap((src) => candidates.map((dstName) => ({ src, dstName })));
     try {
       const reports = await Promise.all(
-        pairs.map(({ src, dstName }) => Api.post("/api/diagnose", { src: src.ip, dst: dstIp(dstName), proto: "", dstPorts: [] })),
+        pairs.map(({ src, dstName }) => Api.post(apiPath("diagnose"), { src: src.ip, dst: dstIp(dstName), proto: "", dstPorts: [] })),
       );
       const flows = reports.map((r) => expandFlow(r, state.topology)).filter(Boolean);
       const merged = mergeFlows(flows);
@@ -648,7 +648,7 @@ const Diagnose = (() => {
   async function boot() {
     try {
       const [topo, subnetsDoc, layout] = await Promise.all([
-        Api.get("/api/topology"), Api.get("/api/subnets"), Api.get("/api/layout"),
+        Api.get(apiPath("topology")), Api.get(apiPath("subnets")), Api.get(apiPath("layout")),
       ]);
       state.topology = topo;
       state.subnets = subnetsDoc.subnets || [];
