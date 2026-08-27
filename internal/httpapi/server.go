@@ -48,6 +48,7 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	apiMux.Handle("POST /api/drafts/{id}/confirm", auth.RequireAdmin(http.HandlerFunc(h.confirmDraft)))
 	apiMux.HandleFunc("GET /api/drafts/{id}/topology", h.getDraftTopology)
 	apiMux.HandleFunc("PUT /api/drafts/{id}/topology", h.putDraftTopology)
+	apiMux.HandleFunc("POST /api/drafts/{id}/topology/operations", h.postDraftTopologyOperation)
 	apiMux.HandleFunc("GET /api/drafts/{id}/subnets", h.getDraftSubnets)
 	apiMux.HandleFunc("PUT /api/drafts/{id}/subnets", h.putDraftSubnets)
 	apiMux.HandleFunc("GET /api/drafts/{id}/rules", h.getDraftRules)

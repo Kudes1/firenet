@@ -221,6 +221,68 @@ func (h *handlers) putDraftTopology(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, topo)
 }
 
+// editorSnapshot is the canonical topology+layout returned after a
+// topology operation applies. It always reflects the draft's
+// storage-sorted state (pgstore.fromEntities' order), so the editor's
+// canvas and link identities match what's actually persisted without a
+// separate reload.
+type editorSnapshot struct {
+	Topology TopologyDoc `json:"topology"`
+	Layout   LayoutDoc   `json:"layout"`
+}
+
+// postDraftTopologyOperation applies one topologyOperation to the draft's
+// current document and, on success, returns the resulting canonical
+// topology+layout snapshot. The operation is validated the same way a
+// full PUT topology would be (deletion guard, then topology.Validate via
+// loadTopologyDoc) before it's persisted, so a partially-applied or
+// invalid draft is never written.
+func (h *handlers) postDraftTopologyOperation(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	var op topologyOperation
+	if err := json.NewDecoder(r.Body).Decode(&op); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
+		return
+	}
+
+	id := r.PathValue("id")
+	prev, revision, err := h.projects.ReadDraft(r.Context(), id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	next, err := applyTopologyOperation(prev, op)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if errs := deletionErrorsFromDocs(prev, next); len(errs) > 0 {
+		writeError(w, http.StatusConflict, errors.New(strings.Join(errs, "; ")))
+		return
+	}
+	if _, err := loadTopologyDoc(next); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+
+	if _, err := h.projects.WriteDraft(r.Context(), id, next, requestRevision(r, revision)); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	// Re-read rather than trust next: the store applies its own canonical
+	// sort, and this also reports the true post-write revision even if
+	// another write raced in between.
+	saved, savedRevision, err := h.projects.ReadDraft(r.Context(), id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.Header().Set("X-Draft-Revision", savedRevision)
+	writeJSON(w, http.StatusOK, editorSnapshot{Topology: saved.Topology, Layout: saved.Layout})
+}
+
 // getLinkExports serves the local export candidates for one side of a link.
 // The edited link and every other filtered link are excluded, so a route
 // learned through one filter cannot be re-exported through another.
@@ -247,12 +309,36 @@ func (h *handlers) getCurrentLinkExports(w http.ResponseWriter, r *http.Request)
 
 func (h *handlers) writeLinkExports(w http.ResponseWriter, r *http.Request, doc projectdoc.ProjectDoc) {
 	q := r.URL.Query()
-	idx, err := strconv.Atoi(q.Get("link"))
 	side := q.Get("side")
-	if err != nil || idx < 0 || (side != "a" && side != "b") {
+	if side != "a" && side != "b" {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("invalid link index or side"))
 		return
 	}
+
+	// The link candidates flow (topology operations) identifies its link
+	// by canonical endpoint pair; /ui/links still identifies it by array
+	// index. Resolve by pair when both a and b are given, otherwise fall
+	// back to the legacy index so /ui/links keeps working unmodified.
+	a, hasA := q["a"]
+	b, hasB := q["b"]
+	byPair := hasA && hasB
+
+	var idx int
+	if byPair {
+		idx = linkIndex(doc.Topology.Links, a[0], b[0])
+		if idx < 0 {
+			writeError(w, http.StatusNotFound, fmt.Errorf("no link between %q and %q", a[0], b[0]))
+			return
+		}
+	} else {
+		var err error
+		idx, err = strconv.Atoi(q.Get("link"))
+		if err != nil || idx < 0 {
+			writeError(w, http.StatusUnprocessableEntity, errors.New("invalid link index or side"))
+			return
+		}
+	}
+
 	topo, err := loadTopologyDoc(doc)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
