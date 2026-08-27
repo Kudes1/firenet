@@ -23,6 +23,197 @@ function normalizeTopology(topo) {
   };
 }
 
+// normalizeLayout/normalizeCamera mirror normalizeTopology for the layout
+// half of an editor snapshot ({topology, layout} — see topology_sync.js and
+// docs/superpowers/specs/2026-08-27-topology-draft-sync-design.md's
+// "Клиентский поток"): every GET/reload/operation response is coerced into
+// the same shape State.layout/State.camera already used, null collections
+// included.
+function normalizeLayout(layout) {
+  layout ||= {};
+  return {
+    devices: layout.devices || {},
+    networks: layout.networks || layout.subnets || {},
+    links: layout.links || {},
+    camera: normalizeCamera(layout.camera),
+  };
+}
+
+function normalizeCamera(camera) {
+  return camera && camera.z > 0 ? { ...Camera.create(), ...camera } : Camera.create();
+}
+
+// --- applyTopologyOp: client-side mirror of applyTopologyOperation ---
+// (internal/httpapi/topology_operations.go). Pure: never mutates snapshot,
+// always returns a new {topology, layout}. This is TopologySync's `apply`
+// reducer (see topology_sync.js) — it projects every not-yet-confirmed
+// operation onto the last confirmed server snapshot so the canvas responds
+// instantly, without waiting for the round trip. It does not validate (no
+// duplicate/self-loop/reference checks — that stays server-only); an
+// unknown/malformed op is a no-op here since the server would have
+// rejected it before this ever runs on a confirmed response.
+//
+// Field names match topologyOperation's JSON tags exactly (dto.go); the
+// switch is structured to read side by side with the Go one.
+
+function canonicalLinkPair(a, b) { return a > b ? [b, a] : [a, b]; }
+function layoutLinkKey(a, b) { return canonicalLinkPair(a, b).join("|"); }
+function linkFind(links, a, b) {
+  const [x, y] = canonicalLinkPair(a, b);
+  return links.findIndex((l) => canonicalLinkPair(l.a.device, l.b.device).join("|") === `${x}|${y}`);
+}
+const removeString = (arr, s) => (arr || []).filter((v) => v !== s);
+
+// cloneSnapshot deep-copies the parts of {topology, layout} an operation
+// can mutate, so applying one never aliases the caller's arrays/objects —
+// same discipline as topology_operations.go's cloneProjectDoc.
+function cloneSnapshot(snapshot) {
+  const topology = snapshot.topology;
+  const layout = snapshot.layout;
+  return {
+    topology: {
+      ...topology,
+      devices: [...topology.devices],
+      links: [...topology.links],
+      networks: topology.networks.map((n) => ({ ...n, subnets: [...(n.subnets || [])], attach: [...(n.attach || [])] })),
+      sets: topology.sets ? [...topology.sets] : [],
+      unions: (topology.unions || []).map((u) => ({ ...u, devices: [...(u.devices || [])], networks: [...(u.networks || [])] })),
+    },
+    layout: {
+      devices: { ...layout.devices },
+      networks: { ...layout.networks },
+      links: Object.fromEntries(Object.entries(layout.links || {}).map(([k, v]) => [k, [...v]])),
+      camera: layout.camera ? { ...layout.camera } : layout.camera,
+    },
+  };
+}
+
+function applyTopologyOp(snapshot, op) {
+  const next = cloneSnapshot(snapshot);
+  const topo = next.topology;
+  const layout = next.layout;
+
+  switch (op.kind) {
+    case "create-device":
+      topo.devices.push(op.device);
+      break;
+
+    case "delete-device": {
+      topo.devices = topo.devices.filter((d) => d.name !== op.deviceName);
+      topo.links = topo.links.filter((l) => {
+        if (l.a.device === op.deviceName || l.b.device === op.deviceName) {
+          delete layout.links[layoutLinkKey(l.a.device, l.b.device)];
+          return false;
+        }
+        return true;
+      });
+      topo.networks = topo.networks.map((n) => ({ ...n, attach: n.attach.filter((a) => a.device !== op.deviceName) }));
+      topo.unions = topo.unions.map((u) => ({ ...u, devices: removeString(u.devices, op.deviceName) }));
+      delete layout.devices[op.deviceName];
+      break;
+    }
+
+    case "create-network":
+      topo.networks.push(op.network);
+      break;
+
+    case "delete-network":
+      topo.networks = topo.networks.filter((n) => n.name !== op.networkName);
+      topo.unions = topo.unions.map((u) => ({ ...u, networks: removeString(u.networks, op.networkName) }));
+      delete layout.networks[op.networkName];
+      break;
+
+    case "create-link":
+      topo.links.push(op.link);
+      break;
+
+    case "delete-link": {
+      const i = linkFind(topo.links, op.link.a.device, op.link.b.device);
+      if (i < 0) break;
+      delete layout.links[layoutLinkKey(op.link.a.device, op.link.b.device)];
+      topo.links.splice(i, 1);
+      break;
+    }
+
+    case "set-link-filter": {
+      const i = linkFind(topo.links, op.link.a.device, op.link.b.device);
+      if (i >= 0) topo.links[i] = { ...topo.links[i], filter: op.filter };
+      break;
+    }
+
+    case "clear-link-filter": {
+      const i = linkFind(topo.links, op.link.a.device, op.link.b.device);
+      if (i >= 0) { const { filter, ...rest } = topo.links[i]; topo.links[i] = rest; }
+      break;
+    }
+
+    case "create-union":
+      topo.unions.push(op.union);
+      break;
+
+    case "delete-union":
+      topo.unions = topo.unions.filter((u) => u.name !== op.unionName);
+      break;
+
+    case "attach-network": {
+      const i = topo.networks.findIndex((n) => n.name === op.networkName);
+      if (i >= 0) topo.networks[i] = { ...topo.networks[i], attach: [...topo.networks[i].attach, op.attach] };
+      break;
+    }
+
+    case "detach-network": {
+      const i = topo.networks.findIndex((n) => n.name === op.networkName);
+      if (i >= 0) topo.networks[i] = { ...topo.networks[i], attach: topo.networks[i].attach.filter((a) => a.device !== op.attach.device) };
+      break;
+    }
+
+    case "union-add-device": {
+      const i = topo.unions.findIndex((u) => u.name === op.unionName);
+      if (i >= 0) topo.unions[i] = { ...topo.unions[i], devices: [...topo.unions[i].devices, op.deviceName] };
+      break;
+    }
+
+    case "union-remove-device": {
+      const i = topo.unions.findIndex((u) => u.name === op.unionName);
+      if (i >= 0) topo.unions[i] = { ...topo.unions[i], devices: removeString(topo.unions[i].devices, op.deviceName) };
+      break;
+    }
+
+    case "union-add-network": {
+      const i = topo.unions.findIndex((u) => u.name === op.unionName);
+      if (i >= 0) topo.unions[i] = { ...topo.unions[i], networks: [...topo.unions[i].networks, op.networkName] };
+      break;
+    }
+
+    case "union-remove-network": {
+      const i = topo.unions.findIndex((u) => u.name === op.unionName);
+      if (i >= 0) topo.unions[i] = { ...topo.unions[i], networks: removeString(topo.unions[i].networks, op.networkName) };
+      break;
+    }
+
+    case "set-device-position":
+      layout.devices[op.deviceName] = op.position;
+      break;
+
+    case "set-network-position":
+      layout.networks[op.networkName] = op.position;
+      break;
+
+    case "set-link-waypoints":
+      layout.links[layoutLinkKey(op.link.a.device, op.link.b.device)] = op.waypoints;
+      break;
+
+    case "set-camera":
+      layout.camera = op.camera;
+      break;
+
+    default:
+      break;
+  }
+
+  return next;
+}
+
 // Topology renders devices/links/networks on a canvas the user builds
 // the network on directly. A network is one L2 segment: click a device,
 // then a network node, to attach the segment to that device. Subnet
@@ -33,7 +224,7 @@ const Topology = (() => {
   let theme = null; // CanvasTheme страницы
   let view = null; // CanvasView поверх #topo-canvas
   let pending = null; // {device|network} — узел, ожидающий пару в режиме connect
-  let saveLayoutTimer = null;
+  let sync = null; // TopologySync — очередь операций поверх подтверждённого снимка черновика
   let previewWire = null; // item оверлея: связь в процессе connect
   let marqueeRect = null; // рамка выделения в мировых координатах
   let popoverCreate = null; // callback awaiting a name from the popover
@@ -85,49 +276,63 @@ const Topology = (() => {
     NetInfo.show(n, State.subnets, Camera.worldToScreen(State.camera, pos.x + NET_W, pos.y), { w: r.width, h: r.height });
   }
 
+  // isCreatePending — true while a create-{device,network,link} operation
+  // for this exact target hasn't been confirmed by the server yet
+  // (TopologySync.pending() lists in-flight + queued ops). Actions that
+  // need a persisted topology (e.g. configuring a filter on a just-created
+  // link) stay unavailable until the create round-trips — the design spec
+  // calls this out explicitly for link filters.
+  function isLinkCreatePending(a, b) {
+    return sync.pending().some((op) => op.kind === "create-link"
+      && canonicalLinkPair(op.link.a.device, op.link.b.device).join("|") === canonicalLinkPair(a, b).join("|"));
+  }
+
   // openLinkPanel открывает плавающую панель редактирования фильтра связи
-  // в экранной точке at (правый клик, из контекстного меню). Правки идут в
-  // State.topology.links в памяти, как и остальные правки канвы — сохранение
-  // общей кнопкой «Сохранить», не отдельным запросом.
+  // в экранной точке at (правый клик, из контекстного меню → «Редактировать»,
+  // недоступно пока связь ещё не подтверждена сервером — см.
+  // isLinkCreatePending). Правки применяются немедленно операцией через
+  // sync.enqueue, не общей кнопкой «Сохранить».
   function openLinkPanel(link, at) {
-    const index = State.topology.links.indexOf(link);
-    if (index < 0) return;
+    if (isLinkCreatePending(link.a.device, link.b.device)) return;
     const r = canvas().getBoundingClientRect();
-    LinkPanel.show(link, index, {
+    LinkPanel.show(link, {
       subnets: State.subnets,
-      fetchExports: (i, side) => Api.get(apiPath(`link-exports?link=${i}&side=${side}`)).then((res) => res.entities || []),
+      fetchExports: (side) => Api.get(apiPath(`link-exports?a=${link.a.device}&b=${link.b.device}&side=${side}`)).then((res) => res.entities || []),
       onApply: (filter) => {
-        const { filter: _drop, ...rest } = link;
-        State.topology.links[index] = filter ? { ...rest, filter } : rest;
-        render();
+        enqueueOp({
+          kind: filter ? "set-link-filter" : "clear-link-filter",
+          link: { a: { device: link.a.device }, b: { device: link.b.device } },
+          ...(filter ? { filter } : {}),
+        });
       },
     }, at, { w: r.width, h: r.height });
   }
 
-  function scheduleLayoutSave() {
-    clearTimeout(saveLayoutTimer);
-    saveLayoutTimer = setTimeout(() => {
-      try {
-        assertEditable();
-      } catch {
-        return; // read-only tab: nothing to persist
-      }
-      Api.put(apiPath("layout"), { ...State.layout, camera: State.camera }).catch(() => {
-        /* layout is best-effort presentation state */
-      });
-    }, 400);
+  // enqueueOp is the one gate every canvas edit passes through: a read-only
+  // tab (no active draft) never talks to the operations endpoint, matching
+  // assertEditable's use everywhere else project data is written.
+  function enqueueOp(op) {
+    try {
+      assertEditable();
+    } catch {
+      return; // read-only tab: nothing to persist
+    }
+    sync.enqueue(op);
   }
 
   // setupCamera wires wheel zoom (anchored at the cursor) and pan by
-  // middle/right-button drag via the shared CameraControls; both persist
-  // through the debounced layout save. Left button stays free for selection
-  // and node dragging (setupSelection).
+  // middle/right-button drag via the shared CameraControls. Every camera
+  // change enqueues a "set-camera" op; TopologySync coalesces same-target
+  // moves queued before the first one sends (see topology_sync.js's
+  // moveKey), so a fast pan/zoom collapses to one write per round trip
+  // instead of flooding the operations endpoint. Left button stays free
+  // for selection and node dragging (setupSelection).
   function setupCamera() {
     camControls = CameraControls.wire(canvas(), {
       getCam: () => State.camera,
       setCam: (c) => { State.camera = c; applyCamera(); },
       buttons: [1, 2],
-      onChange: scheduleLayoutSave,
+      onChange: () => enqueueOp({ kind: "set-camera", camera: State.camera }),
       onDragEnd: (moved, button) => {
         if (button === 2 && !moved && ctxPending) showContextMenu(ctxPending.at, ctxPending.items);
         ctxPending = null;
@@ -197,14 +402,24 @@ const Topology = (() => {
     menu.style.top = at.y + "px";
   }
 
-  // setUnion перемещает объект в объединение idx (или из всех объединений при idx < 0).
+  // setUnion перемещает объект в объединение idx (или из всех объединений
+  // при idx < 0): по одной операции union-remove-* на каждое объединение,
+  // где name состоит сейчас (кроме целевого), затем union-add-* на целевое,
+  // если он ещё туда не входит. Членство читается из текущего State.topology
+  // ДО постановки операций в очередь — enqueueOp может синхронно заменить
+  // State.topology (см. TopologySync.onState), так что computed-once список
+  // защищает от порчи середины цикла.
   function setUnion(name, key, idx) {
-    State.topology.unions.forEach((s) => { s[key] = (s[key] || []).filter((n) => n !== name); });
-    if (idx >= 0) {
-      const s = State.topology.unions[idx];
-      s[key] = [...(s[key] || []), name];
-    }
-    render();
+    const idField = key === "devices" ? "deviceName" : "networkName";
+    const removeKind = key === "devices" ? "union-remove-device" : "union-remove-network";
+    const addKind = key === "devices" ? "union-add-device" : "union-add-network";
+    const target = idx >= 0 ? State.topology.unions[idx] : null;
+    const alreadyInTarget = !!target && (target[key] || []).includes(name);
+    const removeFrom = State.topology.unions
+      .filter((s) => (s[key] || []).includes(name) && (!target || s.name !== target.name))
+      .map((s) => s.name);
+    removeFrom.forEach((unionName) => enqueueOp({ kind: removeKind, unionName, [idField]: name }));
+    if (target && !alreadyInTarget) enqueueOp({ kind: addKind, unionName: target.name, [idField]: name });
   }
 
   // menuItemsFor собирает пункты меню объекта: редактирование фильтра
@@ -218,7 +433,10 @@ const Topology = (() => {
       : obj.type === "attach" ? `привязка ${obj.net.name}–${obj.device}`
       : `${obj.filter ? "фильтрованная связь" : "связь"} ${obj.a.device}–${obj.b.device}`;
     const items = [];
-    if (isLink) items.push(["Редактировать", () => openLinkPanel(obj, at)]);
+    // «Редактировать» недоступно, пока create-link этой связи ещё не
+    // подтверждён сервером (см. isLinkCreatePending) — настройка фильтра
+    // требует сохранённой топологии.
+    if (isLink) items.push(["Редактировать", isLinkCreatePending(obj.a.device, obj.b.device) ? null : () => openLinkPanel(obj, at)]);
     if (key) {
       const inSet = (s) => (s[key] || []).includes(obj.name);
       if ((State.topology.unions || []).some(inSet)) {
@@ -237,7 +455,6 @@ const Topology = (() => {
       State.selection.clear();
       State.selection.add(obj);
       deleteSelection();
-      scheduleLayoutSave();
     }, "danger"]);
     return items;
   }
@@ -282,47 +499,50 @@ const Topology = (() => {
   }
 
   // deleteSelection drops every selected device/network/link plus any
-  // selected attachments ({type:"attach", net, device} entries). Deleting a
-  // device also cascades to links and attachments that reference it, so the
-  // topology never ends up with dangling references the server would reject.
+  // selected attachments ({type:"attach", net, device} entries). The
+  // server's delete-device/delete-network operations already cascade
+  // (drop links/attachments/union membership/layout position that
+  // reference the deleted object — topology_operations.go's delete-device
+  // case), so a link or attach entry only gets its own explicit
+  // delete-link/detach-network op when NEITHER of its endpoints is also
+  // being deleted this batch; otherwise the cascade already removes it
+  // server-side, and sending the now-redundant op would 422 ("unknown
+  // link"/"not attached"). Selection AND each entry's kind (device/network/
+  // link/attach) are captured up front, from the State.topology in effect
+  // before any enqueue: enqueueOp can synchronously replace both
+  // State.selection (TopologySync.onState → reconcileSelection) and
+  // State.topology (new object identities even for untouched entries —
+  // cloneSnapshot always produces fresh network/union objects) partway
+  // through this function, so nothing below may re-derive a classification
+  // by re-checking the live State against a stale object reference.
   function deleteSelection() {
     if (!State.selection.size) return;
-    const deletedDevices = new Set();
-    State.selection.forEach((s) => {
-      if (s && s.type === "attach") s.net.attach = s.net.attach.filter((a) => a.device !== s.device);
-    });
-    State.topology.devices = State.topology.devices.filter((d) => {
-      if (State.selection.has(d)) {
-        delete State.layout.devices[d.name];
-        dropMember(d.name, "devices");
-        deletedDevices.add(d.name);
-        return false;
+    const selected = [...State.selection];
+    const classify = (s) => {
+      if (!s) return "none";
+      if (s.type === "attach") return "attach";
+      if (State.topology.devices.includes(s)) return "device";
+      if (State.topology.networks.includes(s)) return "network";
+      return "link";
+    };
+    const kinds = selected.map(classify);
+    const deletedDevices = new Set(selected.filter((s, i) => kinds[i] === "device").map((d) => d.name));
+    const deletedNetworks = new Set(selected.filter((s, i) => kinds[i] === "network").map((n) => n.name));
+
+    selected.forEach((s, i) => { if (kinds[i] === "device") enqueueOp({ kind: "delete-device", deviceName: s.name }); });
+    selected.forEach((s, i) => { if (kinds[i] === "network") enqueueOp({ kind: "delete-network", networkName: s.name }); });
+    selected.forEach((s, i) => {
+      if (kinds[i] === "attach") {
+        if (!deletedNetworks.has(s.net.name) && !deletedDevices.has(s.device)) {
+          enqueueOp({ kind: "detach-network", networkName: s.net.name, attach: { device: s.device } });
+        }
+      } else if (kinds[i] === "link") {
+        if (!deletedDevices.has(s.a.device) && !deletedDevices.has(s.b.device)) {
+          enqueueOp({ kind: "delete-link", link: { a: { device: s.a.device }, b: { device: s.b.device } } });
+        }
       }
-      return true;
-    });
-    State.topology.networks = State.topology.networks.filter((n) => {
-      if (State.selection.has(n)) {
-        delete State.layout.networks[n.name];
-        dropMember(n.name, "networks");
-        return false;
-      }
-      return true;
-    });
-    if (deletedDevices.size) {
-      State.topology.networks.forEach((n) => {
-        n.attach = n.attach.filter((a) => !deletedDevices.has(a.device));
-      });
-    }
-    State.topology.links = State.topology.links.filter((l) => {
-      if (State.selection.has(l)) return false;
-      return !deletedDevices.has(l.a.device) && !deletedDevices.has(l.b.device);
     });
     clearSelection();
-  }
-
-  // dropMember вычищает имя удалённого объекта из членства объединений.
-  function dropMember(name, key) {
-    (State.topology.unions || []).forEach((s) => { s[key] = (s[key] || []).filter((n) => n !== name); });
   }
 
   // --- выбор, рамка и перетаскивание: единый mousedown на канвасе ---
@@ -358,18 +578,21 @@ const Topology = (() => {
     document.addEventListener("mouseup", onUp);
   }
 
-  // startNodeDrag переносит всю selection (или один узел) группой;
-  // порог 3px отличает перетаскивание от клика.
+  // startNodeDrag переносит всю selection (или один узел) группой; порог
+  // 3px отличает перетаскивание от клика. onMove — чисто локальная правка
+  // (без enqueue, чтобы не слать операцию на каждый кадр); onUp ставит в
+  // очередь по одной set-*-position на каждый передвинутый узел. State.layout
+  // читается заново на каждом кадре (не кэшируется при старте драга): фоновая
+  // синхронизация может подменить весь снимок State.layout за время долгого
+  // драга (TopologySync.onState), и запись должна попасть в актуальный объект.
   function startNodeDrag(obj, e) {
     const start = screenPoint(e);
     const group = [];
     const addObj = (o) => {
       if (State.topology.devices.includes(o)) {
-        const pos = State.layout.devices[o.name];
-        if (pos) group.push({ map: State.layout.devices, name: o.name, pos: { ...pos } });
+        if (State.layout.devices[o.name]) group.push({ kind: "device", name: o.name, pos: { ...State.layout.devices[o.name] } });
       } else if (State.topology.networks.includes(o)) {
-        const pos = State.layout.networks[o.name];
-        if (pos) group.push({ map: State.layout.networks, name: o.name, pos: { ...pos } });
+        if (State.layout.networks[o.name]) group.push({ kind: "network", name: o.name, pos: { ...State.layout.networks[o.name] } });
       }
     };
     if (State.selection.has(obj)) State.selection.forEach(addObj);
@@ -383,14 +606,25 @@ const Topology = (() => {
       const dx = w.x - o.x;
       const dy = w.y - o.y;
       if (Math.abs(p.x - start.x) > 3 || Math.abs(p.y - start.y) > 3) { moved = true; NetInfo.hide(); LinkPanel.hide(); }
-      group.forEach((g) => { g.map[g.name] = { x: g.pos.x + dx, y: g.pos.y + dy }; });
+      group.forEach((g) => {
+        const map = g.kind === "device" ? State.layout.devices : State.layout.networks;
+        map[g.name] = { x: g.pos.x + dx, y: g.pos.y + dy };
+      });
       render();
     }
     function onUp(ev) {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
-      if (moved) scheduleLayoutSave();
-      else onPlainClick(obj, ev);
+      if (moved) {
+        group.forEach((g) => {
+          const map = g.kind === "device" ? State.layout.devices : State.layout.networks;
+          enqueueOp({
+            kind: g.kind === "device" ? "set-device-position" : "set-network-position",
+            ...(g.kind === "device" ? { deviceName: g.name } : { networkName: g.name }),
+            position: map[g.name],
+          });
+        });
+      } else onPlainClick(obj, ev);
     }
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -405,42 +639,47 @@ const Topology = (() => {
     return { key, idx: offsets[State.topology.links.indexOf(link)] };
   }
 
+  const linkABFromKey = (key) => { const [a, b] = key.split("|"); return { a: { device: a }, b: { device: b } }; };
+
   // addWaypoint вставляет точку изгиба в место клика на связи, между
   // ближайшей парой соседних точек (концы устройств или уже существующие
-  // точки изгиба).
+  // точки изгиба), и ставит в очередь set-link-waypoints с целым
+  // пересчитанным layout.links[key] (см. вики операций: waypoints — весь
+  // массив параллельных связей этой пары, не одна точка).
   function addWaypoint(link, p) {
     const { key, idx } = linkDupIndex(link);
-    State.layout.links[key] = State.layout.links[key] || [];
-    const arr = State.layout.links[key];
+    const arr = (State.layout.links[key] || []).map((dup) => [...dup]);
     while (arr.length <= idx) arr.push([]);
     const wps = arr[idx];
     const points = [deviceCenter(link.a.device), ...wps, deviceCenter(link.b.device)];
     wps.splice(NetMap.insertIndex(points, p), 0, { x: p.x, y: p.y });
     selectNode(link, false);
-    scheduleLayoutSave();
+    enqueueOp({ kind: "set-link-waypoints", link: { a: { device: link.a.device }, b: { device: link.b.device } }, waypoints: arr });
   }
 
   // removeWaypoint удаляет одну точку изгиба по ссылке хендла ({key, dupIdx, idx}).
   function removeWaypoint(ref) {
-    const arr = State.layout.links[ref.key] && State.layout.links[ref.key][ref.dupIdx];
-    if (!arr) return;
-    arr.splice(ref.idx, 1);
-    scheduleLayoutSave();
-    render();
+    const dup = State.layout.links[ref.key] && State.layout.links[ref.key][ref.dupIdx];
+    if (!dup) return;
+    const arr = State.layout.links[ref.key].map((d, i) => (i === ref.dupIdx ? d.filter((_, j) => j !== ref.idx) : d));
+    enqueueOp({ kind: "set-link-waypoints", link: linkABFromKey(ref.key), waypoints: arr });
   }
 
-  // startPointDrag тащит одну точку изгиба связи; сохранение — тем же
-  // debounced-путём, что и перетаскивание узлов.
+  // startPointDrag тащит одну точку изгиба связи; onMove правит layout
+  // локально (перечитывая State.layout на каждом кадре — см. startNodeDrag),
+  // onUp ставит в очередь итоговый layout.links[key] целиком.
   function startPointDrag(ref, e) {
-    const arr = State.layout.links[ref.key][ref.dupIdx];
     function onMove(ev) {
+      const arr = State.layout.links[ref.key] && State.layout.links[ref.key][ref.dupIdx];
+      if (!arr) return;
       arr[ref.idx] = toWorld(screenPoint(ev));
       render();
     }
     function onUp() {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
-      scheduleLayoutSave();
+      const arr = State.layout.links[ref.key];
+      if (arr) enqueueOp({ kind: "set-link-waypoints", link: linkABFromKey(ref.key), waypoints: arr });
     }
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -690,16 +929,21 @@ const Topology = (() => {
     else popping = false;
   }
 
+  // createNode ставит в очередь create-device/create-network, затем сразу
+  // set-device-position/set-network-position той же цели — два отдельных
+  // enqueue подряд (создание без позиции неразделимо в протоколе операций),
+  // не коалесцирующих между собой (разные kind), так что очередь отправит
+  // их по порядку: создание всегда доедет раньше позиции.
   function createNode(kind, name, world) {
     if (kind === "device") {
       const nodeKind = document.getElementById("node-kind-select").value || "router";
       if (State.topology.devices.some((d) => d.name === name)) return showBanner(`Устройство ${name} уже существует`);
-      State.topology.devices.push({ name, kind: nodeKind });
-      State.layout.devices[name] = { x: world.x - DEVICE_W / 2, y: world.y - DEVICE_H / 2 };
+      enqueueOp({ kind: "create-device", device: { name, kind: nodeKind } });
+      enqueueOp({ kind: "set-device-position", deviceName: name, position: { x: world.x - DEVICE_W / 2, y: world.y - DEVICE_H / 2 } });
     } else {
       if (State.topology.networks.some((n) => n.name === name)) return showBanner(`Сеть ${name} уже существует`);
-      State.topology.networks.push({ name, subnets: [], attach: [] });
-      State.layout.networks[name] = { x: world.x - NET_W / 2, y: world.y - NET_H / 2 };
+      enqueueOp({ kind: "create-network", network: { name, subnets: [], attach: [] } });
+      enqueueOp({ kind: "set-network-position", networkName: name, position: { x: world.x - NET_W / 2, y: world.y - NET_H / 2 } });
     }
     pops.set(`${kind}:${name}`, performance.now());
     if (!popping) {
@@ -707,7 +951,6 @@ const Topology = (() => {
       requestAnimationFrame(popStep);
     }
     setTool("select");
-    render();
   }
 
   function cancelPending() {
@@ -799,13 +1042,12 @@ const Topology = (() => {
   // attachDevice — общий хвост connect «сеть–устройство» в обе стороны.
   function attachDevice(netName, device) {
     const net = State.topology.networks.find((n) => n.name === netName);
-    net.attach = net.attach || [];
-    if (net.attach.some((a) => a.device === device)) {
+    if ((net.attach || []).some((a) => a.device === device)) {
       showBanner(`Сеть ${netName} уже подключена к ${device}`);
       cancelPending();
       return;
     }
-    net.attach.push({ device });
+    enqueueOp({ kind: "attach-network", networkName: netName, attach: { device } });
     cancelPending();
   }
 
@@ -829,7 +1071,7 @@ const Topology = (() => {
       cancelPending();
       return;
     }
-    State.topology.links.push({ a: { device: pending.device }, b: { device } });
+    enqueueOp({ kind: "create-link", link: { a: { device: pending.device }, b: { device } } });
     cancelPending();
   }
 
@@ -886,6 +1128,54 @@ const Topology = (() => {
     }] : []),
   ];
 
+  const linkKeyOf = (l) => [l.a.device, l.b.device].sort().join("|");
+
+  // reconcileSelection re-points every selection entry to its equivalent
+  // object in the just-replaced State.topology (matched by name / endpoint
+  // pair / attach net+device — array-position and object identity are not
+  // stable across a TopologySync snapshot swap, see onState below), dropping
+  // entries whose target no longer exists. Without this, selection
+  // highlighting (nodeClasses/attachSelected use identity — State.selection.has(obj))
+  // and the trash button's enabled state would silently desync from the
+  // canvas after every confirmed or locally-projected edit.
+  function reconcileSelection() {
+    const next = new Set();
+    State.selection.forEach((s) => {
+      if (!s) return;
+      if (s.type === "attach") {
+        const net = State.topology.networks.find((n) => n.name === s.net.name);
+        if (net && (net.attach || []).some((a) => a.device === s.device)) next.add({ type: "attach", net, device: s.device });
+        return;
+      }
+      if (s.a && s.b) {
+        const link = State.topology.links.find((l) => linkKeyOf(l) === linkKeyOf(s));
+        if (link) next.add(link);
+        return;
+      }
+      const dev = State.topology.devices.find((d) => d.name === s.name);
+      if (dev) { next.add(dev); return; }
+      const net = State.topology.networks.find((n) => n.name === s.name);
+      if (net) next.add(net);
+    });
+    State.selection = next;
+  }
+
+  // renderSyncStatus reflects TopologySync's three onStatus states in the
+  // toolbar's status indicator (aria-live, replaces the removed DirtyGuard
+  // warning as the only signal an edit persisted) and, on error, also
+  // surfaces a banner: a silent label is easy to miss when a queued edit
+  // just got dropped after a 409/422/network failure.
+  function renderSyncStatus(status) {
+    const el = document.getElementById("topo-sync-status");
+    if (!el) return;
+    const text = status === "saving" ? "Сохраняется…" : status === "error" ? "Ошибка синхронизации" : "Сохранено";
+    el.textContent = text;
+    el.setAttribute("class", "sync-status" + (status === "error" ? " error" : ""));
+    if (status === "error") {
+      showBanner("Не удалось сохранить последнее изменение: черновик мог измениться в другой вкладке, либо прервалась связь. Повторите действие.");
+    }
+  }
+
   function render() {
     ensureLayout();
     State.list = TopoScene.buildScene(State, {
@@ -914,21 +1204,6 @@ const Topology = (() => {
     });
   }
 
-  function setupForms() {
-    DirtyGuard.arm(() => State.topology);
-    document.getElementById("topo-save").addEventListener("click", async () => {
-      try {
-        assertEditable();
-        State.topology = normalizeTopology(await Api.put(apiPath("topology"), State.topology));
-        showBanner("Топология сохранена", "ok");
-        DirtyGuard.markClean();
-        render();
-      } catch (e) {
-        showBanner("Ошибка сохранения топологии: " + e.message);
-      }
-    });
-  }
-
   async function boot() {
     try {
       const [topo, subnetsDoc] = await Promise.all([Api.get(apiPath("topology")), Api.get(apiPath("subnets"))]);
@@ -939,11 +1214,11 @@ const Topology = (() => {
     }
     try {
       const layout = await Api.get(apiPath("layout"));
-      State.layout = { devices: layout.devices || {}, networks: layout.networks || layout.subnets || {}, links: layout.links || {} };
-      State.camera = layout.camera && layout.camera.z > 0 ? { ...Camera.create(), ...layout.camera } : Camera.create();
+      State.layout = normalizeLayout(layout);
     } catch {
-      State.layout = { devices: {}, networks: {}, links: {} };
+      State.layout = normalizeLayout({});
     }
+    State.camera = State.layout.camera;
     theme = CanvasTheme.fromComputed(getComputedStyle(document.documentElement));
     view = CanvasView.create(canvas(), {
       getList: () => State.list,
@@ -958,11 +1233,35 @@ const Topology = (() => {
         ...State.topology.networks.map((n) => netCenter(n.name)),
       ].filter(Boolean),
       getCam: () => State.camera,
-      setCam: (c) => { State.camera = c; applyCamera(); scheduleLayoutSave(); },
+      setCam: (c) => { State.camera = c; applyCamera(); enqueueOp({ kind: "set-camera", camera: c }); },
       getViewport: () => { const r = canvas().getBoundingClientRect(); return { w: r.width, h: r.height }; },
       getTheme: () => theme,
     });
-    setupForms();
+
+    // TopologySync (topology_sync.js) owns the confirmed+projected snapshot
+    // from here on: every canvas edit goes through enqueueOp, never a
+    // direct State.topology/State.layout write (see
+    // docs/superpowers/specs/2026-08-27-topology-draft-sync-design.md,
+    // "Клиентский поток"). seed() is called once, right after this initial
+    // load, with the real starting snapshot — never before.
+    sync = TopologySync.create({
+      read: () => State,
+      write: (op) => Api.post(apiPath("topology/operations"), op)
+        .then((res) => ({ topology: normalizeTopology(res.topology), layout: normalizeLayout(res.layout) })),
+      apply: applyTopologyOp,
+      onState: (snapshot) => {
+        State.topology = snapshot.topology;
+        State.layout = snapshot.layout;
+        State.camera = normalizeCamera(snapshot.layout.camera);
+        reconcileSelection();
+        render();
+      },
+      onStatus: renderSyncStatus,
+      reload: () => Promise.all([Api.get(apiPath("topology")), Api.get(apiPath("layout"))])
+        .then(([t, l]) => ({ topology: normalizeTopology(t), layout: normalizeLayout(l) })),
+    });
+    sync.seed({ topology: State.topology, layout: { ...State.layout, camera: State.camera } });
+
     setupCamera();
     setupTools();
     setupSelection();

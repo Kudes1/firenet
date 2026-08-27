@@ -1,14 +1,16 @@
 "use strict";
 
 // LinkPanel — плавающая панель редактирования фильтра одной связи, открываемая
-// с холста топологии (ПКМ по связи → «Редактировать»). Дублирует часть
-// /ui/links (переключение обычная/фильтрованная, экспорт/импорт по сторонам),
-// но правки остаются в памяти канвы: применяет их onApply, персистентность —
-// общая кнопка «Сохранить» страницы (см. Topology.openLinkPanel).
+// с холста топологии (ПКМ по связи → «Редактировать», недоступно пока
+// create-link этой связи не подтверждён — см. Topology.openLinkPanel).
+// Дублирует часть /ui/links (переключение обычная/фильтрованная,
+// экспорт/импорт по сторонам); правки применяет onApply(filter|null), которое
+// ставит set-link-filter/clear-link-filter в очередь операций немедленно —
+// не общей кнопкой «Сохранить».
 const LinkPanel = (() => {
   const PLACE = { w: 380, h: 320, margin: 8 };
 
-  let s = null; // {link, index, filter: {aExports,bExports}|null, subnets, candidates, deps, at, bounds}
+  let s = null; // {link, filter: {aExports,bExports}|null, subnets, candidates, deps, at, bounds}
 
   const box = () => document.getElementById("link-panel");
 
@@ -208,26 +210,33 @@ const LinkPanel = (() => {
     place();
   }
 
+  // loadCandidates fetches export candidates for both sides of the link
+  // currently open. token captures the specific `s` object this fetch was
+  // started for: if the panel gets closed/reopened (for the same or a
+  // different link) before the fetch settles, `s` is reassigned or nulled,
+  // so `s !== token` discards the now-stale response instead of writing it
+  // into whatever is open now.
   async function loadCandidates() {
-    const { index, deps } = s;
+    const token = s;
+    const { deps } = s;
     try {
-      const [a, b] = await Promise.all([deps.fetchExports(index, "a"), deps.fetchExports(index, "b")]);
-      if (s && s.index === index) s.candidates = { a, b };
+      const [a, b] = await Promise.all([deps.fetchExports("a"), deps.fetchExports("b")]);
+      if (s === token) s.candidates = { a, b };
     } catch (e) {
-      if (s && s.index === index) s.candidates = { a: [], b: [] };
+      if (s === token) s.candidates = { a: [], b: [] };
       if (typeof showBanner === "function") showBanner("Не удалось загрузить доступные сети: " + e.message);
     }
     render();
   }
 
-  // show открывает панель для связи link (index — её текущий индекс в
-  // topology.links, нужен серверу для расчёта достижимых сетей) в экранной
-  // точке at, не выпуская окно за границы канваса bounds = {w, h}.
-  function show(link, index, deps, at, bounds) {
+  // show открывает панель для связи link (deps.fetchExports(side) уже
+  // замкнут на конкретную пару link.a/link.b — см. Topology.openLinkPanel)
+  // в экранной точке at, не выпуская окно за границы канваса bounds = {w, h}.
+  function show(link, deps, at, bounds) {
     const b = box();
     if (!b) return;
     s = {
-      link, index, deps, at, bounds,
+      link, deps, at, bounds,
       filter: link.filter ? { aExports: [...link.filter.aExports], bExports: [...link.filter.bExports] } : null,
       subnets: deps.subnets || [],
       candidates: { a: [], b: [] },
