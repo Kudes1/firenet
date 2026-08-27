@@ -85,28 +85,16 @@ func TestReachableEntities_FilteredLinkLimitsToExports(t *testing.T) {
 	}
 }
 
-func TestReachableEntities_ChainsThroughOtherFilteredLinks(t *testing.T) {
+func TestReachableEntities_ExcludesEntitiesLearnedOverOtherFilteredLinks(t *testing.T) {
 	topo := chainTopo()
-	// m announces NA toward d and d passes NA further to o while
-	// announcing NC back up the chain: from m everything is in reach.
-	filter(&topo.Links[0], []string{"NA"}, []string{"NB", "NC"})
-	filter(&topo.Links[1], []string{"NA"}, []string{"NC"})
-	got, err := ReachableEntities(topo, "m", -1)
-	if err != nil {
-		t.Fatalf("reachable: %v", err)
-	}
-	want := []string{"NA", "NB", "NC", "a", "b", "c"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
+	filter(&topo.Links[0], []string{"NA"}, []string{"NB"})
+	topo.Links[1] = topology.Link{A: topology.Endpoint{Device: "m"}, B: topology.Endpoint{Device: "o"}}
 
-	// d stops announcing anything toward o: from m, c becomes unreachable.
-	filter(&topo.Links[1], []string{}, []string{"NC"})
-	got, err = ReachableEntities(topo, "m", -1)
+	got, err := ReachableEntities(topo, "m", 1)
 	if err != nil {
 		t.Fatalf("reachable: %v", err)
 	}
-	want = []string{"NA", "NB", "a", "b"}
+	want := []string{"NA", "a"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}

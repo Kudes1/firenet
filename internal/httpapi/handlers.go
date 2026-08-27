@@ -221,9 +221,9 @@ func (h *handlers) putDraftTopology(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, topo)
 }
 
-// getLinkExports serves the reachable export candidates for one side of a
-// link: networks and subnets the side's device can reach when that very
-// link is excluded from the graph.
+// getLinkExports serves the local export candidates for one side of a link.
+// The edited link and every other filtered link are excluded, so a route
+// learned through one filter cannot be re-exported through another.
 func (h *handlers) getDraftLinkExports(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.resolveDraftForAccess(w, r); !ok {
 		return

@@ -770,6 +770,47 @@ func TestGetLinkExports(t *testing.T) {
 	}
 }
 
+func TestGetLinkExports_ExcludesEntitiesLearnedOverOtherFilteredLinks(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+	topo := TopologyDoc{
+		Devices: []DeviceDoc{
+			{Name: "r1", Kind: "router"},
+			{Name: "r2", Kind: "router"},
+			{Name: "r3", Kind: "router"},
+		},
+		Links: []LinkDoc{
+			{
+				A:      EndpointDoc{Device: "r1"},
+				B:      EndpointDoc{Device: "r2"},
+				Filter: &LinkFilterDoc{AExports: []string{"n-office"}, BExports: []string{"n-dmz"}},
+			},
+			{A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "r3"}},
+		},
+		Networks: []NetworkDoc{
+			{Name: "n-office", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
+			{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []EndpointDoc{{Device: "r2"}}},
+		},
+	}
+	if rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), topo); rec.Code != http.StatusOK {
+		t.Fatalf("save topology: status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?link=1&side=a"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Entities []EntityDoc `json:"entities"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := []EntityDoc{{Name: "n-office"}, {Name: "office", CIDR: "10.0.0.0/24"}}
+	if !slices.EqualFunc(got.Entities, want, func(a, b EntityDoc) bool { return a == b }) {
+		t.Fatalf("entities = %+v, want %+v", got.Entities, want)
+	}
+}
+
 func TestDiagnoseHandler(t *testing.T) {
 	h, _, draftID := newTestServer(t)
 	diagnosePath := draftPath(draftID, "diagnose")
