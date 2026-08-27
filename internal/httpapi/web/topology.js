@@ -402,18 +402,23 @@ const Topology = (() => {
     menu.style.top = at.y + "px";
   }
 
-  // setUnion перемещает объект в объединение idx (или из всех объединений
-  // при idx < 0): по одной операции union-remove-* на каждое объединение,
-  // где name состоит сейчас (кроме целевого), затем union-add-* на целевое,
-  // если он ещё туда не входит. Членство читается из текущего State.topology
-  // ДО постановки операций в очередь — enqueueOp может синхронно заменить
-  // State.topology (см. TopologySync.onState), так что computed-once список
-  // защищает от порчи середины цикла.
-  function setUnion(name, key, idx) {
+  // setUnion перемещает объект в объединение targetName (или из всех
+  // объединений при targetName == null): по одной операции union-remove-*
+  // на каждое объединение, где name состоит сейчас (кроме целевого), затем
+  // union-add-* на целевое, если он ещё туда не входит. targetName — это имя
+  // объединения (строка), а не индекс/ссылка в State.topology.unions: сам
+  // объект-объединение резолвится по имени из ТЕКУЩЕГО State.topology прямо
+  // здесь, в момент вызова, а не когда строилось меню — enqueueOp может
+  // синхронно заменить State.topology (см. TopologySync.onState) любое
+  // число раз между построением контекстного меню и кликом по его пункту, и
+  // индекс/ссылка на объединение, захваченные в момент построения меню,
+  // к этому моменту не указывают ни на что в новом массиве. Имя объединения
+  // как идентичность переживает такую замену невредимым.
+  function setUnion(name, key, targetName) {
     const idField = key === "devices" ? "deviceName" : "networkName";
     const removeKind = key === "devices" ? "union-remove-device" : "union-remove-network";
     const addKind = key === "devices" ? "union-add-device" : "union-add-network";
-    const target = idx >= 0 ? State.topology.unions[idx] : null;
+    const target = targetName ? State.topology.unions.find((s) => s.name === targetName) : null;
     const alreadyInTarget = !!target && (target[key] || []).includes(name);
     const removeFrom = State.topology.unions
       .filter((s) => (s[key] || []).includes(name) && (!target || s.name !== target.name))
@@ -422,12 +427,38 @@ const Topology = (() => {
     if (target && !alreadyInTarget) enqueueOp({ kind: addKind, unionName: target.name, [idField]: name });
   }
 
+  // deleteByIdentity удаляет ОДИН объект контекстного меню по его имени/паре
+  // (kind + identity зафиксированы строками при построении меню в
+  // menuItemsFor), а не по живой ссылке добавленной в State.selection: между
+  // открытием меню и кликом по «Удалить» мог пройти publish (драг узла,
+  // подтверждение любой другой операции, панорама камеры), заменяющий
+  // State.topology новыми экземплярами (cloneSnapshot), так что ссылка на
+  // сам объект к моменту клика могла устареть. kind здесь известен заранее
+  // (nodeType/isLink на момент построения меню), поэтому, в отличие от
+  // deleteSelection, дереклассифицировать объект по ссылке на актуальный
+  // State.topology не требуется вовсе — как раз такая передереклассификация
+  // и есть источник обеих багов, которые чинит этот путь.
+  function deleteByIdentity(kind, identity) {
+    if (kind === "device") enqueueOp({ kind: "delete-device", deviceName: identity.name });
+    else if (kind === "network") enqueueOp({ kind: "delete-network", networkName: identity.name });
+    else if (kind === "link") enqueueOp({ kind: "delete-link", link: { a: { device: identity.a }, b: { device: identity.b } } });
+    else enqueueOp({ kind: "detach-network", networkName: identity.net, attach: { device: identity.device } });
+    clearSelection();
+  }
+
   // menuItemsFor собирает пункты меню объекта: редактирование фильтра
   // (только у связей), членство в объединениях (только у узлов) и удаление
-  // с подписью по типу; объединения — до danger.
+  // с подписью по типу; объединения — до danger. kind/identity фиксируются
+  // здесь как строки (имя устройства/сети, пара {a,b} связи, {net,device}
+  // привязки), а не как ссылки на obj/State.topology.unions[i] — те могут
+  // устареть до клика (см. setUnion и deleteByIdentity выше).
   function menuItemsFor(obj, nodeType, at) {
     const key = nodeType === "device" ? "devices" : nodeType === "network" ? "networks" : null;
     const isLink = !key && obj.type !== "attach";
+    const kind = key === "devices" ? "device" : key === "networks" ? "network" : isLink ? "link" : "attach";
+    const identity = kind === "link" ? { a: obj.a.device, b: obj.b.device }
+      : kind === "attach" ? { net: obj.net.name, device: obj.device }
+      : { name: obj.name };
     const label = nodeType === "device" ? `устройство ${obj.name}`
       : nodeType === "network" ? `сеть ${obj.name}`
       : obj.type === "attach" ? `привязка ${obj.net.name}–${obj.device}`
@@ -440,22 +471,18 @@ const Topology = (() => {
     if (key) {
       const inSet = (s) => (s[key] || []).includes(obj.name);
       if ((State.topology.unions || []).some(inSet)) {
-        items.push(["Убрать из объединения", () => setUnion(obj.name, key, -1)]);
+        items.push(["Убрать из объединения", () => setUnion(obj.name, key, null)]);
       }
       const candidates = (State.topology.unions || [])
         .filter((s) => !inSet(s))
-        .map((s) => [`В объединение «${s.name}»`, () => setUnion(obj.name, key, State.topology.unions.indexOf(s)), null, true, s.name]);
+        .map((s) => [`В объединение «${s.name}»`, () => setUnion(obj.name, key, s.name), null, true, s.name]);
       items.push({
         label: "Добавить в объединение",
         children: candidates.length ? candidates : [["(нет доступных объединений)", null]],
         searchable: candidates.length > 1,
       });
     }
-    items.push(["Удалить " + label, () => {
-      State.selection.clear();
-      State.selection.add(obj);
-      deleteSelection();
-    }, "danger"]);
+    items.push(["Удалить " + label, () => deleteByIdentity(kind, identity), "danger"]);
     return items;
   }
 

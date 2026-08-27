@@ -1526,6 +1526,67 @@ test("reassigning union membership sends remove-from-old then add-to-new", async
   ]);
 });
 
+// --- stale object references in context-menu closures (a publish happens
+// between menu-open and menu-click: any node drag, or any other queued op
+// confirming, synchronously swaps State.topology with fresh clone
+// instances — see cloneSnapshot/TopologySync.publish) ---
+
+test("context menu delete survives a publish that happened after the menu opened (stale object reference)", async () => {
+  const page = bootTopology(responses); // r1-r2 link, net1 attached to r1
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.net1.x, clientY: AT.net1.y }); // menu captures net1
+  const del = findBtn(ctxMenu(page), (b) => String(b.textContent).startsWith("Удалить"));
+  assert.ok(del, "delete item present");
+
+  // A publish happens while the menu is still open: dragging r1 enqueues
+  // set-device-position, which synchronously swaps State.topology with
+  // freshly cloned instances, staling the net1 reference the menu's delete
+  // item captured at build time.
+  fire(page.canvas, "mousedown", { button: 0, clientX: AT.r1.x, clientY: AT.r1.y });
+  fire(page.doc, "mousemove", { clientX: AT.r1.x + 20, clientY: AT.r1.y + 10 });
+  fire(page.doc, "mouseup", {});
+
+  fire(del, "click", {}); // must not throw, and must actually delete net1
+  await tick();
+  assert.ok(!texts(page.get).includes("net1"), "net1 actually removed, not silently dropped");
+  assert.ok(
+    postedOps(page).some((op) => op.kind === "delete-network" && op.networkName === "net1"),
+    "delete-network op sent for net1",
+  );
+});
+
+test("context menu union assignment survives a publish that happened after the menu opened (stale target index)", async () => {
+  const page = bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": {
+      ...responses["/api/drafts/d1/topology"],
+      unions: [{ name: "a", devices: ["r1"] }, { name: "b", devices: [] }],
+    },
+  });
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  const assignB = findBtn(ctxMenu(page), (b) => String(b.textContent).includes("«b»"));
+  assert.ok(assignB, "assign-to-b item present");
+
+  // A publish happens while the menu is still open: dragging r2 enqueues
+  // set-device-position, swapping State.topology.unions with fresh
+  // instances, staling the target union object/index the menu captured.
+  fire(page.canvas, "mousedown", { button: 0, clientX: AT.r2.x, clientY: AT.r2.y });
+  fire(page.doc, "mousemove", { clientX: AT.r2.x + 20, clientY: AT.r2.y + 10 });
+  fire(page.doc, "mouseup", {});
+
+  fire(assignB, "click", {});
+  await tick();
+  assert.deepEqual(
+    postedOps(page).filter((op) => op.kind.startsWith("union-")),
+    [
+      { kind: "union-remove-device", unionName: "a", deviceName: "r1" },
+      { kind: "union-add-device", unionName: "b", deviceName: "r1" },
+    ],
+    "membership actually reassigned to b, not silently stripped from every union",
+  );
+});
+
 test("dragging a node sends one coalesced set-device-position, not one per mousemove", async () => {
   const page = bootTopology(responses);
   await tick();
