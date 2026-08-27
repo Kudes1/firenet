@@ -635,6 +635,67 @@ test("hop into the denying router stays green, segments beyond it turn red", asy
   assert.equal(mark({ type: "attach", net: { name: "OFFICE" }, device: "sw2" }), "diag-flow-deny", "attach beyond the deny point");
 });
 
+// — половинная доступность (returnPathAllowed: false) —
+
+test("expandFlow marks the allowed route half-open when there is no return path", async () => {
+  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  await tick();
+  const rep = { ...switchedReport, returnPathAllowed: false };
+  get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
+  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
+  for (const name of ["MAIN", "sw1", "r1", "r2", "sw2", "OFFICE"]) {
+    assert.ok(f.half.has(name), `${name} is marked half-open without a return path`);
+  }
+});
+
+test("expandFlow leaves half empty when a return path exists", async () => {
+  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  await tick();
+  const rep = { ...switchedReport, returnPathAllowed: true };
+  get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
+  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
+  assert.equal(f.half.size, 0);
+  assert.equal(f.halfE.size, 0);
+});
+
+test("flowMark paints allowed segments yellow when there is no return path", async () => {
+  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  await tick();
+  const rep = { ...switchedReport, returnPathAllowed: false };
+  get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
+  const mark = get("Diagnose.flowMark(Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology))");
+  assert.equal(mark({ a: { device: "r1" }, b: { device: "r2" } }), "diag-flow-half", "no return path colors the wire yellow, not green");
+  assert.equal(mark({ type: "attach", net: { name: "MAIN" }, device: "sw1" }), "diag-flow-half");
+});
+
+test("flowMark keeps deny red even without a return path", async () => {
+  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  await tick();
+  const rep = { ...denyReport, returnPathAllowed: false };
+  get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
+  const mark = get("Diagnose.flowMark(Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology))");
+  assert.equal(mark({ a: { device: "r2" }, b: { device: "sw2" } }), "diag-flow-deny", "deny still wins over half");
+  assert.equal(mark({ a: { device: "r1" }, b: { device: "r2" } }), "diag-flow-half", "allowed hop turns yellow without a return path");
+});
+
+test("renderReport notes the missing return path", async () => {
+  const { ids, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  await tick();
+  const rep = { ...switchedReport, returnPathAllowed: false };
+  get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
+  const html = JSON.stringify(ids["diag-paths"]);
+  assert.match(html, /обратн/i);
+  assert.match(html, /office-net.*main|main.*office-net/is);
+});
+
+test("renderReport says nothing about return paths when one exists", async () => {
+  const { ids, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  await tick();
+  const rep = { ...switchedReport, returnPathAllowed: true };
+  get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
+  assert.doesNotMatch(JSON.stringify(ids["diag-paths"]), /обратн/i);
+});
+
 // переход потока анимируется через flowFade: старт прозрачный, финал — полный
 test("report flow fades in over animated frames", async () => {
   const { get, frames } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
@@ -861,20 +922,25 @@ test("resolveSpreadSources treats unmatched input as a literal IP", async () => 
   assert.deepEqual(out, [{ ip: "10.0.0.5", subnetName: null }]);
 });
 
-test("mergeFlows unions ok/deny/edge sets from several reports", async () => {
+test("mergeFlows unions ok/deny/edge/half sets from several reports", async () => {
   const { get } = bootDiagnose(responses);
   await tick();
   const out = JSON.parse(get(`JSON.stringify((() => {
-    const f1 = { hl: new Set(["a", "r1"]), ok: new Set(["a", "r1"]), deny: new Map(), okE: new Set(["a\\0r1"]), denyE: new Set() };
-    const f2 = { hl: new Set(["a", "r2"]), ok: new Set(["a"]), deny: new Map([["r2", { rule: "x", reason: "y" }]]), okE: new Set(), denyE: new Set(["a\\0r2"]) };
+    const f1 = { hl: new Set(["a", "r1"]), ok: new Set(["a", "r1"]), deny: new Map(), okE: new Set(["a\\0r1"]), denyE: new Set(), half: new Set(["r1"]), halfE: new Set(["a\\0r1"]) };
+    const f2 = { hl: new Set(["a", "r2"]), ok: new Set(["a"]), deny: new Map([["r2", { rule: "x", reason: "y" }]]), okE: new Set(), denyE: new Set(["a\\0r2"]), half: new Set(), halfE: new Set() };
     const m = Diagnose.mergeFlows([f1, f2]);
-    return { hl: [...m.hl].sort(), ok: [...m.ok].sort(), denyKeys: [...m.deny.keys()], okE: [...m.okE], denyE: [...m.denyE] };
+    return {
+      hl: [...m.hl].sort(), ok: [...m.ok].sort(), denyKeys: [...m.deny.keys()], okE: [...m.okE], denyE: [...m.denyE],
+      half: [...m.half], halfE: [...m.halfE],
+    };
   })())`));
   assert.deepEqual(out.hl, ["a", "r1", "r2"]);
   assert.deepEqual(out.ok, ["a", "r1"]);
   assert.deepEqual(out.denyKeys, ["r2"]);
   assert.deepEqual(out.okE, ["a\0r1"]);
   assert.deepEqual(out.denyE, ["a\0r2"]);
+  assert.deepEqual(out.half, ["r1"]);
+  assert.deepEqual(out.halfE, ["a\0r1"]);
 });
 
 const spreadSubnets = {

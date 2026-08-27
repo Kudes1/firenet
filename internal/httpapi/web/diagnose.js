@@ -93,7 +93,12 @@ const Diagnose = (() => {
   // которые трафик прошёл целиком (включая последний хоп к точке запрета:
   // дроп случается на самом роутере, а не на подходе к нему), denyE — рёбра
   // за точкой запрета, deny — карта «роутер → {rule, reason}» для точек
-  // запрета, hl — весь путь целиком (для приглушения остального).
+  // запрета, hl — весь путь целиком (для приглушения остального). half/halfE
+  // повторяют ok/okE, когда у report.returnPathAllowed === false: сеть
+  // симметрична по построению (Build зеркалит Allow фильтрованных связей в
+  // обе стороны), поэтому отсутствие обратного пути — это firewall-правило
+  // без встречного разрешения (нет mirror/ответного правила), а не разрыв
+  // маршрута; на карте это красится жёлтым — «доступно только в одну сторону».
   // Запрет сильнее разрешения: элемент с deny-вердиктом и всё за ним на
   // запрещённом маршруте никогда не попадают в ok.
   function expandFlow(report, topology) {
@@ -129,7 +134,12 @@ const Diagnose = (() => {
     });
     deny.forEach((_, n) => ok.delete(n)); // запрет сильнее разрешения
     blocked.forEach((n) => ok.delete(n));
-    return { hl, ok, deny, okE, denyE };
+    const half = new Set(), halfE = new Set();
+    if (report.returnPathAllowed === false) {
+      ok.forEach((n) => half.add(n));
+      okE.forEach((k) => halfE.add(k));
+    }
+    return { hl, ok, deny, okE, denyE, half, halfE };
   }
 
   // baseIp — представительский адрес подсети: сетевой адрес её CIDR, который
@@ -159,29 +169,38 @@ const Diagnose = (() => {
   // достаточно простого объединения множеств без повторного вычитания.
   function mergeFlows(flows) {
     const hl = new Set(), ok = new Set(), okE = new Set(), denyE = new Set();
+    const half = new Set(), halfE = new Set();
     const deny = new Map();
     flows.forEach((f) => {
       f.hl.forEach((n) => hl.add(n));
       f.ok.forEach((n) => ok.add(n));
       f.okE.forEach((k) => okE.add(k));
       f.denyE.forEach((k) => denyE.add(k));
+      f.half.forEach((n) => half.add(n));
+      f.halfE.forEach((k) => halfE.add(k));
       f.deny.forEach((v, k) => { if (!deny.has(k)) deny.set(k, v); });
     });
-    return { hl, ok, deny, okE, denyE };
+    return { hl, ok, deny, okE, denyE, half, halfE };
   }
 
   // flowMark возвращает mark(obj) для TopoScene: состояние движения трафика
-  // элемента карты. Узлы — по ok/deny; рёбра (связи и привязки) — по
-  // собственным множествам okE/denyE: цвет ребра не выводится из концов,
-  // иначе хоп к запрещающему роутеру красился бы по его вердикту.
+  // элемента карты. Узлы — по deny/half/ok; рёбра (связи и привязки) — по
+  // собственным множествам denyE/halfE/okE: цвет ребра не выводится из
+  // концов, иначе хоп к запрещающему роутеру красился бы по его вердикту.
+  // Приоритет: запрет > доступность в одну сторону > полное разрешение.
   // Непомеченные элементы остаются приглушёнными.
   const flowMark = (flow) => (obj) => {
     if (!flow || obj.devices) return "";
-    if (!obj.a && obj.type !== "attach")
-      return flow.deny.has(obj.name) ? "diag-flow-deny" : flow.ok.has(obj.name) ? "diag-flow-ok" : "";
+    if (!obj.a && obj.type !== "attach") {
+      if (flow.deny.has(obj.name)) return "diag-flow-deny";
+      if (flow.half.has(obj.name)) return "diag-flow-half";
+      return flow.ok.has(obj.name) ? "diag-flow-ok" : "";
+    }
     const names = obj.type === "attach" ? [obj.net.name, obj.device] : [obj.a.device, obj.b.device];
     const k = edgeKey(names[0], names[1]);
-    return flow.denyE.has(k) ? "diag-flow-deny" : flow.okE.has(k) ? "diag-flow-ok" : "";
+    if (flow.denyE.has(k)) return "diag-flow-deny";
+    if (flow.halfE.has(k)) return "diag-flow-half";
+    return flow.okE.has(k) ? "diag-flow-ok" : "";
   };
 
   // pathDim приглушает всё, что не принадлежит подсвеченному пути:
@@ -458,6 +477,12 @@ const Diagnose = (() => {
       p.textContent = "Недостижимо: путей между подсетями нет.";
       host.append(p);
       return;
+    }
+    if (report.returnPathAllowed === false) {
+      const p = document.createElement("p");
+      p.className = "diag-halfpath";
+      p.textContent = `Доступность в одну сторону: обратный путь от ${report.dstSubnet} к ${report.srcSubnet} не найден (не хватает встречного правила или mirror).`;
+      host.append(p);
     }
     report.paths.forEach((path, i) => {
       const card = document.createElement("article");

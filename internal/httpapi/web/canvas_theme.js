@@ -29,6 +29,7 @@ const CanvasTheme = (() => {
       filteredColor: "#d29922",
       flowOk: "#10b981",
       flowDeny: "#ef4444",
+      flowHalf: "#f59e0b",
       dimAlpha: 0.35,
       textHideZoom: 0.5,
       fonts: { label: "12px system-ui, sans-serif", sub: "11px system-ui, sans-serif" },

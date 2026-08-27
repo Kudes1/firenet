@@ -72,7 +72,10 @@ const TopoScene = (() => {
     if (states.has("selected")) { st.stroke = theme.accent; st.lineWidth = 2.5; }
     if (states.has("pending")) { st.stroke = theme.accent; st.lineWidth = 3; }
     if (states.has("search-hit")) st.lineWidth = (pub.lineWidth || 1) + 2;
-    const flow = states.has("diag-flow-ok") ? theme.flowOk : states.has("diag-flow-deny") ? theme.flowDeny : null;
+    const flow = states.has("diag-flow-ok") ? theme.flowOk
+      : states.has("diag-flow-deny") ? theme.flowDeny
+      : states.has("diag-flow-half") ? theme.flowHalf
+      : null;
     // flow красит только контуры; у подписей stroke нет
     if (flow && base.stroke) {
       const k = fade?.flow ?? 1;
