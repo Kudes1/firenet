@@ -24,7 +24,7 @@ document.addEventListener("alpine:init", () => {
 
     async init() {
       try {
-        const [topo, doc] = await Promise.all([Api.get("/api/topology"), Api.get("/api/subnets")]);
+        const [topo, doc] = await Promise.all([Api.get(apiPath("topology")), Api.get(apiPath("subnets"))]);
         this._topo = topo; // devices/links/attach are preserved verbatim on save
         this.networks = (topo.networks || []).map((n) => ({ name: n.name, subnets: [...(n.subnets || [])], description: n.description || "" }));
         this.subnets = doc.subnets || [];
@@ -153,7 +153,8 @@ document.addEventListener("alpine:init", () => {
 
     async persist(next) {
       try {
-        const doc = await Api.put("/api/topology", {
+        assertEditable();
+        const doc = await Api.put(apiPath("topology"), {
           devices: this._topo.devices || [],
           links: this._topo.links || [],
           networks: next.map((n) => {

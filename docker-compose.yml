@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: firenet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: firenet
+    volumes:
+      - firenet-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U firenet -d firenet"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      FIRENET_DATABASE_URL: postgres://firenet:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/firenet?sslmode=disable
+      FIRENET_ADMIN_USER: ${FIRENET_ADMIN_USER:?set FIRENET_ADMIN_USER in .env}
+      FIRENET_ADMIN_PASSWORD: ${FIRENET_ADMIN_PASSWORD:?set FIRENET_ADMIN_PASSWORD in .env}
+    ports:
+      - "8787:8787"
+
+volumes:
+  firenet-db:

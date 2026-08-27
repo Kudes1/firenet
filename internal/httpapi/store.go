@@ -4,30 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"gopkg.in/yaml.v3"
-
-	"github.com/kudes1/firenet/internal/rules"
 )
 
-// ProjectStore is the persistence seam between the HTTP API and where a
-// project's topology/rules/layout actually live. FileProjectStore (a single
-// directory's worth of files) is the only implementation today; a future
-// multi-project/team server can swap in a different one without touching a
-// single handler.
-type ProjectStore interface {
-	ReadTopology() ([]byte, error)
-	WriteTopology([]byte) error
-	ReadSubnets() ([]byte, error)
-	WriteSubnets([]byte) error
-	ReadRules() ([]byte, error)
-	WriteRules([]byte) error
-	// ReadLayout returns (nil, nil) if no layout has been saved yet.
-	ReadLayout() ([]byte, error)
-	WriteLayout([]byte) error
-}
-
-// FileProjectStore reads/writes a project's files directly on disk.
+// FileProjectStore reads/writes a project's files directly on disk. Used
+// only for the one-time legacy-file import into version 1 (see
+// internal/cli/legacy.go) — live serving goes through internal/pgstore.
 type FileProjectStore struct {
 	TopologyPath string
 	SubnetsPath  string
@@ -51,67 +32,6 @@ func (s FileProjectStore) ReadLayout() ([]byte, error) {
 }
 
 func (s FileProjectStore) WriteLayout(b []byte) error { return writeFileAtomic(s.LayoutPath, b) }
-
-// EnsureSeeded creates empty-but-valid topology/subnets/rules files at the
-// store's paths if they don't already exist, so a brand-new project can be
-// started purely from the browser instead of requiring hand-written YAML up
-// front.
-func (s FileProjectStore) EnsureSeeded() error {
-	for path, content := range map[string][]byte{
-		s.TopologyPath: emptyTopologyYAML(),
-		s.SubnetsPath:  emptySubnetsYAML(),
-		s.RulesPath:    emptyPolicyYAML(),
-	} {
-		if err := seedIfMissing(path, content); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func emptyTopologyYAML() []byte {
-	b, err := yaml.Marshal(TopologyDoc{
-		Devices:  []DeviceDoc{},
-		Links:    []LinkDoc{},
-		Networks: []NetworkDoc{},
-		Sets:     []SetDoc{},
-		Unions:   []UnionDoc{},
-	})
-	if err != nil {
-		panic(err) // static value, can't fail
-	}
-	return b
-}
-
-func emptySubnetsYAML() []byte {
-	b, err := yaml.Marshal(SubnetsDoc{Subnets: []SubnetDoc{}})
-	if err != nil {
-		panic(err) // static value, can't fail
-	}
-	return b
-}
-
-func emptyPolicyYAML() []byte {
-	b, err := yaml.Marshal(PolicyDoc{Chains: []ChainDoc{{
-		Name:          rules.DefaultChainName,
-		DefaultAction: "deny",
-		ChainPosition: string(rules.ChainTop),
-		Rules:         []RuleDoc{},
-	}}})
-	if err != nil {
-		panic(err) // static value, can't fail
-	}
-	return b
-}
-
-func seedIfMissing(path string, content []byte) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat %s: %w", path, err)
-	}
-	return writeFileAtomic(path, content)
-}
 
 // writeFileAtomic writes via a temp file + rename so a mid-write crash can't
 // corrupt the user's real config file.

@@ -58,10 +58,129 @@ const DirtyGuard = (() => {
   return { arm, markClean, isDirty };
 })();
 
+// --- draft context ---
+// sessionStorage (not localStorage) so each browser tab can hold a
+// different draft: a user editing draft A in one tab and draft B in
+// another must not clobber each other's context.
+const DRAFT_ID_KEY = "firenet-draft-id";
+
+function currentDraftID() {
+  return sessionStorage.getItem(DRAFT_ID_KEY) || null;
+}
+
+function setCurrentDraftID(id) {
+  lastDraftRevision = null;
+  if (id) sessionStorage.setItem(DRAFT_ID_KEY, id);
+  else sessionStorage.removeItem(DRAFT_ID_KEY);
+}
+
+function isReadOnly() {
+  return !currentDraftID();
+}
+
+// renderDraftBanner shows a persistent, page-wide indicator of whether
+// this tab is viewing the read-only current version or editing inside a
+// draft, with the action to switch. If the active draft no longer exists
+// (deleted or confirmed from another tab), the tab drops back to read-only.
+async function renderDraftBanner() {
+  const banner = document.createElement("div");
+  banner.className = "draft-banner";
+  const draftID = currentDraftID();
+
+  if (draftID) {
+    let draft;
+    try {
+      draft = await Api.get(`/api/drafts/${draftID}`);
+    } catch {
+      setCurrentDraftID(null);
+      window.location.reload();
+      return;
+    }
+    banner.classList.add("draft-banner-editing");
+    const text = document.createElement("span");
+    text.textContent = `Черновик «${draft.name}» (${draft.status}).`;
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.textContent = "Вернуться к текущей версии";
+    closeBtn.addEventListener("click", () => {
+      setCurrentDraftID(null);
+      window.location.reload();
+    });
+    banner.append(text, closeBtn);
+  } else {
+    const [version] = await Api.get("/api/versions?limit=1");
+    banner.classList.add("draft-banner-readonly");
+    const text = document.createElement("span");
+    text.textContent = `Только чтение — версия ${version ? version.id : "—"}.`;
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.textContent = "Открыть черновик";
+    openBtn.addEventListener("click", async () => {
+      const name = window.prompt("Имя черновика:");
+      if (!name) return;
+      try {
+        const draft = await Api.post("/api/drafts", { name });
+        setCurrentDraftID(draft.id);
+        window.location.reload();
+      } catch (e) {
+        showBanner("Не удалось создать черновик: " + e.message);
+      }
+    });
+    banner.append(text, openBtn);
+  }
+
+  document.body.prepend(banner);
+}
+
+// apiPath builds the URL for one project-data resource (e.g. "topology",
+// or "link-exports?link=0&side=a"), routed through the active draft in
+// this tab, or the read-only current version otherwise. Every page that
+// reads/writes project data goes through this instead of a literal
+// "/api/..." string, so there is exactly one place that knows the
+// draft-vs-current routing rule.
+function apiPath(suffix) {
+  const draftID = currentDraftID();
+  return draftID ? `/api/drafts/${draftID}/${suffix}` : `/api/versions/current/${suffix}`;
+}
+
+class ReadOnlyError extends Error {
+  constructor() {
+    super("Только чтение — откройте черновик, чтобы редактировать");
+  }
+}
+
+// assertEditable is the one-line guard every save path calls first.
+function assertEditable() {
+  if (isReadOnly()) throw new ReadOnlyError();
+}
+
+// lastDraftRevision is the CAS token from the most recent draft response
+// (GET or PUT) in this page load — attached to the next PUT automatically
+// so callers never have to thread X-Draft-Revision through by hand.
+let lastDraftRevision = null;
+
+// loginRedirectURL builds the /login target for an unauthenticated
+// request, preserving where the user was so they land back there after
+// logging in. Guards against open redirects: only same-origin, absolute
+// paths are honored as the "next" target.
+function loginRedirectURL(pathname, search) {
+  const target = pathname + search;
+  const safe = target.startsWith("/") && !target.startsWith("//");
+  return "/login" + (safe ? "?next=" + encodeURIComponent(target) : "");
+}
+
+async function redirectToLogin() {
+  window.location.href = loginRedirectURL(window.location.pathname, window.location.search);
+  return new Promise(() => {}); // navigation is underway; never resolve
+}
+
 const Api = {
   async get(path) {
     const res = await fetch(path);
+    if (res.status === 401) return redirectToLogin();
     if (!res.ok) throw await apiError(res);
+    const rev = res.headers?.get("X-Draft-Revision");
+    if (rev) lastDraftRevision = rev;
     return res.json();
   },
   async post(path, body) {
@@ -70,27 +189,35 @@ const Api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (res.status === 401) return redirectToLogin();
     if (!res.ok) throw await apiError(res);
     return res.status === 204 ? null : res.json();
   },
   async put(path, body) {
-    const res = await fetch(path, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const headers = { "Content-Type": "application/json" };
+    if (lastDraftRevision) headers["X-Draft-Revision"] = lastDraftRevision;
+    const res = await fetch(path, { method: "PUT", headers, body: JSON.stringify(body) });
+    if (res.status === 401) return redirectToLogin();
+    if (!res.ok) throw await apiError(res);
+    const rev = res.headers?.get("X-Draft-Revision");
+    if (rev) lastDraftRevision = rev;
+    return res.status === 204 ? null : res.json();
+  },
+  async delete(path) {
+    const res = await fetch(path, { method: "DELETE" });
+    if (res.status === 401) return redirectToLogin();
     if (!res.ok) throw await apiError(res);
     return res.status === 204 ? null : res.json();
   },
 };
 
 async function apiError(res) {
-  try {
-    const data = await res.json();
-    return new Error(data.error || `HTTP ${res.status}`);
-  } catch {
-    return new Error(`HTTP ${res.status}`);
-  }
+  let data = {};
+  try { data = await res.json(); } catch {}
+  const err = new Error(data.error || `HTTP ${res.status}`);
+  err.status = res.status;
+  err.data = data;
+  return err;
 }
 
 // ipv4CidrOverlap is a best-effort client-side hint for the same check
@@ -229,6 +356,9 @@ const NAV_GROUPS = [
 
 const NAV_STANDALONE = [
   { id: "diagnose", href: "/ui/diagnose", label: "Диагностика" },
+  { id: "users", href: "/ui/users", label: "Пользователи" },
+  { id: "drafts", href: "/ui/drafts", label: "Черновики" },
+  { id: "history", href: "/ui/history", label: "История" },
 ];
 
 const svgOpen = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
@@ -242,6 +372,9 @@ const NAV_ICONS = {
   rules: svgOpen + '<path d="M12 3l8 3v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3z"/></svg>',
   compile: svgOpen + '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
   diagnose: svgOpen + '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+  users: svgOpen + '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 8a3 3 0 1 1 0 6"/><path d="M21 20c0-2.5-1.6-4.6-4-5.5"/></svg>',
+  drafts: svgOpen + '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
+  history: svgOpen + '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 3"/></svg>',
 };
 
 // buildNav renders the shared sidebar shell (brand, collapsible nav with
@@ -353,6 +486,28 @@ function buildNav(active) {
   });
   aside.append(btn);
 
+  const userBox = document.createElement("div");
+  userBox.className = "user-box";
+  const userName = document.createElement("span");
+  userName.className = "user-name";
+  const logoutBtn = document.createElement("button");
+  logoutBtn.type = "button";
+  logoutBtn.className = "logout-btn";
+  logoutBtn.textContent = "Выйти";
+  logoutBtn.addEventListener("click", async () => {
+    await fetch("/api/logout", { method: "POST" });
+    window.location.href = "/login";
+  });
+  userBox.append(userName, logoutBtn);
+  aside.append(userBox);
+
+  fetch("/api/me")
+    .then((res) => (res.ok ? res.json() : null))
+    .then((me) => {
+      if (me) userName.textContent = me.username + (me.role === "admin" ? " · admin" : "");
+    })
+    .catch(() => {});
+
   const banner = document.createElement("div");
   banner.id = "error-banner";
   banner.className = "banner";
@@ -369,4 +524,7 @@ function buildNav(active) {
 document.addEventListener("DOMContentLoaded", () => {
   const active = document.body.dataset.nav;
   if (active) buildNav(active);
+  if (!document.body.dataset.noDraftBanner) {
+    void renderDraftBanner().catch((e) => showBanner("Не удалось загрузить статус версии: " + e.message));
+  }
 });

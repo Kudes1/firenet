@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>firenet — пользователи</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-nav="users">
+<main class="page">
+  <h1>Пользователи</h1>
+  <p id="access-denied" class="banner error" hidden>Доступ только для администраторов.</p>
+
+  <table id="users-table" class="data-table" hidden>
+    <thead><tr><th>Логин</th><th>Роль</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <form id="create-user-form">
+    <label>Логин <input type="text" name="username" required></label>
+    <label>Пароль <input type="password" name="password" required minlength="8"></label>
+    <label>Роль
+      <select name="role">
+        <option value="user">user</option>
+        <option value="admin">admin</option>
+      </select>
+    </label>
+    <button type="submit">Создать</button>
+  </form>
+</main>
+<script src="/alpine.min.js" defer></script>
+<script src="/common.js"></script>
+<script src="/users.js"></script>
+</body>
+</html>

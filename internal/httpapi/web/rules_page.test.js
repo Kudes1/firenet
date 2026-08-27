@@ -14,6 +14,7 @@ function bootPage({ failPut = null, lintFindings = [] } = {}) {
   const factories = {};
   const calls = [];
   const banners = [];
+  const store = { "firenet-draft-id": "d1" };
   const docListeners = {};
   const notify = (event) => {
     if (event.type === "notify") banners.push(event.detail);
@@ -48,6 +49,11 @@ function bootPage({ failPut = null, lintFindings = [] } = {}) {
     document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
     window: { dispatchEvent: notify },
     localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = v; },
+      removeItem: (k) => { delete store[k]; },
+    },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     confirm: () => true,
@@ -56,23 +62,23 @@ function bootPage({ failPut = null, lintFindings = [] } = {}) {
     console,
     fetch: async (path_, opts) => {
       calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
-      if (path_ === "/api/rules" && opts?.method === "PUT" && failPut) {
+      if (path_ === "/api/drafts/d1/rules" && opts?.method === "PUT" && failPut) {
         return { ok: false, status: 422, json: async () => ({ error: failPut }) };
       }
-      if (path_ === "/api/rules") {
+      if (path_ === "/api/drafts/d1/rules") {
         return { ok: true, status: 200, json: async () => calls.findLast((c) => c.method === "PUT")?.body || rulesFixture };
       }
-      if (path_ === "/api/topology") {
+      if (path_ === "/api/drafts/d1/topology") {
         return { ok: true, status: 200, json: async () => topoFixture };
       }
-      if (path_ === "/api/subnets") {
+      if (path_ === "/api/drafts/d1/subnets") {
         return {
           ok: true,
           status: 200,
           json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }, { name: "b", cidr: "10.0.1.0/24" }] }),
         };
       }
-      if (path_ === "/api/lint") {
+      if (path_ === "/api/drafts/d1/lint") {
         return { ok: true, status: 200, json: async () => ({ findings: lintFindings }) };
       }
       return { ok: false, status: 404, json: async () => ({}) };
@@ -88,7 +94,7 @@ function bootPage({ failPut = null, lintFindings = [] } = {}) {
   const page = factories.rulesPage();
   page.$nextTick = (fn) => fn();
   page.$refs = { dialog: { close: () => calls.push({ path: "dialog.close" }), showModal: () => calls.push({ path: "dialog.showModal" }) } };
-  return { page, calls, banners };
+  return { page, calls, banners, store };
 }
 
 async function bootLoadedPage() {
@@ -242,7 +248,7 @@ test("saveDraft appends a new rule and persists the whole policy doc", async () 
 
   await page.saveDraft();
 
-  const put = calls.find((c) => c.path === "/api/rules" && c.method === "PUT");
+  const put = calls.find((c) => c.path === "/api/drafts/d1/rules" && c.method === "PUT");
   assert.equal(put.body.chains[0].defaultAction, "deny");
   assert.equal(put.body.chains[0].chainPosition, "top");
   assert.deepEqual(put.body.chains[0].rules.map((r) => r.name), ["web", "to-limited", "dns"]);
@@ -372,7 +378,7 @@ test("persist sends chains-shaped body", async () => {
 
   await page.saveDraft();
 
-  const put = calls.find((c) => c.path === "/api/rules" && c.method === "PUT");
+  const put = calls.find((c) => c.path === "/api/drafts/d1/rules" && c.method === "PUT");
   assert.ok(Array.isArray(put.body.chains));
 });
 
@@ -398,4 +404,16 @@ test("jumpToFinding switches to the finding's chain and highlights its rules", a
 
   assert.equal(ctx.page.active, 1); // LIMITED is rulesFixture.chains[1]
   assert.deepEqual(ctx.page.highlightedRules, ["limited-dns"]);
+});
+
+test("saveDraft is blocked while read-only (no active draft)", async () => {
+  const { page, calls, store } = await bootLoadedPage();
+  delete store["firenet-draft-id"];
+  page.openAdd();
+  Object.assign(page.draft, { name: "dns", src: ["any"], dst: ["any"], proto: "udp", dstPorts: "53" });
+
+  await page.saveDraft();
+
+  assert.equal(calls.filter((c) => c.method === "PUT").length, 0);
+  assert.match(page.modalError, /Только чтение/);
 });

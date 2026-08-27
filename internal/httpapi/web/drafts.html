@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>firenet — черновики</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-nav="drafts" data-no-draft-banner="true" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
+<main class="page">
+  <h1>Черновики</h1>
+
+  <label id="all-toggle" hidden><input type="checkbox" id="all-checkbox"> Показать черновики всех пользователей</label>
+
+  <table id="drafts-table" class="data-table">
+    <thead><tr><th>Название</th><th>Автор</th><th>База</th><th>Статус</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <form id="create-draft-form">
+    <label>Название <input type="text" name="name" required></label>
+    <button type="submit">Создать черновик</button>
+  </form>
+
+  <section id="diff-panel" hidden>
+    <h2>Изменения <span id="diff-draft-name"></span></h2>
+    <table class="data-table">
+      <thead><tr><th>Тип</th><th>Ключ</th><th>Изменение</th></tr></thead>
+      <tbody id="diff-body"></tbody>
+    </table>
+    <button type="button" id="confirm-btn" hidden>Подтвердить</button>
+  </section>
+</main>
+<script src="/alpine.min.js" defer></script>
+<script src="/common.js"></script>
+<script src="/drafts.js"></script>
+</body>
+</html>

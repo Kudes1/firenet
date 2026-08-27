@@ -1033,3 +1033,143 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .lint-finding-chain { font-size: 0.8em; opacity: 0.7; }
 .lint-finding-msg { font-size: 0.9em; }
 .lint-highlighted { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.user-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.user-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+.sidebar.collapsed .user-name {
+  display: none;
+}
+.logout-btn {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8em;
+  cursor: pointer;
+}
+.logout-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+.login-card {
+  width: min(320px, 90vw);
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.login-card h1 {
+  margin: 0 0 16px;
+  font-size: 1.2em;
+}
+.login-card label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 0.9em;
+}
+.login-card input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+}
+.login-card button {
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+.login-error {
+  margin-top: 12px;
+  color: #dc2626;
+  font-size: 0.85em;
+}
+.data-table {
+  border-collapse: collapse;
+  margin-bottom: 24px;
+}
+.data-table th, .data-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+}
+
+/* The banner is prepended to <body>, which is a horizontal flex row
+   (sidebar + main); without position:fixed it would become a third
+   column instead of a page-wide header. Pinning it to the top takes it
+   out of that row, so .sidebar/main need a compensating padding-top
+   (below) — but only on pages where the banner actually renders, i.e.
+   not [data-no-draft-banner] (see common.js's DOMContentLoaded guard). */
+.draft-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: 0.85em;
+  border-bottom: 1px solid var(--border);
+}
+/* ~44px covers the banner's own rendered height (padding 8px top+bottom
+   plus its text/button content, ~28px) without leaving a visible gap. */
+body:not([data-no-draft-banner]) .sidebar,
+body:not([data-no-draft-banner]) main {
+  padding-top: calc(var(--space-3) + 44px);
+}
+.draft-banner-readonly {
+  background: var(--bg);
+  color: var(--muted);
+}
+.draft-banner-editing {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--text);
+}
+.draft-banner button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+.draft-banner button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.conflict-row {
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg));
+}

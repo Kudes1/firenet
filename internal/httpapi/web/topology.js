@@ -83,7 +83,7 @@ const Topology = (() => {
     const r = canvas().getBoundingClientRect();
     LinkPanel.show(link, index, {
       subnets: State.subnets,
-      fetchExports: (i, side) => Api.get(`/api/link-exports?link=${i}&side=${side}`).then((res) => res.entities || []),
+      fetchExports: (i, side) => Api.get(apiPath(`link-exports?link=${i}&side=${side}`)).then((res) => res.entities || []),
       onApply: (filter) => {
         const { filter: _drop, ...rest } = link;
         State.topology.links[index] = filter ? { ...rest, filter } : rest;
@@ -95,7 +95,12 @@ const Topology = (() => {
   function scheduleLayoutSave() {
     clearTimeout(saveLayoutTimer);
     saveLayoutTimer = setTimeout(() => {
-      Api.put("/api/layout", { ...State.layout, camera: State.camera }).catch(() => {
+      try {
+        assertEditable();
+      } catch {
+        return; // read-only tab: nothing to persist
+      }
+      Api.put(apiPath("layout"), { ...State.layout, camera: State.camera }).catch(() => {
         /* layout is best-effort presentation state */
       });
     }, 400);
@@ -901,7 +906,8 @@ const Topology = (() => {
     DirtyGuard.arm(() => State.topology);
     document.getElementById("topo-save").addEventListener("click", async () => {
       try {
-        State.topology = await Api.put("/api/topology", State.topology);
+        assertEditable();
+        State.topology = await Api.put(apiPath("topology"), State.topology);
         showBanner("Топология сохранена", "ok");
         DirtyGuard.markClean();
         render();
@@ -913,14 +919,14 @@ const Topology = (() => {
 
   async function boot() {
     try {
-      const [topo, subnetsDoc] = await Promise.all([Api.get("/api/topology"), Api.get("/api/subnets")]);
+      const [topo, subnetsDoc] = await Promise.all([Api.get(apiPath("topology")), Api.get(apiPath("subnets"))]);
       State.topology = topo;
       State.subnets = subnetsDoc.subnets || [];
     } catch (e) {
       showBanner("Не удалось загрузить топологию: " + e.message);
     }
     try {
-      const layout = await Api.get("/api/layout");
+      const layout = await Api.get(apiPath("layout"));
       State.layout = { devices: layout.devices || {}, networks: layout.networks || layout.subnets || {}, links: layout.links || {} };
       State.camera = layout.camera && layout.camera.z > 0 ? { ...Camera.create(), ...layout.camera } : Camera.create();
     } catch {

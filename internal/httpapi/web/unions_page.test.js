@@ -13,6 +13,7 @@ function bootPage() {
   const factories = {};
   const calls = [];
   const banners = [];
+  const store = { "firenet-draft-id": "d1" };
   const docListeners = {};
   const notify = (event) => {
     if (event.type === "notify") banners.push(event.detail);
@@ -28,6 +29,11 @@ function bootPage() {
     document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
     window: { dispatchEvent: notify },
     localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = v; },
+      removeItem: (k) => { delete store[k]; },
+    },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     dispatchEvent: notify,
@@ -37,10 +43,10 @@ function bootPage() {
     console,
     fetch: async (path_, opts) => {
       calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
-      if (path_ === "/api/topology") {
+      if (path_ === "/api/drafts/d1/topology") {
         return { ok: true, status: 200, json: async () => calls.find((c) => c.method === "PUT")?.body || topoFixture };
       }
-      if (path_ === "/api/subnets") {
+      if (path_ === "/api/drafts/d1/subnets") {
         return {
           ok: true,
           status: 200,
@@ -60,7 +66,7 @@ function bootPage() {
   const page = factories.unionsPage();
   page.$nextTick = (fn) => fn();
   page.$refs = { dialog: { close: () => calls.push({ path: "dialog.close" }) } };
-  return { page, calls, banners };
+  return { page, calls, banners, store };
 }
 
 async function bootLoadedPage() {
@@ -97,7 +103,7 @@ test("saveDraft adds a union and preserves the rest of the topology verbatim", a
 
   await page.saveDraft();
 
-  const put = calls.find((c) => c.path === "/api/topology" && c.method === "PUT");
+  const put = calls.find((c) => c.path === "/api/drafts/d1/topology" && c.method === "PUT");
   assert.deepEqual(put.body.devices, [{ name: "r1", kind: "router" }]);
   assert.deepEqual(put.body.links, []);
   assert.deepEqual(put.body.networks, [{ name: "office", subnets: ["a"], attach: [{ device: "r1" }] }]);
@@ -167,4 +173,12 @@ test("a freshly created union without members is listed with empty filters", asy
   // a non-empty member search still hides unions without members
   page.filters.devices = "r1";
   assert.deepEqual(page.filteredUnions.map((u) => u.union.name), ["hq"]);
+});
+
+test("saveDraft is blocked while read-only (no active draft)", async () => {
+  const { page, calls, store } = await bootLoadedPage();
+  delete store["firenet-draft-id"];
+  page.draft = { index: 0, name: "hq", description: "" };
+  await page.saveDraft();
+  assert.equal(calls.filter((c) => c.method === "PUT").length, 0);
 });

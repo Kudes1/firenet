@@ -69,7 +69,7 @@ function registerRulesPage() {
 
     async init() {
       try {
-        const [doc, topo, subnets] = await Promise.all([Api.get("/api/rules"), Api.get("/api/topology"), Api.get("/api/subnets")]);
+        const [doc, topo, subnets] = await Promise.all([Api.get(apiPath("rules")), Api.get(apiPath("topology")), Api.get(apiPath("subnets"))]);
         this._applyDoc(doc);
         this.networks = topo.networks || [];
         this.sets = topo.sets || [];
@@ -411,7 +411,8 @@ function registerRulesPage() {
     },
 
     async persist(next) {
-      const doc = await Api.put("/api/rules", { chains: next.chains });
+      assertEditable();
+      const doc = await Api.put(apiPath("rules"), { chains: next.chains });
       this._applyDoc(doc);
       showBanner("Правила сохранены", "ok");
     },
@@ -421,7 +422,7 @@ function registerRulesPage() {
     async runLint() {
       this.linting = true;
       try {
-        const res = await Api.get("/api/lint");
+        const res = await Api.get(apiPath("lint"));
         this.lintFindings = res.findings || [];
         this.lintOpen = true;
       } catch (e) {

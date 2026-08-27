@@ -50,6 +50,7 @@ function loadCommon(store) {
     CustomEvent: class {},
     dispatchEvent() {},
     confirm: () => false,
+    fetch: () => Promise.resolve({ ok: false }),
     setTimeout,
     clearTimeout,
     console,
@@ -95,11 +96,15 @@ test("buildNav renders an aside.sidebar with brand, groups and nav links", () =>
     return acc;
   };
   const navLinks = links(nav);
-  assert.equal(navLinks.length, 9, "all sections are linked");
+  assert.equal(navLinks.length, 12, "all sections are linked");
   const groupLinks = (g) => links(g).map(label);
   assert.deepEqual(groupLinks(groups[0]), ["Схема", "Сети", "Объединения", "Связи"]);
   assert.deepEqual(groupLinks(groups[1]), ["Подсети", "Наборы", "Правила", "Компиляция"]);
-  assert.equal(label(navLinks[navLinks.length - 1]), "Диагностика", "standalone link after the groups");
+  assert.deepEqual(
+    navLinks.slice(-4).map(label),
+    ["Диагностика", "Пользователи", "Черновики", "История"],
+    "standalone links after the groups",
+  );
 
   assert.equal(
     label(navLinks.find((a) => String(a.className).split(" ").includes("active"))),

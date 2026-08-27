@@ -13,6 +13,7 @@ function bootPage() {
   const factories = {};
   const calls = [];
   const banners = [];
+  const store = { "firenet-draft-id": "d1" };
   const docListeners = {};
   const notify = (event) => {
     if (event.type === "notify") banners.push(event.detail);
@@ -21,6 +22,11 @@ function bootPage() {
     document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
     window: { dispatchEvent: notify },
     localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = v; },
+      removeItem: (k) => { delete store[k]; },
+    },
     matchMedia: () => ({ matches: false }),
     CustomEvent: class {},
     dispatchEvent: notify,
@@ -30,10 +36,10 @@ function bootPage() {
     console,
     fetch: async (path_, opts) => {
       calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
-      if (path_ === "/api/subnets") {
+      if (path_ === "/api/drafts/d1/subnets") {
         return { ok: true, status: 200, json: async () => ({ subnets: calls.find((c) => c.method === "PUT")?.body.subnets || [] }) };
       }
-      if (path_ === "/api/topology") {
+      if (path_ === "/api/drafts/d1/topology") {
         return { ok: true, status: 200, json: async () => ({ networks: [{ name: "net1", subnets: ["a"] }] }) };
       }
       return { ok: false, status: 404, json: async () => ({}) };
@@ -49,7 +55,7 @@ function bootPage() {
   const page = factories.subnetsPage();
   page.$nextTick = (fn) => fn();
   page.$refs = { dialog: { close: () => calls.push({ path: "dialog.close" }) } };
-  return { page, calls, banners };
+  return { page, calls, banners, store };
 }
 
 test("draftHint flags empty fields, duplicates and CIDR overlaps", () => {
@@ -79,7 +85,7 @@ test("saveDraft appends a new subnet and persists the whole document", async () 
 
   await page.saveDraft();
 
-  const put = calls.find((c) => c.path === "/api/subnets" && c.method === "PUT");
+  const put = calls.find((c) => c.path === "/api/drafts/d1/subnets" && c.method === "PUT");
   assert.deepEqual(put.body, {
     subnets: [
       { name: "a", cidr: "10.0.0.0/24", description: "офис" },
@@ -139,4 +145,15 @@ test("removeRow deletes after confirmation", async () => {
 
   const put = calls.find((c) => c.method === "PUT");
   assert.deepEqual(put.body, { subnets: [{ name: "b", cidr: "10.0.1.0/24" }] });
+});
+
+test("saveDraft is blocked while read-only (no active draft)", async () => {
+  const { page, calls, store } = bootPage();
+  delete store["firenet-draft-id"];
+  page.rows = [];
+  page.draft = { index: -1, name: "b", cidr: "10.0.1.0/24", description: "гостевая" };
+
+  await page.saveDraft();
+
+  assert.equal(calls.filter((c) => c.method === "PUT").length, 0);
 });

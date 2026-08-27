@@ -2,20 +2,24 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/kudes1/firenet/internal/auth"
+	"github.com/kudes1/firenet/internal/db/dbtest"
 	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/lint"
+	"github.com/kudes1/firenet/internal/pgstore"
+	"github.com/kudes1/firenet/internal/projectdoc"
 	"github.com/kudes1/firenet/internal/rules"
 )
 
@@ -46,25 +50,83 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func newTestServer(t *testing.T) (http.Handler, FileProjectStore) {
+// mustParseFixtureDoc builds the ProjectDoc newTestServer seeds as
+// version 1, from the same YAML fixtures the file used to write directly
+// to disk.
+func mustParseFixtureDoc(t *testing.T) projectdoc.ProjectDoc {
 	t.Helper()
-	dir := t.TempDir()
-	store := FileProjectStore{
-		TopologyPath: filepath.Join(dir, "topology.yaml"),
-		SubnetsPath:  filepath.Join(dir, "subnets.yaml"),
-		RulesPath:    filepath.Join(dir, "rules.yaml"),
-		LayoutPath:   filepath.Join(dir, ".firenet-layout.json"),
+	var doc projectdoc.ProjectDoc
+	if err := yaml.Unmarshal([]byte(fixtureTopology), &doc.Topology); err != nil {
+		t.Fatalf("parse fixture topology: %v", err)
 	}
-	if err := store.WriteTopology([]byte(fixtureTopology)); err != nil {
-		t.Fatalf("seed topology: %v", err)
+	if err := yaml.Unmarshal([]byte(fixtureSubnets), &doc.Subnets); err != nil {
+		t.Fatalf("parse fixture subnets: %v", err)
 	}
-	if err := store.WriteSubnets([]byte(fixtureSubnets)); err != nil {
-		t.Fatalf("seed subnets: %v", err)
+	pol, err := rules.Load(strings.NewReader(fixtureRules))
+	if err != nil {
+		t.Fatalf("parse fixture rules: %v", err)
 	}
-	if err := store.WriteRules([]byte(fixtureRules)); err != nil {
-		t.Fatalf("seed rules: %v", err)
+	doc.Rules = NewPolicyDoc(pol)
+	return doc
+}
+
+// newTestServer seeds version 1 from the fixtures above and opens one
+// draft ("test-draft") on top of it, owned by the bootstrapped admin.
+// Returns the authenticated handler, the pgstore.Store for tests that
+// need to inspect persisted state directly, and the draft's id.
+func newTestServer(t *testing.T) (http.Handler, *pgstore.Store, string) {
+	t.Helper()
+	pool := dbtest.Open(t)
+	users := auth.NewStore(pool)
+	ctx := context.Background()
+	if err := users.BootstrapAdmin(ctx, "admin", "test-password-1"); err != nil {
+		t.Fatalf("bootstrap admin: %v", err)
 	}
-	return NewServer(store, discardLogger()), store
+	admin, err := users.GetUserByUsername(ctx, "admin")
+	if err != nil {
+		t.Fatalf("get admin: %v", err)
+	}
+
+	projects := pgstore.NewStore(pool)
+	if _, err := projects.SeedInitialVersion(ctx, mustParseFixtureDoc(t), admin); err != nil {
+		t.Fatalf("seed initial version: %v", err)
+	}
+	draft, err := projects.CreateDraft(ctx, admin, "test-draft")
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	srv := NewServer(projects, users, discardLogger())
+	return authenticatedHandler(t, srv), projects, draft.ID
+}
+
+// authenticatedHandler logs in once and returns a handler that stamps
+// every incoming test request with that session cookie first, so tests
+// that build requests directly and call srv.ServeHTTP need no changes to
+// stay authenticated.
+func authenticatedHandler(t *testing.T, srv http.Handler) http.Handler {
+	t.Helper()
+	body, err := json.Marshal(loginRequest{Username: "admin", Password: "test-password-1"})
+	if err != nil {
+		t.Fatalf("marshal login body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("test login failed: status %d, body %s", rec.Code, rec.Body.String())
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("test login did not set a session cookie")
+	}
+	sessionCookie := cookies[0]
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.AddCookie(sessionCookie)
+		srv.ServeHTTP(w, r)
+	})
 }
 
 // errorBody decodes the {"error": ...} envelope into the raw message.
@@ -79,8 +141,45 @@ func errorBody(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return out.Error
 }
 
+// draftPath builds a /api/drafts/{id}/... URL.
+func draftPath(draftID, suffix string) string {
+	return "/api/drafts/" + draftID + "/" + suffix
+}
+
+// readDraftDoc fetches a draft's current document straight from the
+// store, bypassing HTTP — used where a test used to inspect the file
+// store directly.
+func readDraftDoc(t *testing.T, projects *pgstore.Store, draftID string) projectdoc.ProjectDoc {
+	t.Helper()
+	doc, _, err := projects.ReadDraft(context.Background(), draftID)
+	if err != nil {
+		t.Fatalf("ReadDraft: %v", err)
+	}
+	return doc
+}
+
+func marshalJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
+}
+
+// doJSON issues a request with an optional JSON body against h. A PUT to
+// a /api/drafts/{id}/... path first GETs that same path to pick up the
+// fresh X-Draft-Revision, so individual tests never have to manage CAS
+// revisions themselves.
 func doJSON(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
+	var revision string
+	if method == http.MethodPut && strings.Contains(path, "/api/drafts/") {
+		getRec := httptest.NewRecorder()
+		h.ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, path, nil))
+		revision = getRec.Result().Header.Get("X-Draft-Revision")
+	}
+
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -90,14 +189,17 @@ func doJSON(t *testing.T, h http.Handler, method, path string, body any) *httpte
 		r = bytes.NewReader(b)
 	}
 	req := httptest.NewRequest(method, path, r)
+	if revision != "" {
+		req.Header.Set("X-Draft-Revision", revision)
+	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
 }
 
 func TestGetTopology(t *testing.T) {
-	h, _ := newTestServer(t)
-	rec := doJSON(t, h, http.MethodGet, "/api/topology", nil)
+	h, _, draftID := newTestServer(t)
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "topology"), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -111,8 +213,8 @@ func TestGetTopology(t *testing.T) {
 }
 
 func TestGetPutSubnets(t *testing.T) {
-	h, _ := newTestServer(t)
-	rec := doJSON(t, h, http.MethodGet, "/api/subnets", nil)
+	h, _, draftID := newTestServer(t)
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "subnets"), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -125,16 +227,16 @@ func TestGetPutSubnets(t *testing.T) {
 	}
 
 	doc.Subnets = append(doc.Subnets, SubnetDoc{Name: "guest", CIDR: "10.0.2.0/24"})
-	rec = doJSON(t, h, http.MethodPut, "/api/subnets", doc)
+	rec = doJSON(t, h, http.MethodPut, draftPath(draftID, "subnets"), doc)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("put status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
 func TestGetPutTopologyWithUnions(t *testing.T) {
-	h, store := newTestServer(t)
+	h, projects, draftID := newTestServer(t)
 
-	rec := doJSON(t, h, http.MethodGet, "/api/topology", nil)
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "topology"), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -153,39 +255,32 @@ func TestGetPutTopologyWithUnions(t *testing.T) {
 		Sets:     []SetDoc{},
 		Unions:   []UnionDoc{{Name: "office", Devices: []string{"r1", "r2"}, Networks: []string{"n-office"}, Description: "hq"}},
 	}
-	rec = doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	rec = doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("put status = %d, body = %s", rec.Code, rec.Body)
 	}
 
-	raw, err := store.ReadTopology()
-	if err != nil {
-		t.Fatalf("read stored: %v", err)
-	}
-	var stored TopologyDoc
-	if err := yaml.Unmarshal(raw, &stored); err != nil {
-		t.Fatalf("parse stored: %v", err)
-	}
+	stored := readDraftDoc(t, projects, draftID).Topology
 	if len(stored.Unions) != 1 || stored.Unions[0].Name != "office" || len(stored.Unions[0].Devices) != 2 {
 		t.Fatalf("unexpected stored unions: %+v", stored.Unions)
 	}
 
 	// битая ссылка отклоняется
 	doc.Unions[0].Devices = []string{"ghost"}
-	if rec := doJSON(t, h, http.MethodPut, "/api/topology", doc); rec.Code != http.StatusUnprocessableEntity {
+	if rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("unknown union member: status = %d, body = %s", rec.Code, rec.Body)
 	}
 
 	// двойное членство отклоняется
 	doc.Unions[0].Devices = []string{"r1"}
 	doc.Unions = append(doc.Unions, UnionDoc{Name: "second", Devices: []string{"r1"}})
-	if rec := doJSON(t, h, http.MethodPut, "/api/topology", doc); rec.Code != http.StatusUnprocessableEntity {
+	if rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("double membership: status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
 func TestDeletionGuardBlocksDeviceInUnion(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 	base := func(devices []DeviceDoc, unions []UnionDoc) TopologyDoc {
 		return TopologyDoc{
 			Devices: devices,
@@ -202,12 +297,12 @@ func TestDeletionGuardBlocksDeviceInUnion(t *testing.T) {
 		[]DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}, {Name: "r3", Kind: "router"}},
 		[]UnionDoc{{Name: "office", Devices: []string{"r3"}}},
 	)
-	if rec := doJSON(t, h, http.MethodPut, "/api/topology", all); rec.Code != http.StatusOK {
+	if rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), all); rec.Code != http.StatusOK {
 		t.Fatalf("seed status = %d, body = %s", rec.Code, rec.Body)
 	}
 	// r3 ссылается только сайт — удаление блокируется с 409
 	shrink := base(all.Devices[:2], []UnionDoc{{Name: "office", Devices: []string{"r3"}}})
-	rec := doJSON(t, h, http.MethodPut, "/api/topology", shrink)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), shrink)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("device in union: status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -217,55 +312,52 @@ func TestDeletionGuardBlocksDeviceInUnion(t *testing.T) {
 }
 
 func TestPutSubnets_DescriptionRoundTrip(t *testing.T) {
-	h, store := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 	doc := SubnetsDoc{Subnets: []SubnetDoc{
 		{Name: "office", CIDR: "10.0.0.0/24", Description: "офисный сегмент"},
 		{Name: "dmz", CIDR: "10.0.1.0/24"},
 	}}
-	rec := doJSON(t, h, http.MethodPut, "/api/subnets", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "subnets"), doc)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("put status = %d, body = %s", rec.Code, rec.Body)
 	}
 
-	rec = doJSON(t, h, http.MethodGet, "/api/subnets", nil)
+	rec = doJSON(t, h, http.MethodGet, draftPath(draftID, "subnets"), nil)
 	var got SubnetsDoc
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got.Subnets[0].Description != "офисный сегмент" {
-		t.Fatalf("description lost: %+v", got.Subnets[0])
+	// pgstore reconstructs subnets sorted by name (dmz, office), not
+	// submission order — look up by name rather than assuming position.
+	byName := map[string]SubnetDoc{}
+	for _, s := range got.Subnets {
+		byName[s.Name] = s
 	}
-	if got.Subnets[1].Description != "" {
-		t.Fatalf("unexpected description: %+v", got.Subnets[1])
+	if byName["office"].Description != "офисный сегмент" {
+		t.Fatalf("description lost: %+v", byName["office"])
 	}
-	raw, err := store.ReadSubnets()
-	if err != nil {
-		t.Fatalf("read back: %v", err)
-	}
-	dmzStart := bytes.Index(raw, []byte("name: dmz"))
-	next := bytes.IndexByte(raw[dmzStart:], '\n')
-	if bytes.Contains(raw[dmzStart:dmzStart+next], []byte("description")) {
-		t.Fatalf("empty description must not be stored: %s", raw)
+	if byName["dmz"].Description != "" {
+		t.Fatalf("unexpected description: %+v", byName["dmz"])
 	}
 }
 
 func TestPutSubnets_RejectsOverlap(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 	doc := SubnetsDoc{Subnets: []SubnetDoc{
 		{Name: "office", CIDR: "10.0.0.0/24"},
 		{Name: "dmz", CIDR: "10.0.0.128/25"},
 	}}
-	rec := doJSON(t, h, http.MethodPut, "/api/subnets", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "subnets"), doc)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
 func TestPutSubnets_RejectsDeletingUsedSubnet(t *testing.T) {
-	h, store := newTestServer(t)
-	before, _ := store.ReadSubnets()
+	h, projects, draftID := newTestServer(t)
+	before := marshalJSON(t, readDraftDoc(t, projects, draftID).Subnets)
 	doc := SubnetsDoc{Subnets: []SubnetDoc{{Name: "office", CIDR: "10.0.0.0/24"}}}
-	rec := doJSON(t, h, http.MethodPut, "/api/subnets", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "subnets"), doc)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409 (dmz still referenced), got status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -275,31 +367,31 @@ func TestPutSubnets_RejectsDeletingUsedSubnet(t *testing.T) {
 			t.Fatalf("error %q must mention %s", msg, want)
 		}
 	}
-	after, _ := store.ReadSubnets()
+	after := marshalJSON(t, readDraftDoc(t, projects, draftID).Subnets)
 	if !bytes.Equal(before, after) {
 		t.Fatalf("rejected document must not be persisted")
 	}
 }
 
 func TestPutSubnets_AllowsDeletingUnusedSubnet(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 	withGuest := SubnetsDoc{Subnets: []SubnetDoc{
 		{Name: "office", CIDR: "10.0.0.0/24"},
 		{Name: "dmz", CIDR: "10.0.1.0/24"},
 		{Name: "guest", CIDR: "10.0.2.0/24"},
 	}}
-	if rec := doJSON(t, h, http.MethodPut, "/api/subnets", withGuest); rec.Code != http.StatusOK {
+	if rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "subnets"), withGuest); rec.Code != http.StatusOK {
 		t.Fatalf("add guest: status = %d, body = %s", rec.Code, rec.Body)
 	}
-	rec := doJSON(t, h, http.MethodPut, "/api/subnets", SubnetsDoc{Subnets: withGuest.Subnets[:2]})
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "subnets"), SubnetsDoc{Subnets: withGuest.Subnets[:2]})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete guest: status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
 func TestPutTopology_RejectsDeletingUsedDevice(t *testing.T) {
-	h, store := newTestServer(t)
-	before, _ := store.ReadTopology()
+	h, projects, draftID := newTestServer(t)
+	before := marshalJSON(t, readDraftDoc(t, projects, draftID).Topology)
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r2", Kind: "router"}}, // r1 removed, its link/attach kept
 		Links:   []LinkDoc{{A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "r2"}}},
@@ -308,7 +400,7 @@ func TestPutTopology_RejectsDeletingUsedDevice(t *testing.T) {
 			{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []EndpointDoc{{Device: "r2"}}},
 		},
 	}
-	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409 (r1 still referenced), got status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -318,14 +410,14 @@ func TestPutTopology_RejectsDeletingUsedDevice(t *testing.T) {
 			t.Fatalf("error %q must mention %s", msg, want)
 		}
 	}
-	after, _ := store.ReadTopology()
+	after := marshalJSON(t, readDraftDoc(t, projects, draftID).Topology)
 	if !bytes.Equal(before, after) {
 		t.Fatalf("rejected document must not be persisted")
 	}
 }
 
 func TestPutTopology_AllowsDeletingFreeDevice(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 	base := func(devices []DeviceDoc) TopologyDoc {
 		return TopologyDoc{
 			Devices: devices,
@@ -337,30 +429,30 @@ func TestPutTopology_AllowsDeletingFreeDevice(t *testing.T) {
 		}
 	}
 	all := append([]DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}}, DeviceDoc{Name: "sw1", Kind: "switch"})
-	if rec := doJSON(t, h, http.MethodPut, "/api/topology", base(all)); rec.Code != http.StatusOK {
+	if rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), base(all)); rec.Code != http.StatusOK {
 		t.Fatalf("add sw1: status = %d, body = %s", rec.Code, rec.Body)
 	}
-	rec := doJSON(t, h, http.MethodPut, "/api/topology", base(all[:2]))
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), base(all[:2]))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete sw1: status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
 func TestPutTopology_RejectsUnknownSubnetInNetwork(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 	doc := TopologyDoc{
 		Devices:  []DeviceDoc{{Name: "r1", Kind: "router"}},
 		Links:    []LinkDoc{},
 		Networks: []NetworkDoc{{Name: "n1", Subnets: []string{"ghost"}}},
 	}
-	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
 func TestPutTopology_Valid(t *testing.T) {
-	h, store := newTestServer(t)
+	h, projects, draftID := newTestServer(t)
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}},
 		Links:   []LinkDoc{},
@@ -368,22 +460,25 @@ func TestPutTopology_Valid(t *testing.T) {
 			{Name: "n1", Subnets: []string{"office"}, Attach: []EndpointDoc{{Device: "r1"}}},
 		},
 	}
-	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
-	raw, err := store.ReadTopology()
-	if err != nil {
-		t.Fatalf("read back: %v", err)
+	stored := readDraftDoc(t, projects, draftID).Topology
+	found := false
+	for _, d := range stored.Devices {
+		if d.Name == "r1" {
+			found = true
+		}
 	}
-	if !bytes.Contains(raw, []byte("r1")) {
-		t.Fatalf("stored topology missing device: %s", raw)
+	if !found {
+		t.Fatalf("stored topology missing device r1: %+v", stored.Devices)
 	}
 }
 
 func TestPutTopology_RejectsSelfLoopLink(t *testing.T) {
-	h, store := newTestServer(t)
-	before, _ := store.ReadTopology()
+	h, projects, draftID := newTestServer(t)
+	before := marshalJSON(t, readDraftDoc(t, projects, draftID).Topology)
 
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}},
@@ -392,18 +487,18 @@ func TestPutTopology_RejectsSelfLoopLink(t *testing.T) {
 		},
 		Networks: []NetworkDoc{},
 	}
-	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if rec.Code != http.StatusUnprocessableEntity && rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected rejection, got status = %d, body = %s", rec.Code, rec.Body)
 	}
-	after, _ := store.ReadTopology()
+	after := marshalJSON(t, readDraftDoc(t, projects, draftID).Topology)
 	if !bytes.Equal(before, after) {
 		t.Fatalf("invalid topology must not be persisted")
 	}
 }
 
 func TestPutTopology_SetRoundTrip(t *testing.T) {
-	h, store := newTestServer(t)
+	h, projects, draftID := newTestServer(t)
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}},
 		Links:   []LinkDoc{},
@@ -414,25 +509,18 @@ func TestPutTopology_SetRoundTrip(t *testing.T) {
 			{Name: "blocked", Subnets: []string{"office"}, Addresses: []string{"10.0.0.9"}},
 		},
 	}
-	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
-	raw, err := store.ReadTopology()
-	if err != nil {
-		t.Fatalf("read back: %v", err)
-	}
-	var stored TopologyDoc
-	if err := yaml.Unmarshal(raw, &stored); err != nil {
-		t.Fatalf("unmarshal stored topology: %v", err)
-	}
+	stored := readDraftDoc(t, projects, draftID).Topology
 	if len(stored.Sets) != 1 || stored.Sets[0].Name != "blocked" || len(stored.Sets[0].Addresses) != 1 || stored.Sets[0].Addresses[0] != "10.0.0.9" {
 		t.Fatalf("stored sets = %+v", stored.Sets)
 	}
 }
 
 func TestPutTopology_DescriptionRoundTrip(t *testing.T) {
-	h, store := newTestServer(t)
+	h, projects, draftID := newTestServer(t)
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}},
 		Links:   []LinkDoc{},
@@ -441,18 +529,11 @@ func TestPutTopology_DescriptionRoundTrip(t *testing.T) {
 		},
 		Sets: []SetDoc{{Name: "blocked", Subnets: []string{"office"}, Description: "блоклист"}},
 	}
-	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
-	raw, err := store.ReadTopology()
-	if err != nil {
-		t.Fatalf("read back: %v", err)
-	}
-	var stored TopologyDoc
-	if err := yaml.Unmarshal(raw, &stored); err != nil {
-		t.Fatalf("unmarshal stored topology: %v", err)
-	}
+	stored := readDraftDoc(t, projects, draftID).Topology
 	if stored.Networks[0].Description != "офисная сеть" {
 		t.Fatalf("network description lost: %+v", stored.Networks[0])
 	}
@@ -460,7 +541,7 @@ func TestPutTopology_DescriptionRoundTrip(t *testing.T) {
 		t.Fatalf("set description lost: %+v", stored.Sets[0])
 	}
 
-	rec = doJSON(t, h, http.MethodGet, "/api/topology", nil)
+	rec = doJSON(t, h, http.MethodGet, draftPath(draftID, "topology"), nil)
 	var got TopologyDoc
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -471,22 +552,22 @@ func TestPutTopology_DescriptionRoundTrip(t *testing.T) {
 }
 
 func TestPutTopology_RejectsSetAddressOutsideSubnets(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 	doc := TopologyDoc{
 		Devices:  []DeviceDoc{{Name: "r1", Kind: "router"}},
 		Links:    []LinkDoc{},
 		Networks: []NetworkDoc{{Name: "n1", Subnets: []string{"office"}}},
 		Sets:     []SetDoc{{Name: "bad", Addresses: []string{"192.168.5.5"}}},
 	}
-	rec := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got status = %d, body = %s", rec.Code, rec.Body)
 	}
 }
 
 func TestPutRules_RejectsUnknownEndpoint(t *testing.T) {
-	h, store := newTestServer(t)
-	before, _ := store.ReadRules()
+	h, projects, draftID := newTestServer(t)
+	before := marshalJSON(t, readDraftDoc(t, projects, draftID).Rules)
 
 	doc := PolicyDoc{Chains: []ChainDoc{{
 		DefaultAction: "deny",
@@ -494,54 +575,36 @@ func TestPutRules_RejectsUnknownEndpoint(t *testing.T) {
 			{Name: "bad", Src: []string{"office"}, Dst: []string{"does-not-exist"}, Action: "allow"},
 		},
 	}}}
-	rec := doJSON(t, h, http.MethodPut, "/api/rules", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "rules"), doc)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got status = %d, body = %s", rec.Code, rec.Body)
 	}
-	after, _ := store.ReadRules()
+	after := marshalJSON(t, readDraftDoc(t, projects, draftID).Rules)
 	if !bytes.Equal(before, after) {
 		t.Fatalf("invalid rules must not be persisted")
 	}
 }
 
-func TestGetRulesNormalizesLegacyFile(t *testing.T) {
-	h, store := newTestServer(t)
-	if err := store.WriteRules([]byte("defaultAction: deny\nchainName: OLD\nrules: []\n")); err != nil {
-		t.Fatal(err)
-	}
-	rec := doJSON(t, h, http.MethodGet, "/api/rules", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
-	}
-	var doc PolicyDoc
-	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
-		t.Fatal(err)
-	}
-	if len(doc.Chains) != 1 || doc.Chains[0].Name != "OLD" {
-		t.Fatalf("normalized doc = %+v", doc)
-	}
-}
-
 func TestPutRules_RejectsUnknownJumpTarget(t *testing.T) {
-	h, store := newTestServer(t)
-	before, _ := store.ReadRules()
+	h, projects, draftID := newTestServer(t)
+	before := marshalJSON(t, readDraftDoc(t, projects, draftID).Rules)
 	doc := PolicyDoc{Chains: []ChainDoc{{
 		Name: "FIRENET-FWD", DefaultAction: "deny",
 		Rules: []RuleDoc{{Name: "r", Src: []string{"any"}, Dst: []string{"any"}, Action: "jump", JumpTo: "GHOST"}},
 	}}}
-	rec := doJSON(t, h, http.MethodPut, "/api/rules", doc)
+	rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "rules"), doc)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("code = %d, want 422", rec.Code)
 	}
-	after, _ := store.ReadRules()
+	after := marshalJSON(t, readDraftDoc(t, projects, draftID).Rules)
 	if !bytes.Equal(before, after) {
 		t.Fatalf("invalid rules must not be persisted")
 	}
 }
 
 func TestValidateEndpoint(t *testing.T) {
-	h, _ := newTestServer(t)
-	rec := doJSON(t, h, http.MethodPost, "/api/validate", nil)
+	h, _, draftID := newTestServer(t)
+	rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "validate"), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -558,8 +621,8 @@ func TestValidateEndpoint(t *testing.T) {
 }
 
 func TestCompileEndpoint(t *testing.T) {
-	h, _ := newTestServer(t)
-	rec := doJSON(t, h, http.MethodPost, "/api/compile", nil)
+	h, _, draftID := newTestServer(t)
+	rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "compile"), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -582,20 +645,20 @@ func TestCompileEndpoint(t *testing.T) {
 }
 
 func TestLayoutRoundTrip(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 
-	rec := doJSON(t, h, http.MethodGet, "/api/layout", nil)
-	if rec.Code != http.StatusOK || rec.Body.String() != "{}" {
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "layout"), nil)
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "{}" {
 		t.Fatalf("expected empty layout, got status = %d, body = %s", rec.Code, rec.Body)
 	}
 
 	layout := map[string]any{"devices": map[string]any{"r1": map[string]float64{"x": 1, "y": 2}}}
-	rec = doJSON(t, h, http.MethodPut, "/api/layout", layout)
-	if rec.Code != http.StatusNoContent {
+	rec = doJSON(t, h, http.MethodPut, draftPath(draftID, "layout"), layout)
+	if rec.Code != http.StatusOK {
 		t.Fatalf("put status = %d, body = %s", rec.Code, rec.Body)
 	}
 
-	rec = doJSON(t, h, http.MethodGet, "/api/layout", nil)
+	rec = doJSON(t, h, http.MethodGet, draftPath(draftID, "layout"), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -605,7 +668,7 @@ func TestLayoutRoundTrip(t *testing.T) {
 }
 
 func TestPutTopology_LinkFilterRoundTrip(t *testing.T) {
-	h, store := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}},
@@ -619,11 +682,11 @@ func TestPutTopology_LinkFilterRoundTrip(t *testing.T) {
 			{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []EndpointDoc{{Device: "r2"}}},
 		},
 	}
-	if rec := doJSON(t, h, http.MethodPut, "/api/topology", doc); rec.Code != http.StatusOK {
+	if rec := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc); rec.Code != http.StatusOK {
 		t.Fatalf("put status = %d, body = %s", rec.Code, rec.Body)
 	}
 
-	rec := doJSON(t, h, http.MethodGet, "/api/topology", nil)
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "topology"), nil)
 	var got TopologyDoc
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode GET response: %v", err)
@@ -633,18 +696,10 @@ func TestPutTopology_LinkFilterRoundTrip(t *testing.T) {
 		!slices.Equal(got.Links[0].Filter.BExports, []string{"n-dmz"}) {
 		t.Fatalf("filter did not survive round-trip: %+v", got.Links[0])
 	}
-
-	stored, err := store.ReadTopology()
-	if err != nil {
-		t.Fatalf("read stored topology: %v", err)
-	}
-	if !strings.Contains(string(stored), "a-exports") {
-		t.Fatalf("stored yaml missing a-exports:\n%s", stored)
-	}
 }
 
 func TestPutTopology_RejectsFilteredLinkWithSwitch(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}, {Name: "sw", Kind: "switch"}},
 		Links: []LinkDoc{{
@@ -657,7 +712,7 @@ func TestPutTopology_RejectsFilteredLinkWithSwitch(t *testing.T) {
 			{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []EndpointDoc{{Device: "r2"}}},
 		},
 	}
-	res := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	res := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if res.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("want 422, got %d", res.Code)
 	}
@@ -667,7 +722,7 @@ func TestPutTopology_RejectsFilteredLinkWithSwitch(t *testing.T) {
 }
 
 func TestPutTopology_RejectsUnknownExport(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 	doc := TopologyDoc{
 		Devices: []DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}},
 		Links: []LinkDoc{{
@@ -676,7 +731,7 @@ func TestPutTopology_RejectsUnknownExport(t *testing.T) {
 			Filter: &LinkFilterDoc{AExports: []string{"ghost"}, BExports: []string{"n2"}},
 		}},
 	}
-	res := doJSON(t, h, http.MethodPut, "/api/topology", doc)
+	res := doJSON(t, h, http.MethodPut, draftPath(draftID, "topology"), doc)
 	if res.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("want 422, got %d", res.Code)
 	}
@@ -686,9 +741,9 @@ func TestPutTopology_RejectsUnknownExport(t *testing.T) {
 }
 
 func TestGetLinkExports(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
 
-	rec := doJSON(t, h, http.MethodGet, "/api/link-exports?link=0&side=a", nil)
+	rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?link=0&side=a"), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
@@ -706,20 +761,21 @@ func TestGetLinkExports(t *testing.T) {
 	}
 
 	for _, q := range []string{"link=0&side=c", "link=x&side=a", "link=-1&side=a"} {
-		if rec := doJSON(t, h, http.MethodGet, "/api/link-exports?"+q, nil); rec.Code != http.StatusUnprocessableEntity {
+		if rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?"+q), nil); rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("%s: want 422, got %d", q, rec.Code)
 		}
 	}
-	if rec := doJSON(t, h, http.MethodGet, "/api/link-exports?link=7&side=a", nil); rec.Code != http.StatusNotFound {
+	if rec := doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?link=7&side=a"), nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("out-of-range link: want 404, got %d", rec.Code)
 	}
 }
 
 func TestDiagnoseHandler(t *testing.T) {
-	h, _ := newTestServer(t)
+	h, _, draftID := newTestServer(t)
+	diagnosePath := draftPath(draftID, "diagnose")
 
 	t.Run("allowed flow reports matched rule", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/diagnose",
+		rec := doJSON(t, h, http.MethodPost, diagnosePath,
 			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"443"}})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -740,7 +796,7 @@ func TestDiagnoseHandler(t *testing.T) {
 	})
 
 	t.Run("invalid IP is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/diagnose", map[string]any{"src": "nonsense", "dst": "10.0.1.7"})
+		rec := doJSON(t, h, http.MethodPost, diagnosePath, map[string]any{"src": "nonsense", "dst": "10.0.1.7"})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", rec.Code)
 		}
@@ -750,7 +806,7 @@ func TestDiagnoseHandler(t *testing.T) {
 	})
 
 	t.Run("unknown IP is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/diagnose", map[string]any{"src": "10.0.0.5", "dst": "192.168.99.99"})
+		rec := doJSON(t, h, http.MethodPost, diagnosePath, map[string]any{"src": "10.0.0.5", "dst": "192.168.99.99"})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", rec.Code)
 		}
@@ -760,14 +816,14 @@ func TestDiagnoseHandler(t *testing.T) {
 	})
 
 	t.Run("bad proto is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/diagnose", map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "sctp"})
+		rec := doJSON(t, h, http.MethodPost, diagnosePath, map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "sctp"})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d", rec.Code)
 		}
 	})
 
 	t.Run("invalid port string is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/diagnose",
+		rec := doJSON(t, h, http.MethodPost, diagnosePath,
 			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"abc"}})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -778,7 +834,7 @@ func TestDiagnoseHandler(t *testing.T) {
 	})
 
 	t.Run("inverted port range is unprocessable", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/diagnose",
+		rec := doJSON(t, h, http.MethodPost, diagnosePath,
 			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "srcPorts": []string{"2000:1000"}})
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -786,7 +842,7 @@ func TestDiagnoseHandler(t *testing.T) {
 	})
 
 	t.Run("valid port range passes validation", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodPost, "/api/diagnose",
+		rec := doJSON(t, h, http.MethodPost, diagnosePath,
 			map[string]any{"src": "10.0.0.5", "dst": "10.0.1.7", "proto": "tcp", "dstPorts": []string{"443", "1024:65535"}})
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -794,11 +850,32 @@ func TestDiagnoseHandler(t *testing.T) {
 	})
 }
 
+// writeDraftRules bypasses the PUT handler's own validation, going
+// straight through pgstore — used to simulate rules content that
+// somehow already made it into storage without passing normal checks.
+func writeDraftRules(t *testing.T, projects *pgstore.Store, draftID string, rawYAML string) {
+	t.Helper()
+	ctx := context.Background()
+	var policy projectdoc.PolicyDoc
+	if err := yaml.Unmarshal([]byte(rawYAML), &policy); err != nil {
+		t.Fatalf("parse rules yaml: %v", err)
+	}
+	doc, revision, err := projects.ReadDraft(ctx, draftID)
+	if err != nil {
+		t.Fatalf("ReadDraft: %v", err)
+	}
+	doc.Rules = policy
+	if _, err := projects.WriteDraft(ctx, draftID, doc, revision); err != nil {
+		t.Fatalf("WriteDraft: %v", err)
+	}
+}
+
 func TestLintEndpoint(t *testing.T) {
-	h, store := newTestServer(t)
+	h, projects, draftID := newTestServer(t)
+	lintPath := draftPath(draftID, "lint")
 
 	t.Run("clean policy has no findings", func(t *testing.T) {
-		rec := doJSON(t, h, http.MethodGet, "/api/lint", nil)
+		rec := doJSON(t, h, http.MethodGet, lintPath, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 		}
@@ -814,7 +891,7 @@ func TestLintEndpoint(t *testing.T) {
 	})
 
 	t.Run("unreachable rule is reported", func(t *testing.T) {
-		if err := store.WriteRules([]byte(`
+		writeDraftRules(t, projects, draftID, `
 chains:
   - name: FIRENET-FWD
     defaultAction: deny
@@ -822,10 +899,8 @@ chains:
     rules:
       - {name: allow-all, comment: "broad by design", src: [any], dst: [any], proto: any, action: allow}
       - {name: shadowed, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: deny}
-`)); err != nil {
-			t.Fatal(err)
-		}
-		rec := doJSON(t, h, http.MethodGet, "/api/lint", nil)
+`)
+		rec := doJSON(t, h, http.MethodGet, lintPath, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 		}
@@ -841,17 +916,15 @@ chains:
 	})
 
 	t.Run("invalid rules file surfaces as client error", func(t *testing.T) {
-		if err := store.WriteRules([]byte(`
+		writeDraftRules(t, projects, draftID, `
 chains:
   - name: FIRENET-FWD
     defaultAction: deny
     chainPosition: top
     rules:
       - {name: bad, src: [no-such-subnet], dst: [any], proto: any, action: allow}
-`)); err != nil {
-			t.Fatal(err)
-		}
-		rec := doJSON(t, h, http.MethodGet, "/api/lint", nil)
+`)
+		rec := doJSON(t, h, http.MethodGet, lintPath, nil)
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 		}

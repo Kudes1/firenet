@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,15 +15,19 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/kudes1/firenet/internal/app"
+	"github.com/kudes1/firenet/internal/auth"
 	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/graph"
+	"github.com/kudes1/firenet/internal/pgstore"
+	"github.com/kudes1/firenet/internal/projectdoc"
 	"github.com/kudes1/firenet/internal/rules"
 	"github.com/kudes1/firenet/internal/topology"
 )
 
 type handlers struct {
-	store ProjectStore
-	log   *slog.Logger
+	projects *pgstore.Store
+	users    *auth.Store
+	log      *slog.Logger
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -35,55 +40,212 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
-func (h *handlers) getTopology(w http.ResponseWriter, r *http.Request) {
-	raw, err := h.store.ReadTopology()
-	if err != nil {
+// writeStoreError maps pgstore's sentinel errors to the right HTTP
+// status; anything else is a 500.
+func writeStoreError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, pgstore.ErrDraftNotFound):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, pgstore.ErrNoVersions):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, pgstore.ErrRevisionMismatch):
+		writeError(w, http.StatusConflict, err)
+	case errors.Is(err, pgstore.ErrDraftNameTaken):
+		writeError(w, http.StatusConflict, err)
+	case errors.Is(err, pgstore.ErrConfirmRace):
+		writeError(w, http.StatusConflict, err)
+	default:
 		writeError(w, http.StatusInternalServerError, err)
-		return
 	}
-	var doc TopologyDoc
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("parse stored topology: %w", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, doc)
 }
 
-func (h *handlers) putTopology(w http.ResponseWriter, r *http.Request) {
-	var doc TopologyDoc
-	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+// currentDoc resolves the read-only current confirmed version.
+func (h *handlers) currentDoc(r *http.Request) (projectdoc.ProjectDoc, error) {
+	v, err := h.projects.CurrentVersion(r.Context())
+	if err != nil {
+		return projectdoc.ProjectDoc{}, err
+	}
+	return h.projects.ReadAt(r.Context(), v)
+}
+
+// canAccessDraft reports whether the request's caller may read/write
+// draft d: its owner, or any admin.
+func (h *handlers) canAccessDraft(r *http.Request, d pgstore.Draft) bool {
+	user, _ := auth.UserFromContext(r.Context())
+	return user.Role == auth.RoleAdmin || user.ID == d.Owner
+}
+
+// resolveDraftForAccess loads the {id} path draft and 403s if the caller
+// may not access it. Callers stop (return) when ok is false.
+func (h *handlers) resolveDraftForAccess(w http.ResponseWriter, r *http.Request) (pgstore.Draft, bool) {
+	d, err := h.projects.GetDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return pgstore.Draft{}, false
+	}
+	if !h.canAccessDraft(r, d) {
+		writeError(w, http.StatusForbidden, errors.New("not the owner of this draft"))
+		return pgstore.Draft{}, false
+	}
+	return d, true
+}
+
+// deletionErrorsFromDocs diffs prev's topology+subnets against next's and
+// reports removed objects still referenced by prev's rules. A broken
+// prev/next or unparseable proposal yields no deletions here — full
+// validation reports those instead.
+func deletionErrorsFromDocs(prev, next projectdoc.ProjectDoc) []string {
+	prevTopoYAML, err := yaml.Marshal(prev.Topology)
+	if err != nil {
+		return nil
+	}
+	prevSubnetsYAML, err := yaml.Marshal(prev.Subnets)
+	if err != nil {
+		return nil
+	}
+	prevTopo, err := app.LoadProject(prevTopoYAML, prevSubnetsYAML)
+	if err != nil {
+		return nil
+	}
+
+	nextTopoYAML, err := yaml.Marshal(next.Topology)
+	if err != nil {
+		return nil
+	}
+	nextSubnetsYAML, err := yaml.Marshal(next.Subnets)
+	if err != nil {
+		return nil
+	}
+	nextTopo, err := app.ParseProject(nextTopoYAML, nextSubnetsYAML)
+	if err != nil {
+		return nil
+	}
+
+	rulesYAML, err := yaml.Marshal(prev.Rules)
+	if err != nil {
+		return nil
+	}
+	pol, err := rules.Load(bytes.NewReader(rulesYAML))
+	if err != nil {
+		pol = nil // broken rules: topology-only checks; rules load reports the breakage elsewhere
+	}
+	return app.DeletionErrors(prevTopo, nextTopo, pol)
+}
+
+// loadTopologyDoc validates doc's topology+subnets as one merged,
+// cross-referenced topology.Topology (mirrors the old loadTopology, now
+// sourced from a ProjectDoc instead of the file store).
+func loadTopologyDoc(doc projectdoc.ProjectDoc) (*topology.Topology, error) {
+	topoYAML, err := yaml.Marshal(doc.Topology)
+	if err != nil {
+		return nil, err
+	}
+	subnetsYAML, err := yaml.Marshal(doc.Subnets)
+	if err != nil {
+		return nil, err
+	}
+	topo, err := app.LoadProject(topoYAML, subnetsYAML)
+	if err != nil {
+		return nil, fmt.Errorf("project is invalid: %w", err)
+	}
+	return topo, nil
+}
+
+// requestRevision prefers the client-supplied X-Draft-Revision (from its
+// last GET) for the CAS check; falling back to the revision this handler
+// itself just read is only a safety net for a client that omits the
+// header, not the intended flow.
+func requestRevision(r *http.Request, fallback string) string {
+	if h := r.Header.Get("X-Draft-Revision"); h != "" {
+		return h
+	}
+	return fallback
+}
+
+func (h *handlers) getCurrentTopology(w http.ResponseWriter, r *http.Request) {
+	doc, err := h.currentDoc(r)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc.Topology)
+}
+
+func (h *handlers) getDraftTopology(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	doc, revision, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.Header().Set("X-Draft-Revision", revision)
+	writeJSON(w, http.StatusOK, doc.Topology)
+}
+
+func (h *handlers) putDraftTopology(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	var topo projectdoc.TopologyDoc
+	if err := json.NewDecoder(r.Body).Decode(&topo); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
 		return
 	}
-	raw, err := yaml.Marshal(doc)
+
+	id := r.PathValue("id")
+	prev, revision, err := h.projects.ReadDraft(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeStoreError(w, err)
 		return
 	}
-	subnetsRaw, err := h.readStoredSubnets()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if errs := h.deletionErrors(raw, subnetsRaw); len(errs) > 0 {
+	next := prev
+	next.Topology = topo
+
+	if errs := deletionErrorsFromDocs(prev, next); len(errs) > 0 {
 		writeError(w, http.StatusConflict, errors.New(strings.Join(errs, "; ")))
 		return
 	}
-	if _, err := app.LoadProject(raw, subnetsRaw); err != nil {
+	if _, err := loadTopologyDoc(next); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	if err := h.store.WriteTopology(raw); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+
+	newRevision, err := h.projects.WriteDraft(r.Context(), id, next, requestRevision(r, revision))
+	if err != nil {
+		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, doc)
+	w.Header().Set("X-Draft-Revision", newRevision)
+	writeJSON(w, http.StatusOK, topo)
 }
 
 // getLinkExports serves the reachable export candidates for one side of a
 // link: networks and subnets the side's device can reach when that very
-// link is excluded from the graph (GET /api/link-exports?link=N&side=a|b).
-func (h *handlers) getLinkExports(w http.ResponseWriter, r *http.Request) {
+// link is excluded from the graph.
+func (h *handlers) getDraftLinkExports(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	doc, _, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	h.writeLinkExports(w, r, doc)
+}
+
+func (h *handlers) getCurrentLinkExports(w http.ResponseWriter, r *http.Request) {
+	doc, err := h.currentDoc(r)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	h.writeLinkExports(w, r, doc)
+}
+
+func (h *handlers) writeLinkExports(w http.ResponseWriter, r *http.Request, doc projectdoc.ProjectDoc) {
 	q := r.URL.Query()
 	idx, err := strconv.Atoi(q.Get("link"))
 	side := q.Get("side")
@@ -91,7 +253,7 @@ func (h *handlers) getLinkExports(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("invalid link index or side"))
 		return
 	}
-	topo, err := h.loadTopology()
+	topo, err := loadTopologyDoc(doc)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -110,225 +272,263 @@ func (h *handlers) getLinkExports(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	out := make([]EntityDoc, 0, len(names))
+	out := make([]projectdoc.EntityDoc, 0, len(names))
 	for _, n := range names {
 		cidr := ""
 		if s, ok := topo.Subnets[n]; ok {
 			cidr = s.CIDR.String()
 		}
-		out = append(out, EntityDoc{Name: n, CIDR: cidr})
+		out = append(out, projectdoc.EntityDoc{Name: n, CIDR: cidr})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entities": out})
 }
 
-func (h *handlers) getSubnets(w http.ResponseWriter, r *http.Request) {
-	raw, err := h.readStoredSubnets()
+func (h *handlers) getCurrentSubnets(w http.ResponseWriter, r *http.Request) {
+	doc, err := h.currentDoc(r)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeStoreError(w, err)
 		return
 	}
-	var doc SubnetsDoc
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("parse stored subnets: %w", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, doc)
+	writeJSON(w, http.StatusOK, doc.Subnets)
 }
 
-func (h *handlers) putSubnets(w http.ResponseWriter, r *http.Request) {
-	var doc SubnetsDoc
-	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+func (h *handlers) getDraftSubnets(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	doc, revision, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.Header().Set("X-Draft-Revision", revision)
+	writeJSON(w, http.StatusOK, doc.Subnets)
+}
+
+func (h *handlers) putDraftSubnets(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	var subnets projectdoc.SubnetsDoc
+	if err := json.NewDecoder(r.Body).Decode(&subnets); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
 		return
 	}
-	raw, err := yaml.Marshal(doc)
+
+	id := r.PathValue("id")
+	prev, revision, err := h.projects.ReadDraft(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeStoreError(w, err)
 		return
 	}
-	topoRaw, err := h.store.ReadTopology()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if errs := h.deletionErrors(topoRaw, raw); len(errs) > 0 {
+	next := prev
+	next.Subnets = subnets
+
+	if errs := deletionErrorsFromDocs(prev, next); len(errs) > 0 {
 		writeError(w, http.StatusConflict, errors.New(strings.Join(errs, "; ")))
 		return
 	}
-	if _, err := app.LoadProject(topoRaw, raw); err != nil {
+	if _, err := loadTopologyDoc(next); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	if err := h.store.WriteSubnets(raw); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+
+	newRevision, err := h.projects.WriteDraft(r.Context(), id, next, requestRevision(r, revision))
+	if err != nil {
+		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, doc)
+	w.Header().Set("X-Draft-Revision", newRevision)
+	writeJSON(w, http.StatusOK, subnets)
 }
 
-// deletionErrors diffs the stored project against the proposed one
-// (nextTopologyYAML merged with subnetsYAML) and reports removed objects
-// that are still referenced. A broken stored state or unparseable proposal
-// yields no deletions here — full validation reports those instead.
-func (h *handlers) deletionErrors(nextTopologyYAML, subnetsYAML []byte) []string {
-	prev, err := h.loadTopology()
+func (h *handlers) getCurrentRules(w http.ResponseWriter, r *http.Request) {
+	doc, err := h.currentDoc(r)
 	if err != nil {
-		return nil
-	}
-	next, err := app.ParseProject(nextTopologyYAML, subnetsYAML)
-	if err != nil {
-		return nil
-	}
-	pol, err := h.loadPolicy()
-	if err != nil {
-		pol = nil // broken rules.yaml: topology-only checks; rules load reports the breakage
-	}
-	return app.DeletionErrors(prev, next, pol)
-}
-
-func (h *handlers) loadPolicy() (*rules.Policy, error) {
-	raw, err := h.store.ReadRules()
-	if err != nil {
-		return nil, err
-	}
-	return rules.Load(bytes.NewReader(raw))
-}
-
-func (h *handlers) readStoredSubnets() ([]byte, error) {
-	raw, err := h.store.ReadSubnets()
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) == 0 {
-		raw = []byte("subnets: []\n")
-	}
-	return raw, nil
-}
-
-// loadTopology loads the stored topology.yaml + subnets.yaml as one merged,
-// validated Topology (cross-file references included).
-func (h *handlers) loadTopology() (*topology.Topology, error) {
-	topoRaw, err := h.store.ReadTopology()
-	if err != nil {
-		return nil, err
-	}
-	subnetsRaw, err := h.readStoredSubnets()
-	if err != nil {
-		return nil, err
-	}
-	topo, err := app.LoadProject(topoRaw, subnetsRaw)
-	if err != nil {
-		return nil, fmt.Errorf("stored project is invalid: %w", err)
-	}
-	return topo, nil
-}
-
-func (h *handlers) getRules(w http.ResponseWriter, r *http.Request) {
-	raw, err := h.store.ReadRules()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeStoreError(w, err)
 		return
 	}
-	pol, err := rules.Load(bytes.NewReader(raw))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("parse stored rules: %w", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, NewPolicyDoc(pol))
+	writeJSON(w, http.StatusOK, doc.Rules)
 }
 
-func (h *handlers) putRules(w http.ResponseWriter, r *http.Request) {
-	var doc PolicyDoc
-	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+func (h *handlers) getDraftRules(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	doc, revision, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.Header().Set("X-Draft-Revision", revision)
+	writeJSON(w, http.StatusOK, doc.Rules)
+}
+
+func (h *handlers) putDraftRules(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	var policy projectdoc.PolicyDoc
+	if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
 		return
 	}
-	invalid, err := h.validateAndPersistRules(doc)
+
+	id := r.PathValue("id")
+	prev, revision, err := h.projects.ReadDraft(r.Context(), id)
 	if err != nil {
-		status := http.StatusInternalServerError
-		if invalid {
-			status = http.StatusUnprocessableEntity
-		}
-		writeError(w, status, err)
+		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, doc)
-}
+	next := prev
+	next.Rules = policy
 
-// validateAndPersistRules validates doc against the stored project
-// (topology + subnets) and, on success, persists it. invalid reports whether
-// a failure is the caller's fault (422-worthy) as opposed to a server-side
-// problem (500-worthy).
-func (h *handlers) validateAndPersistRules(doc PolicyDoc) (invalid bool, err error) {
-	topo, err := h.loadTopology()
+	topo, err := loadTopologyDoc(next)
 	if err != nil {
-		return false, err
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
-	pol := doc.ToPolicy()
+	pol := policy.ToPolicy()
 	if err := pol.Validate(topo); err != nil {
-		return true, err
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
 	}
-	raw, err := yaml.Marshal(doc)
+
+	newRevision, err := h.projects.WriteDraft(r.Context(), id, next, requestRevision(r, revision))
 	if err != nil {
-		return false, err
+		writeStoreError(w, err)
+		return
 	}
-	return false, h.store.WriteRules(raw)
+	w.Header().Set("X-Draft-Revision", newRevision)
+	writeJSON(w, http.StatusOK, policy)
 }
 
-func (h *handlers) validate(w http.ResponseWriter, r *http.Request) {
-	topoRaw, err := h.store.ReadTopology()
+func (h *handlers) getCurrentLayout(w http.ResponseWriter, r *http.Request) {
+	doc, err := h.currentDoc(r)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeStoreError(w, err)
 		return
 	}
-	subnetsRaw, err := h.readStoredSubnets()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	writeJSON(w, http.StatusOK, doc.Layout)
+}
+
+func (h *handlers) getDraftLayout(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
 		return
 	}
-	rulesRaw, err := h.store.ReadRules()
+	doc, revision, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeStoreError(w, err)
+		return
+	}
+	w.Header().Set("X-Draft-Revision", revision)
+	writeJSON(w, http.StatusOK, doc.Layout)
+}
+
+func (h *handlers) putDraftLayout(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	var layout projectdoc.LayoutDoc
+	if err := json.NewDecoder(r.Body).Decode(&layout); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
 		return
 	}
 
+	id := r.PathValue("id")
+	prev, revision, err := h.projects.ReadDraft(r.Context(), id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	next := prev
+	next.Layout = layout
+
+	newRevision, err := h.projects.WriteDraft(r.Context(), id, next, requestRevision(r, revision))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.Header().Set("X-Draft-Revision", newRevision)
+	writeJSON(w, http.StatusOK, layout)
+}
+
+func validateDoc(doc projectdoc.ProjectDoc) []string {
 	var errs []string
-	topo, loadErr := app.LoadProject(topoRaw, subnetsRaw)
-	switch {
-	case loadErr != nil:
-		errs = append(errs, loadErr.Error())
-	default:
-		if pol, err := rules.Load(bytes.NewReader(rulesRaw)); err != nil {
-			errs = append(errs, err.Error())
-		} else if err := pol.Validate(topo); err != nil {
-			errs = append(errs, err.Error())
-		}
+	topo, err := loadTopologyDoc(doc)
+	if err != nil {
+		return append(errs, err.Error())
 	}
+	pol := doc.Rules.ToPolicy()
+	if err := pol.Validate(topo); err != nil {
+		errs = append(errs, err.Error())
+	}
+	return errs
+}
 
+func (h *handlers) validateCurrent(w http.ResponseWriter, r *http.Request) {
+	doc, err := h.currentDoc(r)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	errs := validateDoc(doc)
 	writeJSON(w, http.StatusOK, map[string]any{"valid": len(errs) == 0, "errors": errs})
 }
 
-func (h *handlers) compile(w http.ResponseWriter, r *http.Request) {
-	topoRaw, err := h.store.ReadTopology()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+func (h *handlers) validateDraft(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
 		return
 	}
-	subnetsRaw, err := h.readStoredSubnets()
+	doc, _, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeStoreError(w, err)
 		return
 	}
-	rulesRaw, err := h.store.ReadRules()
+	errs := validateDoc(doc)
+	writeJSON(w, http.StatusOK, map[string]any{"valid": len(errs) == 0, "errors": errs})
+}
+
+func (h *handlers) compileDoc(ctx context.Context, doc projectdoc.ProjectDoc) (any, error) {
+	topoYAML, err := yaml.Marshal(doc.Topology)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		return nil, err
+	}
+	subnetsYAML, err := yaml.Marshal(doc.Subnets)
+	if err != nil {
+		return nil, err
+	}
+	rulesYAML, err := yaml.Marshal(doc.Rules)
+	if err != nil {
+		return nil, err
+	}
+	return app.Compile(ctx, h.log, app.CompileOptions{TopologyYAML: topoYAML, SubnetsYAML: subnetsYAML, RulesYAML: rulesYAML})
+}
+
+func (h *handlers) compileCurrent(w http.ResponseWriter, r *http.Request) {
+	doc, err := h.currentDoc(r)
+	if err != nil {
+		writeStoreError(w, err)
 		return
 	}
-	devices, err := app.Compile(r.Context(), h.log, app.CompileOptions{
-		TopologyYAML: topoRaw,
-		SubnetsYAML:  subnetsRaw,
-		RulesYAML:    rulesRaw,
-	})
+	devices, err := h.compileDoc(r.Context(), doc)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, devices)
+}
+
+func (h *handlers) compileDraft(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	doc, _, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	devices, err := h.compileDoc(r.Context(), doc)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
@@ -373,63 +573,61 @@ func validatePortList(ports []string) error {
 	return nil
 }
 
-func (h *handlers) diagnose(w http.ResponseWriter, r *http.Request) {
+// parseDiagnoseRequest decodes and validates the request body shared by
+// both diagnose variants; the returned diagnose.Flow is ready to compile.
+func parseDiagnoseRequest(r *http.Request) (diagnose.Flow, error) {
 	var req diagnoseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid body: %w", err))
-		return
+		return diagnose.Flow{}, fmt.Errorf("invalid body: %w", err)
 	}
 	if !diagnoseProtos[req.Proto] {
-		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid proto %q", req.Proto))
-		return
+		return diagnose.Flow{}, fmt.Errorf("invalid proto %q", req.Proto)
 	}
 	src, err := netip.ParseAddr(req.Src)
 	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid src IP: %w", err))
-		return
+		return diagnose.Flow{}, fmt.Errorf("invalid src IP: %w", err)
 	}
 	dst, err := netip.ParseAddr(req.Dst)
 	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("invalid dst IP: %w", err))
-		return
+		return diagnose.Flow{}, fmt.Errorf("invalid dst IP: %w", err)
 	}
 	if err := validatePortList(req.SrcPorts); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err)
-		return
+		return diagnose.Flow{}, err
 	}
 	if err := validatePortList(req.DstPorts); err != nil {
+		return diagnose.Flow{}, err
+	}
+	return diagnose.Flow{Src: src, Dst: dst, Proto: rules.Proto(req.Proto), SrcPorts: req.SrcPorts, DstPorts: req.DstPorts}, nil
+}
+
+func (h *handlers) diagnoseDoc(ctx context.Context, doc projectdoc.ProjectDoc, flow diagnose.Flow) (any, error) {
+	topoYAML, err := yaml.Marshal(doc.Topology)
+	if err != nil {
+		return nil, err
+	}
+	subnetsYAML, err := yaml.Marshal(doc.Subnets)
+	if err != nil {
+		return nil, err
+	}
+	rulesYAML, err := yaml.Marshal(doc.Rules)
+	if err != nil {
+		return nil, err
+	}
+	return app.Diagnose(ctx, h.log, app.DiagnoseOptions{TopologyYAML: topoYAML, SubnetsYAML: subnetsYAML, RulesYAML: rulesYAML, Flow: flow})
+}
+
+func (h *handlers) diagnoseCurrent(w http.ResponseWriter, r *http.Request) {
+	flow, err := parseDiagnoseRequest(r)
+	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-
-	topoRaw, err := h.store.ReadTopology()
+	doc, err := h.currentDoc(r)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeStoreError(w, err)
 		return
 	}
-	subnetsRaw, err := h.readStoredSubnets()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	rulesRaw, err := h.store.ReadRules()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	rep, err := app.Diagnose(r.Context(), h.log, app.DiagnoseOptions{
-		TopologyYAML: topoRaw,
-		SubnetsYAML:  subnetsRaw,
-		RulesYAML:    rulesRaw,
-		Flow: diagnose.Flow{
-			Src:      src,
-			Dst:      dst,
-			Proto:    rules.Proto(req.Proto),
-			SrcPorts: req.SrcPorts,
-			DstPorts: req.DstPorts,
-		},
-	})
+	rep, err := h.diagnoseDoc(r.Context(), doc, flow)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
@@ -437,18 +635,44 @@ func (h *handlers) diagnose(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rep)
 }
 
-func (h *handlers) lint(w http.ResponseWriter, r *http.Request) {
-	topo, err := h.loadTopology()
+func (h *handlers) diagnoseDraft(w http.ResponseWriter, r *http.Request) {
+	flow, err := parseDiagnoseRequest(r)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	pol, err := h.loadPolicy()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("parse stored rules: %w", err))
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
 		return
 	}
-	findings, err := app.Lint(r.Context(), h.log, topo, pol)
+	doc, _, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	rep, err := h.diagnoseDoc(r.Context(), doc, flow)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
+func (h *handlers) lintDoc(ctx context.Context, doc projectdoc.ProjectDoc) (any, error) {
+	topo, err := loadTopologyDoc(doc)
+	if err != nil {
+		return nil, err
+	}
+	pol := doc.Rules.ToPolicy()
+	return app.Lint(ctx, h.log, topo, &pol)
+}
+
+func (h *handlers) lintCurrent(w http.ResponseWriter, r *http.Request) {
+	doc, err := h.currentDoc(r)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	findings, err := h.lintDoc(r.Context(), doc)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
@@ -456,28 +680,19 @@ func (h *handlers) lint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"findings": findings})
 }
 
-func (h *handlers) getLayout(w http.ResponseWriter, r *http.Request) {
-	raw, err := h.store.ReadLayout()
+func (h *handlers) lintDraft(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	doc, _, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeStoreError(w, err)
 		return
 	}
-	if len(raw) == 0 {
-		raw = []byte("{}")
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(raw)
-}
-
-func (h *handlers) putLayout(w http.ResponseWriter, r *http.Request) {
-	var raw json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
+	findings, err := h.lintDoc(r.Context(), doc)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
-	if err := h.store.WriteLayout(raw); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, map[string]any{"findings": findings})
 }
