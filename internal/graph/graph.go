@@ -101,33 +101,41 @@ type attachPoint struct {
 func Build(topo *topology.Topology) (*Graph, error) {
 	g := newGraph()
 
-	var switchLinks []topology.Link
 	for _, l := range topo.Links {
 		aIsSwitch := topo.Devices[l.A.Device].Kind == topology.DeviceSwitch
 		bIsSwitch := topo.Devices[l.B.Device].Kind == topology.DeviceSwitch
-		switch {
-		case aIsSwitch && bIsSwitch:
-			switchLinks = append(switchLinks, l)
-		case !aIsSwitch && !bIsSwitch:
-			var ab, ba *edgeAllow
-			if l.Filter != nil {
-				aExports, err := exportSubnets(topo, l.Filter.AExports)
-				if err != nil {
-					return nil, fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
-				}
-				bExports, err := exportSubnets(topo, l.Filter.BExports)
-				if err != nil {
-					return nil, fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
-				}
-				ab = &edgeAllow{To: bExports}
-				ba = &edgeAllow{To: aExports}
-			}
-			g.addEdgeAllow(RouterNode(l.A.Device), RouterNode(l.B.Device), ab)
-			g.addEdgeAllow(RouterNode(l.B.Device), RouterNode(l.A.Device), ba)
+		if aIsSwitch || bIsSwitch {
+			continue
 		}
+		var ab, ba *edgeAllow
+		if l.Filter != nil {
+			aExports, err := exportSubnets(topo, l.Filter.AExports)
+			if err != nil {
+				return nil, fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
+			}
+			bExports, err := exportSubnets(topo, l.Filter.BExports)
+			if err != nil {
+				return nil, fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
+			}
+			ab = &edgeAllow{To: bExports}
+			ba = &edgeAllow{To: aExports}
+		}
+		g.addEdgeAllow(RouterNode(l.A.Device), RouterNode(l.B.Device), ab)
+		g.addEdgeAllow(RouterNode(l.B.Device), RouterNode(l.A.Device), ba)
 	}
 
-	domainOf := assignL2Domains(topo, switchLinks)
+	plainSwitchLinks, filteredSwitchLinks := splitSwitchLinks(topo)
+	domainOf := assignL2Domains(topo, plainSwitchLinks)
+
+	// A domain that anchors a filtered switch link needs its bus node even
+	// with a single local attach point below (see the loop over
+	// domainPoints further down): that point is no longer stranded, it has
+	// the filtered link's peer domain on its other side.
+	domainsWithFilteredLink := make(map[string]bool, len(filteredSwitchLinks)*2)
+	for _, l := range filteredSwitchLinks {
+		domainsWithFilteredLink[domainOf[l.A.Device]] = true
+		domainsWithFilteredLink[domainOf[l.B.Device]] = true
+	}
 
 	domainPoints := make(map[string][]attachPoint)
 	for _, l := range topo.Links {
@@ -145,15 +153,69 @@ func Build(topo *topology.Topology) (*Graph, error) {
 
 	// Every subnet inherits the attachment of its owning network (one
 	// network = one L2 segment; Validate guarantees a single owner).
+	// First pass: collect switch attachments in domainPoints.
 	for _, n := range topo.Networks {
 		for _, ref := range n.Attach {
 			dev := topo.Devices[ref.Device]
-			for _, sname := range n.Subnets {
-				switch dev.Kind {
-				case topology.DeviceSwitch:
-					name := domainOf[ref.Device]
+			if dev.Kind == topology.DeviceSwitch {
+				name := domainOf[ref.Device]
+				for _, sname := range n.Subnets {
 					domainPoints[name] = append(domainPoints[name], attachPoint{node: SubnetNode(sname)})
-				case topology.DeviceRouter:
+				}
+			}
+		}
+	}
+
+	// Determine which domains will have a bus node
+	domainsWithBus := make(map[string]bool)
+	for name, points := range domainPoints {
+		if len(points) >= 2 || domainsWithFilteredLink[name] {
+			domainsWithBus[name] = true
+		}
+	}
+
+	// Find routers connected only to switches without a bus
+	routersToSkip := make(map[string]bool)
+	for _, l := range topo.Links {
+		aIsSwitch := topo.Devices[l.A.Device].Kind == topology.DeviceSwitch
+		bIsSwitch := topo.Devices[l.B.Device].Kind == topology.DeviceSwitch
+		var router string
+		if aIsSwitch && !bIsSwitch {
+			router = l.B.Device
+		} else if bIsSwitch && !aIsSwitch {
+			router = l.A.Device
+		} else {
+			continue
+		}
+		// Check if this router is connected to any switch with a bus
+		connectedToBusSwitch := false
+		for _, l2 := range topo.Links {
+			aIsSwitch2 := topo.Devices[l2.A.Device].Kind == topology.DeviceSwitch
+			bIsSwitch2 := topo.Devices[l2.B.Device].Kind == topology.DeviceSwitch
+			var switchDev string
+			if aIsSwitch2 && !bIsSwitch2 && l2.B.Device == router {
+				switchDev = l2.A.Device
+			} else if bIsSwitch2 && !aIsSwitch2 && l2.A.Device == router {
+				switchDev = l2.B.Device
+			} else {
+				continue
+			}
+			if domainsWithBus[domainOf[switchDev]] {
+				connectedToBusSwitch = true
+				break
+			}
+		}
+		if !connectedToBusSwitch {
+			routersToSkip[router] = true
+		}
+	}
+
+	// Second pass: add router attachments, skipping those connected only to lone switches.
+	for _, n := range topo.Networks {
+		for _, ref := range n.Attach {
+			dev := topo.Devices[ref.Device]
+			if dev.Kind == topology.DeviceRouter && !routersToSkip[ref.Device] {
+				for _, sname := range n.Subnets {
 					g.addUndirected(RouterNode(ref.Device), SubnetNode(sname))
 				}
 			}
@@ -161,8 +223,8 @@ func Build(topo *topology.Topology) (*Graph, error) {
 	}
 
 	for name, points := range domainPoints {
-		if len(points) < 2 {
-			continue // nothing on the other side of this switch to reach
+		if !domainsWithBus[name] {
+			continue
 		}
 		bus := domainNode(name)
 		for _, p := range points {
@@ -170,7 +232,56 @@ func Build(topo *topology.Topology) (*Graph, error) {
 		}
 	}
 
+	if err := addFilteredSwitchEdges(g, topo, domainOf, filteredSwitchLinks); err != nil {
+		return nil, err
+	}
+
 	return g, nil
+}
+
+// splitSwitchLinks partitions the switch-switch links of topo into plain
+// (feeding assignL2Domains's merge) and filtered (route-filtered like a
+// router-router link, kept out of the merge — see addFilteredSwitchEdges).
+func splitSwitchLinks(topo *topology.Topology) (plain, filtered []topology.Link) {
+	for _, l := range topo.Links {
+		aIsSwitch := topo.Devices[l.A.Device].Kind == topology.DeviceSwitch
+		bIsSwitch := topo.Devices[l.B.Device].Kind == topology.DeviceSwitch
+		if !aIsSwitch || !bIsSwitch {
+			continue
+		}
+		if l.Filter != nil {
+			filtered = append(filtered, l)
+		} else {
+			plain = append(plain, l)
+		}
+	}
+	return plain, filtered
+}
+
+// addFilteredSwitchEdges wires each filtered switch-switch link as an
+// announce-oriented edge between the two domain bus nodes its switches
+// belong to — exactly like a filtered router-router link, but on domain
+// nodes instead of router nodes. A link whose switches ended up in the
+// same domain anyway (merged via another, unfiltered path) contributes no
+// edge: the domains are already one and the same, nothing to restrict.
+func addFilteredSwitchEdges(g *Graph, topo *topology.Topology, domainOf map[string]string, links []topology.Link) error {
+	for _, l := range links {
+		domA, domB := domainOf[l.A.Device], domainOf[l.B.Device]
+		if domA == domB {
+			continue
+		}
+		aExports, err := exportSubnets(topo, l.Filter.AExports)
+		if err != nil {
+			return fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
+		}
+		bExports, err := exportSubnets(topo, l.Filter.BExports)
+		if err != nil {
+			return fmt.Errorf("link %s-%s: %w", l.A.Device, l.B.Device, err)
+		}
+		g.addEdgeAllow(domainNode(domA), domainNode(domB), &edgeAllow{To: bExports})
+		g.addEdgeAllow(domainNode(domB), domainNode(domA), &edgeAllow{To: aExports})
+	}
+	return nil
 }
 
 // assignL2Domains groups switch devices into connected components (L2
