@@ -131,23 +131,67 @@ switch-switch линка (разные пары физических свитч�
 Это была немая, но безобидная деградация, пока switch-switch фильтр был
 запрещён валидацией; теперь её нужно исправить.
 
-Выносим разрешение «устройство → доменная группировка» в общий помощник,
-используемый и `Build`, и `ReachableEntities`, чтобы не считать домены
-дважды по разной логике:
+**Исправлено по факту реализации (см. план, Task 4):** вариант выше —
+единственный доменный узел как стартовая точка — оказался сломан. `Build`
+подключает локальные точки домена к его bus-узлу только когда их ≥2 или
+домен держит **выживший** фильтрованный линк — а `ReachableEntities` всегда
+исключает именно тот линк, о котором спрашивает вызывающий, что рутинно
+оказывается единственным основанием для существования bus-узла. Поэтому
+доменный узел в обрезанном графе регулярно остаётся без рёбер, и наивная
+версия выше проваливает свой же тест уже на первом сценарии.
+
+Рабочее решение — `startNodes` (во множественном числе): свитч
+разрешается не в один доменный узел, а в набор из самого доменного узла
+**плюс** каждую его точку присоединения напрямую (каждый роутер на этом
+домене, каждая подсеть, чья сеть подключена к свитчу этого домена).
+`plainReachableSubnets` соответственно принимает `[]Node`, а не один `Node`,
+и стартует BFS от всех переданных узлов сразу:
 
 ```go
-func deviceStartNode(topo *topology.Topology, device string, domainOf map[string]string) Node {
-    if topo.Devices[device].Kind == topology.DeviceRouter {
-        return RouterNode(device)
+func startNodes(topo *topology.Topology, device string) ([]Node, error) {
+    d, ok := topo.Devices[device]
+    if !ok {
+        return nil, fmt.Errorf("unknown device %q", device)
     }
-    return domainNode(domainOf[device])
+    if d.Kind == topology.DeviceRouter {
+        return []Node{RouterNode(device)}, nil
+    }
+    plainLinks, _ := splitSwitchLinks(topo)
+    domainOf := assignL2Domains(topo, plainLinks)
+    domain := domainOf[device]
+    seen := map[Node]bool{}
+    var starts []Node
+    add := func(n Node) {
+        if !seen[n] {
+            seen[n] = true
+            starts = append(starts, n)
+        }
+    }
+    add(domainNode(domain))
+    // + каждый роутер, присоединённый к этому домену через switch-router
+    //   линк, + каждая подсеть сети, присоединённой напрямую к свитчу
+    //   этого домена — см. internal/graph/reachable.go для полного кода.
+    return starts, nil
 }
 ```
 
+Доменный узел всё равно нужен как один из seed'ов: он остаётся значимым,
+когда домен участвует ещё в одном, не исключённом сейчас фильтрованном
+линке — тогда через bus доступно то, что re-derive по локальным точкам
+топологии не восстановит.
+
 `ReachableEntities` считает `domainOf` на урезанном (`trimmed`) графе тем
-же путём, что и `Build` (тем же извлечённым помощником группировки), и
-стартует `plainReachableSubnets` с `deviceStartNode(...)` вместо
-`RouterNode(device)` напрямую.
+же путём, что и `Build` (теми же извлечёнными помощниками `splitSwitchLinks`/
+`assignL2Domains`), и стартует `plainReachableSubnets` с `startNodes(...)`
+вместо `RouterNode(device)` напрямую.
+
+Известный технический долг: `startNodes` независимо повторяет перечисление
+точек присоединения домена (switch-router линки + сети, подключённые к
+свитчу), которое `Build` уже делает при сборке `domainPoints`. Сегодня оба
+места согласованы, но это не вынесено в один общий помощник, как
+изначально предполагалось выше, — расхождение придётся ловить руками, если
+`Build`-версия обзаведётся новым видом точки присоединения. Оставлено как
+дальнейшее рефакторинговое улучшение, не блокирующее эту фичу.
 
 `ValidateFilterExports` не меняется — она уже вызывает `ReachableEntities`
 по обеим сторонам любого фильтрованного линка независимо от рода
