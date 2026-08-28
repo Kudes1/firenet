@@ -382,3 +382,86 @@ func TestRun_ChainedReExportRequestArrivesReturnHasNoRoute(t *testing.T) {
 		t.Fatal("market never learned a route back to office: no firewall rule can create a route that was never announced")
 	}
 }
+
+const switchFilterDiagTopology = `
+devices:
+  - {name: ra, kind: router}
+  - {name: rb, kind: router}
+  - {name: rc, kind: router}
+  - {name: sw-a, kind: switch}
+  - {name: sw-b, kind: switch}
+links:
+  - {a: {device: ra}, b: {device: sw-a}}
+  - {a: {device: rb}, b: {device: sw-b}}
+  - {a: {device: rc}, b: {device: sw-b}}
+  - a: {device: sw-a}
+    b: {device: sw-b}
+    filter: {a-exports: [NA], b-exports: [NB]}
+networks:
+  - {name: NA, subnets: [a], attach: [{device: ra}]}
+  - {name: NB, subnets: [b], attach: [{device: rb}]}
+  - {name: NC, subnets: [c], attach: [{device: rc}]}
+`
+
+const switchFilterDiagSubnets = `
+subnets:
+  - {name: a, cidr: 10.20.0.0/24}
+  - {name: b, cidr: 10.20.1.0/24}
+  - {name: c, cidr: 10.20.2.0/24}
+`
+
+// A filtered switch-switch link constrains route propagation across the
+// trunk exactly like a filtered router-router link: b is announced across
+// sw-a→sw-b (BExports) and stays reachable, c is not and becomes
+// unreachable at the network layer — not because of any firewall verdict
+// (sets is nil: every router allows unconditionally), a routing gap.
+func TestRun_FilteredSwitchLinkConstrainsPropagation(t *testing.T) {
+	topo, err := topology.Load(strings.NewReader(switchFilterDiagTopology))
+	if err != nil {
+		t.Fatalf("load topology: %v", err)
+	}
+	subs, err := topology.LoadSubnets(strings.NewReader(switchFilterDiagSubnets))
+	if err != nil {
+		t.Fatalf("load subnets: %v", err)
+	}
+	topo.Subnets = subs
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("validate topology: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+
+	repAB, err := diagnose.Run(topo, nil, g, graph.DefaultLimits(), diagnose.Flow{
+		Src: netip.MustParseAddr("10.20.0.5"), Dst: netip.MustParseAddr("10.20.1.5"), Proto: rules.ProtoAny,
+	})
+	if err != nil {
+		t.Fatalf("diagnose.Run a->b: %v", err)
+	}
+	if len(repAB.Paths) == 0 {
+		t.Fatal("a->b: expected a path, b is announced across the sw-a/sw-b trunk")
+	}
+	if !repAB.ReturnRouteExists {
+		t.Fatal("a->b: return route must exist, a is announced back across the same trunk")
+	}
+
+	repAC, err := diagnose.Run(topo, nil, g, graph.DefaultLimits(), diagnose.Flow{
+		Src: netip.MustParseAddr("10.20.0.5"), Dst: netip.MustParseAddr("10.20.2.5"), Proto: rules.ProtoAny,
+	})
+	if err != nil {
+		t.Fatalf("diagnose.Run a->c: %v", err)
+	}
+	if len(repAC.Paths) != 0 {
+		t.Fatalf("a->c: expected no path, c was never announced across the sw-a/sw-b trunk, got %+v", repAC.Paths)
+	}
+	// The return direction is NOT the mirror of the blocked forward path:
+	// dst=a is announced via aExports regardless of which router on
+	// sw-b's domain sends it (source is never checked — route-filtering
+	// is destination-oriented, see internal/graph), so c can still reach
+	// a even though nothing can reach c. ReturnRouteExists tracks exactly
+	// this asymmetry, the same way TestBuild_FilteredLinkPropagatesLearnedRouteAcrossPlainLink
+	// does at the router-router level.
+	if !repAC.ReturnRouteExists {
+		t.Fatal("a->c: c can still reach a via aExports regardless of source, so the return route does exist at the network layer")
+	}
