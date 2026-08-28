@@ -76,11 +76,27 @@ func (g *Graph) addEdge(from, to Node) {
 	g.addEdgeAllow(from, to, nil)
 }
 
+// addEdgeAllow adds an edge from->to, or, if one already exists, merges
+// allow into it instead of keeping only the first caller's restriction: an
+// unconditional edge (Allow == nil) always wins, and two restricted edges
+// union their announced destinations (either one having announced dst is
+// enough for real routing to have learned it).
 func (g *Graph) addEdgeAllow(from, to Node, allow *edgeAllow) {
-	for _, e := range g.adj[from] {
-		if e.To == to {
-			return
+	for i, e := range g.adj[from] {
+		if e.To != to {
+			continue
 		}
+		switch {
+		case e.Allow == nil:
+			// already unconditional: a further restriction can't narrow it
+		case allow == nil:
+			g.adj[from][i].Allow = nil // any unconditional announcement wins
+		default:
+			for name := range allow.To {
+				e.Allow.To[name] = struct{}{}
+			}
+		}
+		return
 	}
 	g.adj[from] = append(g.adj[from], Edge{To: to, Allow: allow})
 }

@@ -471,6 +471,63 @@ func TestBuild_LonelySwitchStaysUnwiredWithoutFilteredLink(t *testing.T) {
 	}
 }
 
+func TestBuild_TwoFilteredSwitchLinksOnSameDomainPairUnionExports(t *testing.T) {
+	// sw1a/sw1b merge into one domain, sw2a/sw2b merge into another; two
+	// separate filtered links (sw1a-sw2a and sw1b-sw2b) both connect that
+	// same pair of domains, each announcing a different subnet. Both must
+	// stay reachable — the second link's announcement must not be
+	// silently dropped in favor of the first.
+	topo := &topology.Topology{
+		Devices: map[string]topology.Device{
+			"r1a":  {Name: "r1a", Kind: topology.DeviceRouter},
+			"r1b":  {Name: "r1b", Kind: topology.DeviceRouter},
+			"r2a":  {Name: "r2a", Kind: topology.DeviceRouter},
+			"r2b":  {Name: "r2b", Kind: topology.DeviceRouter},
+			"sw1a": {Name: "sw1a", Kind: topology.DeviceSwitch},
+			"sw1b": {Name: "sw1b", Kind: topology.DeviceSwitch},
+			"sw2a": {Name: "sw2a", Kind: topology.DeviceSwitch},
+			"sw2b": {Name: "sw2b", Kind: topology.DeviceSwitch},
+		},
+		Links: []topology.Link{
+			{A: topology.Endpoint{Device: "r1a"}, B: topology.Endpoint{Device: "sw1a"}},
+			{A: topology.Endpoint{Device: "r1b"}, B: topology.Endpoint{Device: "sw1b"}},
+			{A: topology.Endpoint{Device: "r2a"}, B: topology.Endpoint{Device: "sw2a"}},
+			{A: topology.Endpoint{Device: "r2b"}, B: topology.Endpoint{Device: "sw2b"}},
+			{A: topology.Endpoint{Device: "sw1a"}, B: topology.Endpoint{Device: "sw1b"}},
+			{A: topology.Endpoint{Device: "sw2a"}, B: topology.Endpoint{Device: "sw2b"}},
+			{A: topology.Endpoint{Device: "sw1a"}, B: topology.Endpoint{Device: "sw2a"},
+				Filter: &topology.LinkFilter{AExports: []string{"NA1"}, BExports: []string{"NB1"}}},
+			{A: topology.Endpoint{Device: "sw1b"}, B: topology.Endpoint{Device: "sw2b"},
+				Filter: &topology.LinkFilter{AExports: []string{"NA2"}, BExports: []string{"NB2"}}},
+		},
+		Subnets: map[string]topology.Subnet{
+			"A1": {Name: "A1", CIDR: prefix(t, "10.0.0.0/24")},
+			"A2": {Name: "A2", CIDR: prefix(t, "10.0.1.0/24")},
+			"B1": {Name: "B1", CIDR: prefix(t, "10.0.2.0/24")},
+			"B2": {Name: "B2", CIDR: prefix(t, "10.0.3.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"NA1": netWithSubnets("NA1", []string{"A1"}, topology.Endpoint{Device: "r1a"}),
+			"NA2": netWithSubnets("NA2", []string{"A2"}, topology.Endpoint{Device: "r1b"}),
+			"NB1": netWithSubnets("NB1", []string{"B1"}, topology.Endpoint{Device: "r2a"}),
+			"NB2": netWithSubnets("NB2", []string{"B2"}, topology.Endpoint{Device: "r2b"}),
+		},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("invalid fixture: %v", err)
+	}
+	g, err := Build(topo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, pair := range [][2]string{{"A1", "B1"}, {"A1", "B2"}, {"A2", "B1"}, {"A2", "B2"}} {
+		paths, err := g.AllSimplePaths(SubnetNode(pair[0]), SubnetNode(pair[1]), DefaultLimits())
+		if err != nil || len(paths) != 1 {
+			t.Fatalf("%s->%s: got %d paths (%v), want 1 (union of both filtered links' exports)", pair[0], pair[1], len(paths), err)
+		}
+	}
+}
+
 func filteredTopo() *topology.Topology {
 	return &topology.Topology{
 		Devices: map[string]topology.Device{
