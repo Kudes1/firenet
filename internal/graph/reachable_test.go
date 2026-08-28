@@ -153,6 +153,47 @@ func TestReachableEntities_DeviceBehindSwitchOwnsItsNetwork(t *testing.T) {
 	}
 }
 
+func TestReachableEntities_SwitchDeviceItself(t *testing.T) {
+	// Today ReachableEntities always starts from RouterNode(device), which
+	// never exists for a switch — candidates for a switch-side filtered
+	// link silently come back empty. sw1's own network must be in reach.
+	topo := &topology.Topology{
+		Devices: map[string]topology.Device{
+			"r1":  {Name: "r1", Kind: topology.DeviceRouter},
+			"r2":  {Name: "r2", Kind: topology.DeviceRouter},
+			"sw1": {Name: "sw1", Kind: topology.DeviceSwitch},
+			"sw2": {Name: "sw2", Kind: topology.DeviceSwitch},
+		},
+		Links: []topology.Link{
+			{A: topology.Endpoint{Device: "r1"}, B: topology.Endpoint{Device: "sw1"}},
+			{A: topology.Endpoint{Device: "r2"}, B: topology.Endpoint{Device: "sw2"}},
+			*filter(&topology.Link{A: topology.Endpoint{Device: "sw1"}, B: topology.Endpoint{Device: "sw2"}}, []string{"NA"}, []string{"NB"}),
+		},
+		Subnets: map[string]topology.Subnet{
+			"a": {Name: "a", CIDR: netip.MustParsePrefix("10.0.0.0/24")},
+			"b": {Name: "b", CIDR: netip.MustParsePrefix("10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"NA": {Name: "NA", Subnets: []string{"a"}, Attach: []topology.Endpoint{{Device: "r1"}}},
+			"NB": {Name: "NB", Subnets: []string{"b"}, Attach: []topology.Endpoint{{Device: "r2"}}},
+		},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("invalid fixture: %v", err)
+	}
+	got, err := ReachableEntities(topo, "sw1", 2) // exclude the filtered sw1-sw2 link itself
+	if err != nil {
+		t.Fatalf("reachable: %v", err)
+	}
+	want := []string{"NA", "a"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if err := ValidateFilterExports(topo); err != nil {
+		t.Fatalf("own-network export rejected: %v", err)
+	}
+}
+
 func TestValidateFilterExports(t *testing.T) {
 	topo := chainTopo()
 	filter(&topo.Links[0], []string{"NA"}, []string{"NB"})

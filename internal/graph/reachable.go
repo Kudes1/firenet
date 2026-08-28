@@ -9,9 +9,9 @@ import (
 )
 
 // ReachableEntities returns the sorted names of networks and bare subnets
-// reachable from router device when topo.Links[skip] is excluded from the
-// graph (skip < 0 keeps every link). A name qualifies if any of its subnets
-// can be reached from a subnet attached to device, honoring the export
+// reachable from device (router or switch) when topo.Links[skip] is excluded
+// from the graph (skip < 0 keeps every link). A name qualifies if any of its
+// subnets can be reached from a subnet attached to device, honoring the export
 // rules of all other filtered links — so an entity counts as reachable both
 // over plain links and across other filtered links that announce it.
 func ReachableEntities(topo *topology.Topology, device string, skip int) ([]string, error) {
@@ -28,7 +28,11 @@ func ReachableEntities(topo *topology.Topology, device string, skip int) ([]stri
 		return nil, err
 	}
 
-	local := plainReachableSubnets(g, RouterNode(device))
+	start, err := startNode(&trimmed, device)
+	if err != nil {
+		return nil, err
+	}
+	local := plainReachableSubnets(g, start)
 	if len(local) == 0 {
 		return nil, nil // nothing attached: nothing is in reach
 	}
@@ -65,6 +69,57 @@ func ReachableEntities(topo *topology.Topology, device string, skip int) ([]stri
 		}
 	}
 	return out, nil
+}
+
+// startNode resolves the graph node standing in for device: a router is
+// its own node, a switch is the L2-domain bus it belongs to (switches
+// never appear as their own graph node — see Build). If the domain bus is
+// not present in the graph due to a single attachment point and no filtered
+// links, fall back to that attachment point (usually a router).
+func startNode(topo *topology.Topology, device string) (Node, error) {
+	d, ok := topo.Devices[device]
+	if !ok {
+		return Node{}, fmt.Errorf("unknown device %q", device)
+	}
+	if d.Kind == topology.DeviceRouter {
+		return RouterNode(device), nil
+	}
+	plainLinks, _ := splitSwitchLinks(topo)
+	domainOf := assignL2Domains(topo, plainLinks)
+	domain := domainOf[device]
+
+	// Find router attachment points for this domain.
+	var routerAttachPoints []string
+	for _, l := range topo.Links {
+		aIsSwitch := topo.Devices[l.A.Device].Kind == topology.DeviceSwitch
+		bIsSwitch := topo.Devices[l.B.Device].Kind == topology.DeviceSwitch
+		if aIsSwitch && !bIsSwitch && domainOf[l.A.Device] == domain {
+			routerAttachPoints = append(routerAttachPoints, l.B.Device)
+		} else if bIsSwitch && !aIsSwitch && domainOf[l.B.Device] == domain {
+			routerAttachPoints = append(routerAttachPoints, l.A.Device)
+		}
+	}
+
+	// If the domain has exactly one router attachment and no subnets
+	// attached directly to it, use the router as start point (the domain
+	// node won't exist in the graph for this case).
+	if len(routerAttachPoints) == 1 {
+		// Check for direct subnet attachments to the domain.
+		for _, n := range topo.Networks {
+			for _, ref := range n.Attach {
+				if topo.Devices[ref.Device].Kind == topology.DeviceSwitch &&
+					domainOf[ref.Device] == domain {
+					// There's a subnet attached to the domain; use domain node.
+					return domainNode(domain), nil
+				}
+			}
+		}
+		// Only one router attachment, no subnet attachments: use that router.
+		return RouterNode(routerAttachPoints[0]), nil
+	}
+
+	// Multiple attachment points or none; use domain node.
+	return domainNode(domain), nil
 }
 
 // ValidateFilterExports checks every filtered link's export list against
