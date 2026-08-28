@@ -107,6 +107,11 @@ function applyOperationFake(store, op) {
     case "create-network": topo.networks.push(op.network); break;
     case "delete-network":
       topo.networks = topo.networks.filter((n) => n.name !== op.networkName);
+      topo.links.forEach((l) => {
+        if (!l.filter) return;
+        l.filter.aExports = dropStr(l.filter.aExports, op.networkName);
+        l.filter.bExports = dropStr(l.filter.bExports, op.networkName);
+      });
       (topo.unions || []).forEach((u) => { u.networks = dropStr(u.networks, op.networkName); });
       delete layout.networks[op.networkName];
       break;
@@ -361,6 +366,29 @@ test("device kinds get their distinct shape and glyph, unknown kinds fall back",
   assert.deepEqual(radii, [["r1", 16], ["sw1", 2], ["x1", 6]], "router rounded, switch sharp, fallback plain");
   const glyphs = JSON.parse(get(`JSON.stringify(State.list.filter((i) => i.kind === "glyph").map((i) => i.id))`));
   assert.deepEqual(glyphs, ["device:r1:glyph", "device:sw1:glyph"], "glyph only for kinds that have one");
+});
+
+test("client projection removes deleted network from filtered-link exports", async () => {
+  const { get } = bootTopology(responses);
+  await tick();
+  const snapshot = {
+    topology: {
+      devices: [{ name: "r1", kind: "router" }, { name: "r2", kind: "router" }],
+      networks: [{ name: "office", subnets: [], attach: [] }, { name: "dmz", subnets: [], attach: [] }],
+      links: [
+        { a: { device: "r1" }, b: { device: "r2" }, filter: { aExports: ["office"], bExports: ["dmz"] } },
+        { a: { device: "r2" }, b: { device: "r1" }, filter: { aExports: ["dmz"], bExports: ["office"] } },
+      ],
+      sets: [], unions: [],
+    },
+    layout: { devices: {}, networks: {}, links: {}, camera: null },
+  };
+  const op = { kind: "delete-network", networkName: "office" };
+  const next = JSON.parse(get(`JSON.stringify(applyTopologyOp(${JSON.stringify(snapshot)}, ${JSON.stringify(op)}))`));
+
+  assert.deepEqual(next.topology.links[0].filter, { aExports: [], bExports: ["dmz"] });
+  assert.deepEqual(next.topology.links[1].filter, { aExports: ["dmz"], bExports: [] });
+  assert.deepEqual(snapshot.topology.links[0].filter.aExports, ["office"], "input snapshot stays unchanged");
 });
 
 test("network node renders as a closed cloud path inside its bbox", async () => {

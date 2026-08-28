@@ -120,6 +120,40 @@ func TestApplyTopologyOperation_DeleteDeviceCascades(t *testing.T) {
 	}
 }
 
+// TestApplyTopologyOperation_DeleteNetworkRemovesFilteredExports protects
+// network deletion from leaving filtered links with references to an export
+// entity that no longer exists.
+func TestApplyTopologyOperation_DeleteNetworkRemovesFilteredExports(t *testing.T) {
+	doc := fixtureProjectDoc()
+	doc.Topology.Links = []LinkDoc{
+		{
+			A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "r2"},
+			Filter: &LinkFilterDoc{AExports: []string{"n-office"}, BExports: []string{"n-dmz"}},
+		},
+		{
+			A: EndpointDoc{Device: "r2"}, B: EndpointDoc{Device: "r1"},
+			Filter: &LinkFilterDoc{AExports: []string{"n-dmz"}, BExports: []string{"n-office"}},
+		},
+	}
+
+	next, err := applyTopologyOperation(doc, topologyOperation{Kind: "delete-network", NetworkName: "n-office"})
+	if err != nil {
+		t.Fatalf("delete-network: %v", err)
+	}
+	if got := networkIndex(next.Topology.Networks, "n-office"); got != -1 {
+		t.Fatalf("n-office still present at index %d", got)
+	}
+	if got := next.Topology.Links[0].Filter; got == nil || len(got.AExports) != 0 || len(got.BExports) != 1 || got.BExports[0] != "n-dmz" {
+		t.Fatalf("first link filter = %+v, want only n-dmz on B", got)
+	}
+	if got := next.Topology.Links[1].Filter; got == nil || len(got.AExports) != 1 || got.AExports[0] != "n-dmz" || len(got.BExports) != 0 {
+		t.Fatalf("second link filter = %+v, want only n-dmz on A", got)
+	}
+	if got := doc.Topology.Links[0].Filter.AExports; len(got) != 1 || got[0] != "n-office" {
+		t.Fatalf("input doc was mutated: %+v", got)
+	}
+}
+
 func TestApplyTopologyOperation_AttachDetachNetwork(t *testing.T) {
 	doc := fixtureProjectDoc()
 

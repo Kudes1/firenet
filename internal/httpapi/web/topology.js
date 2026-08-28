@@ -140,6 +140,14 @@ function applyTopologyOp(snapshot, op) {
 
     case "delete-network":
       topo.networks = topo.networks.filter((n) => n.name !== op.networkName);
+      topo.links = topo.links.map((link) => link.filter ? {
+        ...link,
+        filter: {
+          ...link.filter,
+          aExports: removeString(link.filter.aExports, op.networkName),
+          bExports: removeString(link.filter.bExports, op.networkName),
+        },
+      } : link);
       topo.unions = topo.unions.map((u) => ({ ...u, networks: removeString(u.networks, op.networkName) }));
       delete layout.networks[op.networkName];
       break;

@@ -73,6 +73,16 @@ func removeString(ss []string, s string) []string {
 	return ss
 }
 
+func removeAllStrings(ss []string, s string) []string {
+	next := make([]string, 0, len(ss))
+	for _, v := range ss {
+		if v != s {
+			next = append(next, v)
+		}
+	}
+	return next
+}
+
 // cloneProjectDoc deep-copies the parts of doc a topology operation can
 // mutate (Topology, Layout), so applying an operation never aliases the
 // caller's slices/maps. Subnets and Rules are never written by a topology
@@ -192,6 +202,15 @@ func applyTopologyOperation(doc projectdoc.ProjectDoc, op topologyOperation) (pr
 		topo.Networks = append(topo.Networks[:i:i], topo.Networks[i+1:]...)
 		for ui, u := range topo.Unions {
 			topo.Unions[ui].Networks = removeString(u.Networks, op.NetworkName)
+		}
+		for li, l := range topo.Links {
+			if l.Filter == nil {
+				continue
+			}
+			filter := *l.Filter
+			filter.AExports = removeAllStrings(filter.AExports, op.NetworkName)
+			filter.BExports = removeAllStrings(filter.BExports, op.NetworkName)
+			topo.Links[li].Filter = &filter
 		}
 		delete(layout.Networks, op.NetworkName)
 
