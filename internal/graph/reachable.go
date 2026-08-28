@@ -152,7 +152,7 @@ func ValidateFilterExports(topo *topology.Topology) error {
 			}
 			for _, e := range s.exports {
 				if _, ok := inReach[e]; !ok {
-					return fmt.Errorf("link[%d]: export %q is not reachable from router %q (side %s)", i, e, s.dev, s.label)
+					return fmt.Errorf("link[%d]: export %q is not reachable from device %q (side %s)", i, e, s.dev, s.label)
 				}
 			}
 		}

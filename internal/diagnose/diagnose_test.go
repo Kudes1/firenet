@@ -442,7 +442,7 @@ func TestRun_FilteredSwitchLinkConstrainsPropagation(t *testing.T) {
 	if len(repAB.Paths) == 0 {
 		t.Fatal("a->b: expected a path, b is announced across the sw-a/sw-b trunk")
 	}
-	if !repAB.ReturnRouteExists {
+	if !repAB.ReturnPathAllowed {
 		t.Fatal("a->b: return route must exist, a is announced back across the same trunk")
 	}
 
@@ -459,10 +459,12 @@ func TestRun_FilteredSwitchLinkConstrainsPropagation(t *testing.T) {
 	// dst=a is announced via aExports regardless of which router on
 	// sw-b's domain sends it (source is never checked — route-filtering
 	// is destination-oriented, see internal/graph), so c can still reach
-	// a even though nothing can reach c. ReturnRouteExists tracks exactly
-	// this asymmetry, the same way TestBuild_FilteredLinkPropagatesLearnedRouteAcrossPlainLink
-	// does at the router-router level.
-	if !repAC.ReturnRouteExists {
+	// a even though nothing can reach c. With sets=nil (no firewall rules,
+	// every router allows unconditionally), ReturnPathAllowed reduces to
+	// exactly this network-layer question, the same way
+	// TestBuild_FilteredLinkPropagatesLearnedRouteAcrossPlainLink
+	// demonstrates it at the router-router level.
+	if !repAC.ReturnPathAllowed {
 		t.Fatal("a->c: c can still reach a via aExports regardless of source, so the return route does exist at the network layer")
 	}
 }

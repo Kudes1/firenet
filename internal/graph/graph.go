@@ -149,8 +149,12 @@ func Build(topo *topology.Topology) (*Graph, error) {
 	// the filtered link's peer domain on its other side.
 	domainsWithFilteredLink := make(map[string]bool, len(filteredSwitchLinks)*2)
 	for _, l := range filteredSwitchLinks {
-		domainsWithFilteredLink[domainOf[l.A.Device]] = true
-		domainsWithFilteredLink[domainOf[l.B.Device]] = true
+		domA, domB := domainOf[l.A.Device], domainOf[l.B.Device]
+		if domA == domB {
+			continue // already merged via another path; addFilteredSwitchEdges adds no edge for this link either
+		}
+		domainsWithFilteredLink[domA] = true
+		domainsWithFilteredLink[domB] = true
 	}
 
 	domainPoints := make(map[string][]attachPoint)
