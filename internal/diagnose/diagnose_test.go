@@ -465,3 +465,37 @@ func TestRun_FilteredSwitchLinkConstrainsPropagation(t *testing.T) {
 	if !repAC.ReturnRouteExists {
 		t.Fatal("a->c: c can still reach a via aExports regardless of source, so the return route does exist at the network layer")
 	}
+}
+
+// Regression guard for the original bug report: an *unfiltered* switch
+// link still merges both switches into one L2 domain, so c (behind rc, on
+// sw-b like b) stays reachable from a in a single path. Nothing in Tasks
+// 1-4 should have changed this.
+func TestRun_PlainSwitchLinkStillMergesDomain(t *testing.T) {
+	topo, err := topology.Load(strings.NewReader(switchFilterDiagTopology))
+	if err != nil {
+		t.Fatalf("load topology: %v", err)
+	}
+	topo.Links[3].Filter = nil // same topology, plain sw-a/sw-b link
+	subs, err := topology.LoadSubnets(strings.NewReader(switchFilterDiagSubnets))
+	if err != nil {
+		t.Fatalf("load subnets: %v", err)
+	}
+	topo.Subnets = subs
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("validate topology: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	rep, err := diagnose.Run(topo, nil, g, graph.DefaultLimits(), diagnose.Flow{
+		Src: netip.MustParseAddr("10.20.0.5"), Dst: netip.MustParseAddr("10.20.2.5"), Proto: rules.ProtoAny,
+	})
+	if err != nil {
+		t.Fatalf("diagnose.Run a->c: %v", err)
+	}
+	if len(rep.Paths) != 1 {
+		t.Fatalf("a->c: expected exactly 1 path through the merged sw-a+sw-b domain, got %+v", rep.Paths)
+	}
+}
