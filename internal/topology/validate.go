@@ -68,8 +68,9 @@ func (t *Topology) validateLinks() error {
 		seen[pair] = i
 
 		if l.Filter != nil {
-			if t.Devices[l.A.Device].Kind != DeviceRouter || t.Devices[l.B.Device].Kind != DeviceRouter {
-				return fmt.Errorf("%s: filtered link must connect two routers", where)
+			aKind, bKind := t.Devices[l.A.Device].Kind, t.Devices[l.B.Device].Kind
+			if aKind != bKind || (aKind != DeviceRouter && aKind != DeviceSwitch) {
+				return fmt.Errorf("%s: filtered link must connect two routers or two switches", where)
 			}
 			if l.Filter.AExports == nil || l.Filter.BExports == nil {
 				return fmt.Errorf("%s: filter must declare both a-exports and b-exports", where)

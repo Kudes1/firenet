@@ -236,6 +236,32 @@ func TestValidate_FilteredLink_OK(t *testing.T) {
 	}
 }
 
+func TestValidate_FilteredLink_TwoSwitchesOK(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Devices["sw1"] = Device{Name: "sw1", Kind: DeviceSwitch}
+	topo.Devices["sw2"] = Device{Name: "sw2", Kind: DeviceSwitch}
+	topo.Links = append(topo.Links, Link{
+		A: Endpoint{"sw1"}, B: Endpoint{"sw2"},
+		Filter: &LinkFilter{AExports: []string{"n1"}, BExports: []string{"n2"}},
+	})
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_FilteredLink_RejectsMixedRouterSwitch(t *testing.T) {
+	topo := baseTopology(t)
+	topo.Devices["sw"] = Device{Name: "sw", Kind: DeviceSwitch}
+	topo.Links[0] = Link{
+		A: Endpoint{"r1"}, B: Endpoint{"sw"},
+		Filter: &LinkFilter{AExports: []string{"n1"}, BExports: []string{"n2"}},
+	}
+	err := topo.Validate()
+	if err == nil || !strings.Contains(err.Error(), "two routers or two switches") {
+		t.Fatalf("expected mixed-kind error, got: %v", err)
+	}
+}
+
 func TestValidate_FilteredLink_NeedsTwoRouters(t *testing.T) {
 	topo := baseTopology(t)
 	topo.Devices["sw"] = Device{Name: "sw", Kind: DeviceSwitch}
