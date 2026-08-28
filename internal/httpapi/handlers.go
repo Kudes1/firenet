@@ -91,7 +91,7 @@ func (h *handlers) resolveDraftForAccess(w http.ResponseWriter, r *http.Request)
 }
 
 // deletionErrorsFromDocs diffs prev's topology+subnets against next's and
-// reports removed objects still referenced by prev's rules. A broken
+// reports removed objects still referenced by the proposed rules. A broken
 // prev/next or unparseable proposal yields no deletions here — full
 // validation reports those instead.
 func deletionErrorsFromDocs(prev, next projectdoc.ProjectDoc) []string {
@@ -121,7 +121,7 @@ func deletionErrorsFromDocs(prev, next projectdoc.ProjectDoc) []string {
 		return nil
 	}
 
-	rulesYAML, err := yaml.Marshal(prev.Rules)
+	rulesYAML, err := yaml.Marshal(next.Rules)
 	if err != nil {
 		return nil
 	}

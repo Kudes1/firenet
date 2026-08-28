@@ -44,6 +44,11 @@ function bootPage() {
     console,
     fetch: async (path_, opts) => {
       calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
+      if (path_ === "/api/drafts/d1/topology/operations" && opts?.method === "POST") {
+        const op = JSON.parse(opts.body);
+        const networks = topoFixture.networks.map((n) => n.name === op.networkName ? { ...op.network, attach: n.attach } : n);
+        return { ok: true, status: 200, json: async () => ({ topology: { ...topoFixture, networks }, layout: {} }) };
+      }
       if (path_ === "/api/drafts/d1/topology") {
         return { ok: true, status: 200, json: async () => calls.find((c) => c.method === "PUT")?.body || topoFixture };
       }
@@ -170,22 +175,37 @@ test("filteredNetworks matches by name, description and subnets with IP expansio
   assert.deepEqual(page.filteredNetworks.map((n) => n.net.name), ["office", "dmz"]);
 });
 
-test("saveDraft persists the whole topology preserving devices, links and attach", async () => {
+test("saveDraft updates network members and description", async () => {
   const { page, calls } = await bootLoadedPage();
   page.draft = { index: 0, name: "office", subnets: ["a", "c"], description: "офисная" };
 
   await page.saveDraft();
 
-  const put = calls.find((c) => c.path === "/api/drafts/d1/topology" && c.method === "PUT");
-  assert.deepEqual(put.body.devices, [{ name: "r1", kind: "router" }]);
-  assert.deepEqual(put.body.links, []);
-  assert.deepEqual(put.body.networks, [
-    { name: "office", subnets: ["a", "c"].sort(), attach: [{ device: "r1" }], description: "офисная" },
-    { name: "dmz", subnets: ["b"], attach: [] },
-  ]);
+  const post = calls.find((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST");
+  assert.deepEqual(post.body, {
+    kind: "update-network",
+    networkName: "office",
+    network: { name: "office", subnets: ["a", "c"], description: "офисная" },
+  });
   assert.equal(page.networks[0].description, "офисная"); // description survives persist
   assert.equal(page.networks.length, 2);
   assert.ok(calls.some((c) => c.path === "dialog.close"));
+});
+
+test("saveDraft renames a network through the cascading update operation", async () => {
+  const { page, calls } = await bootLoadedPage();
+  page.draft = { index: 0, name: "hq", subnets: ["a"], description: "головной офис" };
+
+  await page.saveDraft();
+
+  const post = calls.find((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST");
+  assert.ok(post, "network rename must use a cascading operation");
+  assert.deepEqual(post.body, {
+    kind: "update-network",
+    networkName: "office",
+    network: { name: "hq", subnets: ["a"], description: "головной офис" },
+  });
+  assert.equal(calls.some((c) => c.path === "/api/drafts/d1/topology" && c.method === "PUT"), false);
 });
 
 test("removeNetwork deletes after confirmation", async () => {

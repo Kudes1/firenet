@@ -83,10 +83,18 @@ func removeAllStrings(ss []string, s string) []string {
 	return next
 }
 
+func renameStrings(ss []string, from, to string) {
+	for i, s := range ss {
+		if s == from {
+			ss[i] = to
+		}
+	}
+}
+
 // cloneProjectDoc deep-copies the parts of doc a topology operation can
-// mutate (Topology, Layout), so applying an operation never aliases the
-// caller's slices/maps. Subnets and Rules are never written by a topology
-// operation, so a shallow copy of doc is enough for them.
+// mutate (Topology, Rules, Layout), so applying an operation never aliases
+// the caller's slices/maps. Subnets are never written by a topology
+// operation, so a shallow copy of that document is enough.
 func cloneProjectDoc(doc projectdoc.ProjectDoc) projectdoc.ProjectDoc {
 	next := doc
 	next.Topology.Devices = append([]DeviceDoc(nil), doc.Topology.Devices...)
@@ -105,6 +113,17 @@ func cloneProjectDoc(doc projectdoc.ProjectDoc) projectdoc.ProjectDoc {
 		u.Devices = append([]string(nil), u.Devices...)
 		u.Networks = append([]string(nil), u.Networks...)
 		next.Topology.Unions[i] = u
+	}
+
+	next.Rules.Chains = make([]projectdoc.ChainDoc, len(doc.Rules.Chains))
+	for i, c := range doc.Rules.Chains {
+		c.Rules = make([]projectdoc.RuleDoc, len(c.Rules))
+		for j, r := range doc.Rules.Chains[i].Rules {
+			r.Src = append([]string(nil), r.Src...)
+			r.Dst = append([]string(nil), r.Dst...)
+			c.Rules[j] = r
+		}
+		next.Rules.Chains[i] = c
 	}
 
 	next.Layout.Devices = cloneLayoutPoints(doc.Layout.Devices)
@@ -190,6 +209,49 @@ func applyTopologyOperation(doc projectdoc.ProjectDoc, op topologyOperation) (pr
 			return doc, fmt.Errorf("create-network: missing network")
 		}
 		topo.Networks = append(topo.Networks, *op.Network)
+
+	case "update-network":
+		if op.NetworkName == "" || op.Network == nil || op.Network.Name == "" {
+			return doc, fmt.Errorf("update-network: missing networkName or network")
+		}
+		i := networkIndex(topo.Networks, op.NetworkName)
+		if i < 0 {
+			return doc, fmt.Errorf("update-network: unknown network %q", op.NetworkName)
+		}
+		if op.Network.Name != op.NetworkName && networkIndex(topo.Networks, op.Network.Name) >= 0 {
+			return doc, fmt.Errorf("update-network: network %q already exists", op.Network.Name)
+		}
+
+		updated := *op.Network
+		updated.Subnets = append([]string(nil), op.Network.Subnets...)
+		updated.Attach = append([]EndpointDoc(nil), topo.Networks[i].Attach...)
+		topo.Networks[i] = updated
+		if op.Network.Name == op.NetworkName {
+			break
+		}
+		for ui := range topo.Unions {
+			renameStrings(topo.Unions[ui].Networks, op.NetworkName, op.Network.Name)
+		}
+		for li, l := range topo.Links {
+			if l.Filter == nil {
+				continue
+			}
+			filter := *l.Filter
+			renameStrings(filter.AExports, op.NetworkName, op.Network.Name)
+			renameStrings(filter.BExports, op.NetworkName, op.Network.Name)
+			topo.Links[li].Filter = &filter
+		}
+		for ci := range next.Rules.Chains {
+			for ri := range next.Rules.Chains[ci].Rules {
+				rule := &next.Rules.Chains[ci].Rules[ri]
+				renameStrings(rule.Src, op.NetworkName, op.Network.Name)
+				renameStrings(rule.Dst, op.NetworkName, op.Network.Name)
+			}
+		}
+		if pos, ok := layout.Networks[op.NetworkName]; ok {
+			delete(layout.Networks, op.NetworkName)
+			layout.Networks[op.Network.Name] = pos
+		}
 
 	case "delete-network":
 		if op.NetworkName == "" {

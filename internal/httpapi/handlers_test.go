@@ -850,6 +850,24 @@ func TestPostTopologyOperation_ReturnsCanonicalSnapshot(t *testing.T) {
 	}
 }
 
+// TestDeletionErrorsFromDocsAcceptsRenamedRuleRefs ensures a topology
+// operation that changes rules together with a network is not rejected as a
+// deletion based on the draft's pre-operation rules.
+func TestDeletionErrorsFromDocsAcceptsRenamedRuleRefs(t *testing.T) {
+	prev := mustParseFixtureDoc(t)
+	prev.Rules.Chains[0].Rules[0].Src = []string{"n-office"}
+	next, err := applyTopologyOperation(prev, topologyOperation{
+		Kind: "update-network", NetworkName: "n-office",
+		Network: &NetworkDoc{Name: "n-hq", Subnets: []string{"office"}},
+	})
+	if err != nil {
+		t.Fatalf("update-network: %v", err)
+	}
+	if errs := deletionErrorsFromDocs(prev, next); len(errs) != 0 {
+		t.Fatalf("rename deletion errors = %v, want none", errs)
+	}
+}
+
 func TestPostTopologyOperation_StaleRevisionReturnsConflict(t *testing.T) {
 	h, _, draftID := newTestServer(t)
 

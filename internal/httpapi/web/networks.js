@@ -135,12 +135,20 @@ document.addEventListener("alpine:init", () => {
 
     async saveDraft() {
       if (this.draftHint || this.saving) return;
-      const next = this.networks.slice();
-      next[this.draft.index] = { name: this.draft.name.trim(), subnets: [...this.draft.subnets], description: (this.draft.description || "").trim() };
+      const previous = this.networks[this.draft.index];
+      const network = { name: this.draft.name.trim(), subnets: [...this.draft.subnets].sort(), ...(this.draft.description ? { description: this.draft.description.trim() } : {}) };
       this.saving = true;
       try {
-        await this.persist(next);
+        assertEditable();
+        const snapshot = await Api.post(apiPath("topology/operations"), {
+          kind: "update-network", networkName: previous.name, network,
+        });
+        this._topo = snapshot.topology;
+        this.networks = (snapshot.topology.networks || []).map((n) => ({ name: n.name, subnets: [...(n.subnets || [])], description: n.description || "" }));
+        showBanner("Сети сохранены", "ok");
         this.closeModal();
+      } catch (e) {
+        showBanner("Ошибка сохранения: " + e.message);
       } finally {
         this.saving = false;
       }

@@ -154,6 +154,52 @@ func TestApplyTopologyOperation_DeleteNetworkRemovesFilteredExports(t *testing.T
 	}
 }
 
+// TestApplyTopologyOperation_UpdateNetworkRenamesEveryReference protects a
+// rename from being treated as a delete/create pair: every document field
+// that names the network must keep pointing to its new name.
+func TestApplyTopologyOperation_UpdateNetworkRenamesEveryReference(t *testing.T) {
+	doc := fixtureProjectDoc()
+	doc.Topology.Links = []LinkDoc{{
+		A:      EndpointDoc{Device: "r1"},
+		B:      EndpointDoc{Device: "r2"},
+		Filter: &LinkFilterDoc{AExports: []string{"n-office"}, BExports: []string{"n-dmz", "n-office"}},
+	}}
+	doc.Rules = projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{Rules: []projectdoc.RuleDoc{{
+		Name: "office-access", Src: []string{"n-office"}, Dst: []string{"n-dmz", "n-office"},
+	}}}}}
+
+	next, err := applyTopologyOperation(doc, topologyOperation{
+		Kind: "update-network", NetworkName: "n-office",
+		Network: &NetworkDoc{Name: "n-vpn", Subnets: []string{"office"}, Description: "VPN"},
+	})
+	if err != nil {
+		t.Fatalf("update-network: %v", err)
+	}
+	n := next.Topology.Networks[networkIndex(next.Topology.Networks, "n-vpn")]
+	if n.Description != "VPN" || len(n.Attach) != 1 || n.Attach[0].Device != "r1" {
+		t.Fatalf("updated network = %+v, want preserved attachment and new description", n)
+	}
+	if got := next.Topology.Unions[0].Networks; len(got) != 1 || got[0] != "n-vpn" {
+		t.Fatalf("union networks = %v, want [n-vpn]", got)
+	}
+	if got := next.Topology.Links[0].Filter; got == nil || len(got.AExports) != 1 || got.AExports[0] != "n-vpn" || len(got.BExports) != 2 || got.BExports[1] != "n-vpn" {
+		t.Fatalf("link filter = %+v, want n-vpn references", got)
+	}
+	r := next.Rules.Chains[0].Rules[0]
+	if len(r.Src) != 1 || r.Src[0] != "n-vpn" || len(r.Dst) != 2 || r.Dst[1] != "n-vpn" {
+		t.Fatalf("rule = %+v, want n-vpn references", r)
+	}
+	if _, ok := next.Layout.Networks["n-office"]; ok {
+		t.Fatal("old network layout position survived")
+	}
+	if got := next.Layout.Networks["n-vpn"]; got != (LayoutPoint{X: 3, Y: 3}) {
+		t.Fatalf("new network layout position = %+v, want {3 3}", got)
+	}
+	if doc.Topology.Networks[0].Name != "n-office" || doc.Topology.Unions[0].Networks[0] != "n-office" || doc.Rules.Chains[0].Rules[0].Src[0] != "n-office" {
+		t.Fatal("input doc was mutated")
+	}
+}
+
 func TestApplyTopologyOperation_AttachDetachNetwork(t *testing.T) {
 	doc := fixtureProjectDoc()
 
