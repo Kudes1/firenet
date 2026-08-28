@@ -153,69 +153,15 @@ func Build(topo *topology.Topology) (*Graph, error) {
 
 	// Every subnet inherits the attachment of its owning network (one
 	// network = one L2 segment; Validate guarantees a single owner).
-	// First pass: collect switch attachments in domainPoints.
 	for _, n := range topo.Networks {
 		for _, ref := range n.Attach {
 			dev := topo.Devices[ref.Device]
-			if dev.Kind == topology.DeviceSwitch {
-				name := domainOf[ref.Device]
-				for _, sname := range n.Subnets {
+			for _, sname := range n.Subnets {
+				switch dev.Kind {
+				case topology.DeviceSwitch:
+					name := domainOf[ref.Device]
 					domainPoints[name] = append(domainPoints[name], attachPoint{node: SubnetNode(sname)})
-				}
-			}
-		}
-	}
-
-	// Determine which domains will have a bus node
-	domainsWithBus := make(map[string]bool)
-	for name, points := range domainPoints {
-		if len(points) >= 2 || domainsWithFilteredLink[name] {
-			domainsWithBus[name] = true
-		}
-	}
-
-	// Find routers connected only to switches without a bus
-	routersToSkip := make(map[string]bool)
-	for _, l := range topo.Links {
-		aIsSwitch := topo.Devices[l.A.Device].Kind == topology.DeviceSwitch
-		bIsSwitch := topo.Devices[l.B.Device].Kind == topology.DeviceSwitch
-		var router string
-		if aIsSwitch && !bIsSwitch {
-			router = l.B.Device
-		} else if bIsSwitch && !aIsSwitch {
-			router = l.A.Device
-		} else {
-			continue
-		}
-		// Check if this router is connected to any switch with a bus
-		connectedToBusSwitch := false
-		for _, l2 := range topo.Links {
-			aIsSwitch2 := topo.Devices[l2.A.Device].Kind == topology.DeviceSwitch
-			bIsSwitch2 := topo.Devices[l2.B.Device].Kind == topology.DeviceSwitch
-			var switchDev string
-			if aIsSwitch2 && !bIsSwitch2 && l2.B.Device == router {
-				switchDev = l2.A.Device
-			} else if bIsSwitch2 && !aIsSwitch2 && l2.A.Device == router {
-				switchDev = l2.B.Device
-			} else {
-				continue
-			}
-			if domainsWithBus[domainOf[switchDev]] {
-				connectedToBusSwitch = true
-				break
-			}
-		}
-		if !connectedToBusSwitch {
-			routersToSkip[router] = true
-		}
-	}
-
-	// Second pass: add router attachments, skipping those connected only to lone switches.
-	for _, n := range topo.Networks {
-		for _, ref := range n.Attach {
-			dev := topo.Devices[ref.Device]
-			if dev.Kind == topology.DeviceRouter && !routersToSkip[ref.Device] {
-				for _, sname := range n.Subnets {
+				case topology.DeviceRouter:
 					g.addUndirected(RouterNode(ref.Device), SubnetNode(sname))
 				}
 			}
@@ -223,8 +169,8 @@ func Build(topo *topology.Topology) (*Graph, error) {
 	}
 
 	for name, points := range domainPoints {
-		if !domainsWithBus[name] {
-			continue
+		if len(points) < 2 && !domainsWithFilteredLink[name] {
+			continue // nothing on the other side of this switch to reach
 		}
 		bus := domainNode(name)
 		for _, p := range points {
