@@ -456,9 +456,18 @@ func TestBuild_LonelySwitchStaysUnwiredWithoutFilteredLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
+	// r1 legitimately has one edge of its own (to subnet "a", from its
+	// direct network attachment) regardless of the switch link — that
+	// edge is not what this test is about. What must NOT happen is r1
+	// getting wired to sw1's bus, and the bus itself must not exist.
 	bus := Node{Kind: NodeDomain, Name: "sw1"}
-	if len(g.adj[bus]) != 0 || len(g.adj[RouterNode("r1")]) != 0 {
-		t.Fatalf("a lone switch with one attach point and no filtered link must stay unwired: adj[bus]=%v adj[r1]=%v", g.adj[bus], g.adj[RouterNode("r1")])
+	if len(g.adj[bus]) != 0 {
+		t.Fatalf("a lone switch with one attach point and no filtered link must have no bus node, got adj[bus]=%v", g.adj[bus])
+	}
+	for _, e := range g.adj[RouterNode("r1")] {
+		if e.To == bus {
+			t.Fatalf("r1 must not be wired to sw1's bus when sw1 has <2 points and no filtered link, got edge to %v", e.To)
+		}
 	}
 }
 
