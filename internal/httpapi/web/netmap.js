@@ -98,3 +98,6 @@ const NetMap = (() => {
     center, linkOffsets, spreadOffset, pointAt, insertIndex, cloudSegs,
   });
 })();
+
+export { NetMap };
+if (typeof window !== "undefined") window.NetMap = NetMap; // TODO(Task 28): remove once every classic-script consumer imports NetMap directly
