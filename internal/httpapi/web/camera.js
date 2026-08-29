@@ -36,4 +36,4 @@ const Camera = (() => {
 })();
 
 export { Camera };
-if (typeof window !== "undefined") window.Camera = Camera; // TODO(Task 28): remove once every classic-script consumer imports Camera directly
+globalThis.Camera = Camera; // TODO(Task 28): remove once every classic-script consumer imports Camera directly

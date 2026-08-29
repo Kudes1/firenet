@@ -555,25 +555,23 @@ document.addEventListener("DOMContentLoaded", () => {
 // Alpine's x-data="appData()" inline expression, which always needs the
 // global). TODO(Task 28): drop every line except appData once every page
 // imports these directly.
-if (typeof window !== "undefined") {
-  window.appData = appData; // permanent: Alpine evaluates x-data="appData()" against the global scope
-  window.showBanner = showBanner;
-  window.DirtyGuard = DirtyGuard;
-  window.currentDraftID = currentDraftID;
-  window.setCurrentDraftID = setCurrentDraftID;
-  window.isReadOnly = isReadOnly;
-  window.apiPath = apiPath;
-  window.assertEditable = assertEditable;
-  window.loginRedirectURL = loginRedirectURL;
-  window.Api = Api;
-  window.ipv4CidrOverlap = ipv4CidrOverlap;
-  window.containsFold = containsFold;
-  window.parseIPv4 = parseIPv4;
-  window.parsePrefix = parsePrefix;
-  window.parseQueryPrefix = parseQueryPrefix;
-  window.formatIPv4 = formatIPv4;
-  window.prefixContains = prefixContains;
-  window.prefixOverlap = prefixOverlap;
-  window.matchPrefixQuery = matchPrefixQuery;
-  window.matchSubnetMembers = matchSubnetMembers;
-}
+globalThis.appData = appData; // permanent: Alpine evaluates x-data="appData()" against the global scope
+globalThis.showBanner = showBanner;
+globalThis.DirtyGuard = DirtyGuard;
+globalThis.currentDraftID = currentDraftID;
+globalThis.setCurrentDraftID = setCurrentDraftID;
+globalThis.isReadOnly = isReadOnly;
+globalThis.apiPath = apiPath;
+globalThis.assertEditable = assertEditable;
+globalThis.loginRedirectURL = loginRedirectURL;
+globalThis.Api = Api;
+globalThis.ipv4CidrOverlap = ipv4CidrOverlap;
+globalThis.containsFold = containsFold;
+globalThis.parseIPv4 = parseIPv4;
+globalThis.parsePrefix = parsePrefix;
+globalThis.parseQueryPrefix = parseQueryPrefix;
+globalThis.formatIPv4 = formatIPv4;
+globalThis.prefixContains = prefixContains;
+globalThis.prefixOverlap = prefixOverlap;
+globalThis.matchPrefixQuery = matchPrefixQuery;
+globalThis.matchSubnetMembers = matchSubnetMembers;

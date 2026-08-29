@@ -108,4 +108,4 @@ const HitTest = (() => {
 })();
 
 export { HitTest };
-if (typeof window !== "undefined") window.HitTest = HitTest; // TODO(Task 28): remove once every classic-script consumer imports HitTest directly
+globalThis.HitTest = HitTest; // TODO(Task 28): remove once every classic-script consumer imports HitTest directly
