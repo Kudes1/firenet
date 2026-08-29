@@ -2,15 +2,13 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 // Boots the rules Alpine component outside a browser and exercises its
 // unified create/edit modal, client-side filtering (including IP/CIDR
 // search), chain tabs, and persistence against a stubbed fetch.
 
-function bootPage({ failPut = null, lintFindings = [] } = {}) {
+async function bootPage({ failPut = null, lintFindings = [] } = {}) {
   const factories = {};
   const calls = [];
   const banners = [];
@@ -45,51 +43,43 @@ function bootPage({ failPut = null, lintFindings = [] } = {}) {
       },
     ],
   };
-  const sandbox = {
-    document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
-    window: { dispatchEvent: notify },
-    localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = v; },
-      removeItem: (k) => { delete store[k]; },
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class {},
-    confirm: () => true,
-    setTimeout,
-    clearTimeout,
-    console,
-    fetch: async (path_, opts) => {
-      calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
-      if (path_ === "/api/drafts/d1/rules" && opts?.method === "PUT" && failPut) {
-        return { ok: false, status: 422, json: async () => ({ error: failPut }) };
-      }
-      if (path_ === "/api/drafts/d1/rules") {
-        return { ok: true, status: 200, json: async () => calls.findLast((c) => c.method === "PUT")?.body || rulesFixture };
-      }
-      if (path_ === "/api/drafts/d1/topology") {
-        return { ok: true, status: 200, json: async () => topoFixture };
-      }
-      if (path_ === "/api/drafts/d1/subnets") {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }, { name: "b", cidr: "10.0.1.0/24" }] }),
-        };
-      }
-      if (path_ === "/api/drafts/d1/lint") {
-        return { ok: true, status: 200, json: async () => ({ findings: lintFindings }) };
-      }
-      return { ok: false, status: 404, json: async () => ({}) };
-    },
-    Alpine: { data: (name, factory) => (factories[name] = factory) },
+  global.document = { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) };
+  global.window = { dispatchEvent: notify };
+  global.localStorage = { getItem: () => null, setItem() {} };
+  global.sessionStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of ["common.js", "columns.js", "rules.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class {};
+  global.confirm = () => true;
+  global.fetch = async (path_, opts) => {
+    calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
+    if (path_ === "/api/drafts/d1/rules" && opts?.method === "PUT" && failPut) {
+      return { ok: false, status: 422, json: async () => ({ error: failPut }) };
+    }
+    if (path_ === "/api/drafts/d1/rules") {
+      return { ok: true, status: 200, json: async () => calls.findLast((c) => c.method === "PUT")?.body || rulesFixture };
+    }
+    if (path_ === "/api/drafts/d1/topology") {
+      return { ok: true, status: 200, json: async () => topoFixture };
+    }
+    if (path_ === "/api/drafts/d1/subnets") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }, { name: "b", cidr: "10.0.1.0/24" }] }),
+      };
+    }
+    if (path_ === "/api/drafts/d1/lint") {
+      return { ok: true, status: 200, json: async () => ({ findings: lintFindings }) };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  global.Alpine = { data: (name, factory) => (factories[name] = factory) };
+  // cache-busting: rules.js регистрирует alpine:init при каждом импорте
+  await import(path.join(__dirname, "rules.js") + `?t=${Date.now()}-${Math.random()}`);
   (docListeners["alpine:init"] || []).forEach((fn) => fn());
   const page = factories.rulesPage();
   page.$nextTick = (fn) => fn();
@@ -98,7 +88,7 @@ function bootPage({ failPut = null, lintFindings = [] } = {}) {
 }
 
 async function bootLoadedPage() {
-  const ctx = bootPage();
+  const ctx = await bootPage();
   await ctx.page.init();
   return ctx;
 }
@@ -271,7 +261,7 @@ test("saveDraft replaces the edited rule in place", async () => {
 });
 
 test("saveDraft keeps the modal open with the server error on rejection", async () => {
-  const { page, calls } = bootPage({ failPut: 'rule "x": unknown src "nope"' });
+  const { page, calls } = await bootPage({ failPut: 'rule "x": unknown src "nope"' });
   await page.init();
   page.openAdd();
   Object.assign(page.draft, { name: "x", src: ["nope"], dst: ["any"] });
@@ -383,7 +373,7 @@ test("persist sends chains-shaped body", async () => {
 });
 
 test("runLint fetches findings and opens the panel", async () => {
-  const ctx = bootPage({
+  const ctx = await bootPage({
     lintFindings: [{ severity: "warning", chain: "FIRENET-FWD", rules: ["web"], message: "правило web никогда не применяется" }],
   });
   await ctx.page.init();
@@ -396,7 +386,7 @@ test("runLint fetches findings and opens the panel", async () => {
 });
 
 test("jumpToFinding switches to the finding's chain and highlights its rules", async () => {
-  const ctx = bootPage();
+  const ctx = await bootPage();
   await ctx.page.init();
   ctx.page.active = 0;
 

@@ -1,5 +1,8 @@
 "use strict";
 
+import { Api, showBanner, apiPath, assertEditable, containsFold, parseIPv4, parsePrefix, parseQueryPrefix, formatIPv4, prefixContains, prefixOverlap } from "./common.js";
+import { makeColumnsResizable, initializeColumns } from "./columns.js";
+
 // Rules page: client-side table over rules.yaml, mirroring the networks
 // page. One <dialog> modal serves both create (draft.index === -1) and edit;
 // every mutation persists the whole policy doc via PUT /api/rules, the
@@ -9,13 +12,6 @@
 
 const RULES_COL_WIDTHS_KEY = "firenet-rules-col-widths-v4";
 const RULES_COL_WIDTHS_VERSION = 4;
-
-function splitPorts(s) {
-  return (s || "")
-    .split(",")
-    .map((p) => p.trim())
-    .filter(Boolean);
-}
 
 // --- table search: IPv4 helpers live in common.js, shared with the
 // subnets/networks/sets pages; only name resolution stays page-specific ---
