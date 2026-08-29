@@ -2,14 +2,12 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 // Boots the subnets Alpine component outside a browser and exercises its
 // validation and persistence logic against a stubbed fetch.
 
-function bootPage() {
+async function bootPage() {
   const factories = {};
   const calls = [];
   const banners = [];
@@ -18,39 +16,30 @@ function bootPage() {
   const notify = (event) => {
     if (event.type === "notify") banners.push(event.detail);
   };
-  const sandbox = {
-    document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
-    window: { dispatchEvent: notify },
-    localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = v; },
-      removeItem: (k) => { delete store[k]; },
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class {},
-    dispatchEvent: notify,
-    confirm: () => true,
-    setTimeout,
-    clearTimeout,
-    console,
-    fetch: async (path_, opts) => {
-      calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
-      if (path_ === "/api/drafts/d1/subnets") {
-        return { ok: true, status: 200, json: async () => ({ subnets: calls.find((c) => c.method === "PUT")?.body.subnets || [] }) };
-      }
-      if (path_ === "/api/drafts/d1/topology") {
-        return { ok: true, status: 200, json: async () => ({ networks: [{ name: "net1", subnets: ["a"] }] }) };
-      }
-      return { ok: false, status: 404, json: async () => ({}) };
-    },
-    Alpine: { data: (name, factory) => (factories[name] = factory) },
+  global.document = { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) };
+  global.window = { dispatchEvent: notify };
+  global.localStorage = { getItem: () => null, setItem() {} };
+  global.sessionStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of ["common.js", "columns.js", "subnets.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class {};
+  global.confirm = () => true;
+  global.fetch = async (path_, opts) => {
+    calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
+    if (path_ === "/api/drafts/d1/subnets") {
+      return { ok: true, status: 200, json: async () => ({ subnets: calls.find((c) => c.method === "PUT")?.body.subnets || [] }) };
+    }
+    if (path_ === "/api/drafts/d1/topology") {
+      return { ok: true, status: 200, json: async () => ({ networks: [{ name: "net1", subnets: ["a"] }] }) };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  global.Alpine = { data: (name, factory) => (factories[name] = factory) };
+  // cache-busting: subnets.js регистрирует alpine:init при каждом импорте
+  await import(path.join(__dirname, "subnets.js") + `?t=${Date.now()}-${Math.random()}`);
   (docListeners["alpine:init"] || []).forEach((fn) => fn());
   const page = factories.subnetsPage();
   page.$nextTick = (fn) => fn();
@@ -58,8 +47,8 @@ function bootPage() {
   return { page, calls, banners, store };
 }
 
-test("draftHint flags empty fields, duplicates and CIDR overlaps", () => {
-  const { page } = bootPage();
+test("draftHint flags empty fields, duplicates and CIDR overlaps", async () => {
+  const { page } = await bootPage();
   page.rows = [
     { name: "a", cidr: "10.0.0.0/24", owner: "" },
     { name: "b", cidr: "10.0.1.0/24", owner: "" },
@@ -79,7 +68,7 @@ test("draftHint flags empty fields, duplicates and CIDR overlaps", () => {
 });
 
 test("saveDraft appends a new subnet and persists the whole document", async () => {
-  const { page, calls } = bootPage();
+  const { page, calls } = await bootPage();
   page.rows = [{ name: "a", cidr: "10.0.0.0/24", description: "офис", owner: "net1" }];
   page.draft = { index: -1, name: "b", cidr: "10.0.1.0/24", description: "гостевая" };
 
@@ -99,7 +88,7 @@ test("saveDraft appends a new subnet and persists the whole document", async () 
 });
 
 test("saveDraft is blocked while the draft is invalid", async () => {
-  const { page, calls } = bootPage();
+  const { page, calls } = await bootPage();
   page.rows = [];
   page.draft = { index: -1, name: "", cidr: "" };
 
@@ -108,8 +97,8 @@ test("saveDraft is blocked while the draft is invalid", async () => {
   assert.equal(calls.filter((c) => c.method === "PUT").length, 0);
 });
 
-test("filteredRows filters by name, cidr, owner and description substrings", () => {
-  const { page } = bootPage();
+test("filteredRows filters by name, cidr, owner and description substrings", async () => {
+  const { page } = await bootPage();
   page.rows = [
     { name: "a", cidr: "10.0.0.0/24", owner: "net1", description: "офис" },
     { name: "b", cidr: "192.168.1.0/24", owner: "", description: "" },
@@ -135,7 +124,7 @@ test("filteredRows filters by name, cidr, owner and description substrings", () 
 });
 
 test("removeRow deletes after confirmation", async () => {
-  const { page, calls } = bootPage();
+  const { page, calls } = await bootPage();
   page.rows = [
     { name: "a", cidr: "10.0.0.0/24", owner: "" },
     { name: "b", cidr: "10.0.1.0/24", owner: "" },
@@ -148,7 +137,7 @@ test("removeRow deletes after confirmation", async () => {
 });
 
 test("saveDraft is blocked while read-only (no active draft)", async () => {
-  const { page, calls, store } = bootPage();
+  const { page, calls, store } = await bootPage();
   delete store["firenet-draft-id"];
   page.rows = [];
   page.draft = { index: -1, name: "b", cidr: "10.0.1.0/24", description: "гостевая" };

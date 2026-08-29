@@ -1,5 +1,8 @@
 "use strict";
 
+import { Api, showBanner, apiPath, assertEditable, containsFold, ipv4CidrOverlap } from "./common.js";
+import { makeColumnsResizable, initializeColumns } from "./columns.js";
+
 // Subnets page: read-only table over subnets.yaml via /api/subnets;
 // editing happens one record at a time in a native <dialog> modal.
 
