@@ -2,9 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 // Minimal DOM stub sufficient to boot diagnose.js outside a browser and
 // exercise the report rendering against a stubbed fetch.
@@ -85,13 +83,27 @@ function makeCtx() {
   return ctx;
 }
 
-const topoFixture = {
+(async () => {
+  // diagnose.js и его зависимости импортируются как ES-модули
+  await import(path.join(__dirname, "camera.js"));
+  await import(path.join(__dirname, "minimap.js"));
+  await import(path.join(__dirname, "camera_input.js"));
+  await import(path.join(__dirname, "netmap.js"));
+  await import(path.join(__dirname, "tween.js"));
+  await import(path.join(__dirname, "canvas_theme.js"));
+  await import(path.join(__dirname, "hit_test.js"));
+  await import(path.join(__dirname, "canvas_view.js"));
+  await import(path.join(__dirname, "topo_scene.js"));
+  await import(path.join(__dirname, "net_info.js"));
+  const { CanvasTheme } = await import(path.join(__dirname, "canvas_theme.js"));
+
+  const topoFixture = {
   devices: [{ name: "r1", kind: "router" }, { name: "r2", kind: "router" }],
   links: [{ a: { device: "r1" }, b: { device: "r2" } }],
   networks: [{ name: "office", subnets: ["a"], attach: [{ device: "r1" }] }],
 };
 
-function bootDiagnose(responses, savedStore, draftID = "d1") {
+async function bootDiagnose(responses, savedStore, draftID = "d1") {
   const draftStore = draftID ? { "firenet-draft-id": draftID } : {};
   const ctx = makeCtx();
   const canvas = Object.assign(makeEl("canvas"), {
@@ -121,54 +133,40 @@ function bootDiagnose(responses, savedStore, draftID = "d1") {
   // только колбэки, поставленные в очередь до него
   let clock = 0;
   const rafQueue = [];
-  const sandbox = {
-    document: doc,
-    window: {
-      addEventListener(t, fn) { (doc.listeners["win-" + t] ||= []).push(fn); },
-      dispatchEvent() {},
-    },
-    localStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = String(v); },
-      removeItem: (k) => { delete store[k]; },
-    },
-    sessionStorage: {
-      getItem: (k) => (k in draftStore ? draftStore[k] : null),
-      setItem: (k, v) => { draftStore[k] = v; },
-      removeItem: (k) => { delete draftStore[k]; },
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class {},
+  global.document = doc;
+  global.window = {
+    addEventListener(t, fn) { (doc.listeners["win-" + t] ||= []).push(fn); },
     dispatchEvent() {},
-    confirm: () => false,
-    FormData: class { get() { return ""; } },
-    Path2D: class {},               // стаб для kind:"glyph"
-    getComputedStyle: () => ({ getPropertyValue: () => "" }),
-    performance: { now: () => clock },
-    requestAnimationFrame: (fn) => rafQueue.push(fn),
-    setTimeout,
-    clearTimeout,
-    Promise,
-    console,
-    // clone: production mutates loaded state, responses must stay pristine.
-    // responses[p] may be a function(body) for endpoints hit with varying
-    // payloads (e.g. one /api/diagnose call per spread candidate).
-    fetch: async (p, opts) => {
-      const body = opts?.body ? JSON.parse(opts.body) : null;
-      calls.push({ path: p, method: opts?.method, body });
-      const raw = typeof responses[p] === "function" ? responses[p](body) : responses[p];
-      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(raw ?? null)) };
-    },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of [
-    "common.js", "camera.js", "minimap.js", "camera_input.js", "netmap.js", "tween.js",
-    "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
-    "net_info.js", "diagnose.js",
-  ]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
+  global.localStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: (k) => { delete store[k]; },
+  };
+  global.sessionStorage = {
+    getItem: (k) => (k in draftStore ? draftStore[k] : null),
+    setItem: (k, v) => { draftStore[k] = v; },
+    removeItem: (k) => { delete draftStore[k]; },
+  };
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class {};
+  global.confirm = () => false;
+  global.FormData = class { get() { return ""; } };
+  global.Path2D = class {};               // стаб для kind:"glyph"
+  global.getComputedStyle = () => ({ getPropertyValue: () => "" });
+  global.performance = { now: () => clock };
+  global.requestAnimationFrame = (fn) => rafQueue.push(fn);
+  // clone: production mutates loaded state, responses must stay pristine.
+  // responses[p] may be a function(body) for endpoints hit with varying
+  // payloads (e.g. one /api/diagnose call per spread candidate).
+  global.fetch = async (p, opts) => {
+    const body = opts?.body ? JSON.parse(opts.body) : null;
+    calls.push({ path: p, method: opts?.method, body });
+    const raw = typeof responses[p] === "function" ? responses[p](body) : responses[p];
+    return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(raw ?? null)) };
+  };
+  // cache-busting: каждый bootDiagnose ждёт свежий Diagnose.state
+  const { Diagnose } = await import(path.join(__dirname, "diagnose.js") + `?t=${Date.now()}-${Math.random()}`);
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
   const frame = () => {
     clock += 50;
@@ -177,8 +175,8 @@ function bootDiagnose(responses, savedStore, draftID = "d1") {
   const frames = async (n) => {
     for (let i = 0; i < n; i++) frame();
   };
-  const get = (expr) => vm.runInContext(expr, sandbox);
-  return { canvas, ctx, minimap, ids, calls, get, sandbox, doc, store, frame, frames };
+  const get = (expr) => new Function("Diagnose", "window", "document", "CanvasTheme", `return (${expr});`)(Diagnose, global.window, doc, CanvasTheme);
+  return { canvas, ctx, minimap, ids, calls, get, doc, store, frame, frames };
 }
 
 const responses = {
@@ -213,7 +211,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 // — карта: display list, камера, взаимодействие —
 
 test("boot builds the canvas display list and draws a frame", async () => {
-  const { ctx, frames, get } = bootDiagnose(responses);
+  const { ctx, frames, get } = await bootDiagnose(responses);
   await tick();
   await frames(1);
   const ids = get("Diagnose.state.list.map((i) => i.id)");
@@ -224,7 +222,7 @@ test("boot builds the canvas display list and draws a frame", async () => {
 });
 
 test("diagnostics normalizes empty topology collections from the API", async () => {
-  const { get } = bootDiagnose({
+  const { get } = await bootDiagnose({
     ...responses,
     "/api/drafts/d1/topology": { devices: null, links: null, networks: null, sets: null, unions: null },
     "/api/drafts/d1/subnets": { subnets: null },
@@ -237,7 +235,7 @@ test("diagnostics normalizes empty topology collections from the API", async () 
 });
 
 test("wheel zooms around the cursor", async () => {
-  const { canvas, frames, get } = bootDiagnose({
+  const { canvas, frames, get } = await bootDiagnose({
     ...responses,
     "/api/drafts/d1/layout": { devices: {}, networks: {}, camera: { x: -100, y: -50, z: 2 } },
   });
@@ -257,7 +255,7 @@ test("wheel zooms around the cursor", async () => {
 
 // same pan buttons as the topology editor: middle + right, left stays free
 test("middle- and right-button drags pan the read-only map", async () => {
-  const { canvas, doc, frames, get } = bootDiagnose(responses);
+  const { canvas, doc, frames, get } = await bootDiagnose(responses);
   await tick();
   await frames(1);
   fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
@@ -273,7 +271,7 @@ test("middle- and right-button drags pan the read-only map", async () => {
 });
 
 test("left button stays free: dragging it does not pan the map", async () => {
-  const { canvas, doc, frames, get } = bootDiagnose(responses);
+  const { canvas, doc, frames, get } = await bootDiagnose(responses);
   await tick();
   await frames(1);
   fire(canvas, "mousedown", { button: 0, clientX: 100, clientY: 100 });
@@ -284,7 +282,7 @@ test("left button stays free: dragging it does not pan the map", async () => {
 });
 
 test("right-click on the canvas suppresses the native menu", async () => {
-  const { canvas } = bootDiagnose(responses);
+  const { canvas } = await bootDiagnose(responses);
   await tick();
   let prevented = false;
   fire(canvas, "contextmenu", { button: 2, preventDefault: () => { prevented = true; } });
@@ -292,7 +290,7 @@ test("right-click on the canvas suppresses the native menu", async () => {
 });
 
 test("camera changes are not persisted to /api/layout", async () => {
-  const { canvas, doc, calls, frames } = bootDiagnose(responses);
+  const { canvas, doc, calls, frames } = await bootDiagnose(responses);
   await tick();
   await frames(1);
   fire(canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
@@ -304,7 +302,7 @@ test("camera changes are not persisted to /api/layout", async () => {
 });
 
 test("map shows subnet names, network labels and union frames", async () => {
-  const { frames, get } = bootDiagnose({
+  const { frames, get } = await bootDiagnose({
     ...responses,
     "/api/drafts/d1/topology": {
       devices: topoFixture.devices,
@@ -327,7 +325,7 @@ test("map shows subnet names, network labels and union frames", async () => {
 });
 
 test("clicking a network on the read-only map shows its subnets", async () => {
-  const { canvas, ids, frames } = bootDiagnose(responses);
+  const { canvas, ids, frames } = await bootDiagnose(responses);
   await tick();
   await frames(1);
   const info = (ids["net-info"] ||= makeEl("div"));
@@ -346,7 +344,7 @@ test("clicking a network on the read-only map shows its subnets", async () => {
 // mousemove приходит чаще кадров дисплея: всплеск движений обязан дать одну
 // перерисовку (камера применяется одним setCam на кадр внутри CameraControls)
 test("rapid pan moves coalesce into one redraw per frame", async () => {
-  const { canvas, doc, ctx, frames } = bootDiagnose(responses);
+  const { canvas, doc, ctx, frames } = await bootDiagnose(responses);
   await tick();
   await frames(1);
   const draws = () => ctx.calls.filter((c) => c[0] === "clearRect").length;
@@ -362,7 +360,7 @@ test("rapid pan moves coalesce into one redraw per frame", async () => {
 // — кнопка «вписать карту» —
 
 test("fit button flies the camera to frame the whole map", async () => {
-  const { ids, frames, get } = bootDiagnose(responses);
+  const { ids, frames, get } = await bootDiagnose(responses);
   await tick();
   await frames(1);
   fire(ids["diag-fit"], "click", {});
@@ -379,7 +377,7 @@ test("fit button flies the camera to frame the whole map", async () => {
 // — отчёт диагностики (DOM) —
 
 test("renderReport builds one card per path with verdict badges", async () => {
-  const { ids, get } = bootDiagnose(responses);
+  const { ids, get } = await bootDiagnose(responses);
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
   const cards = ids["diag-paths"].children.filter((c) => c.className === "diag-path");
@@ -390,7 +388,7 @@ test("renderReport builds one card per path with verdict badges", async () => {
 });
 
 test("return verdict renders a neutral badge with FORWARD wording", async () => {
-  const { ids, get } = bootDiagnose(responses);
+  const { ids, get } = await bootDiagnose(responses);
   await tick();
   const rep = JSON.parse(JSON.stringify(sampleReport));
   rep.paths[0].verdict = "return";
@@ -403,7 +401,7 @@ test("return verdict renders a neutral badge with FORWARD wording", async () => 
 });
 
 test("unreachable report renders explicit message", async () => {
-  const { ids, get } = bootDiagnose(responses);
+  const { ids, get } = await bootDiagnose(responses);
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify({ srcSubnet: "office", dstSubnet: "isolated", note: "", paths: [] })})`);
   assert.match(JSON.stringify(ids["diag-paths"]), /недостижим/i);
@@ -411,7 +409,7 @@ test("unreachable report renders explicit message", async () => {
 });
 
 test("summary line reports source, destination and path count", async () => {
-  const { ids, get } = bootDiagnose(responses);
+  const { ids, get } = await bootDiagnose(responses);
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
   assert.ok(!ids["diag-summary"].hidden);
@@ -453,7 +451,7 @@ const switchedReport = {
 };
 
 test("highlight covers the full path: networks, switches, links and attaches", async () => {
-  const { get, frames } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get, frames } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
@@ -493,7 +491,7 @@ const collidingReport = {
 };
 
 test("a network and a router sharing one name still light the switch between them", async () => {
-  const { get, frames } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": collidingTopo });
+  const { get, frames } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": collidingTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(collidingReport)})`);
@@ -507,7 +505,7 @@ test("a network and a router sharing one name still light the switch between the
 });
 
 test("form submit posts to /api/diagnose and renders the report", async () => {
-  const { ids, calls } = bootDiagnose({ ...responses, "/api/drafts/d1/diagnose": sampleReport });
+  const { ids, calls } = await bootDiagnose({ ...responses, "/api/drafts/d1/diagnose": sampleReport });
   await tick();
   // form inputs are resolved by id at submit time; seed the registry
   for (const id of ["diag-src", "diag-dst", "diag-proto", "diag-dstports"]) ids[id] ||= makeEl("input");
@@ -525,7 +523,7 @@ test("form submit posts to /api/diagnose and renders the report", async () => {
 });
 
 test("router verdict renders each rule-walk step as a numbered list item", async () => {
-  const { ids, get } = bootDiagnose(responses);
+  const { ids, get } = await bootDiagnose(responses);
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
   const lists = (function collect(n) {
@@ -541,7 +539,7 @@ test("router verdict renders each rule-walk step as a numbered list item", async
 });
 
 test("verdict without steps falls back to the plain reason text", async () => {
-  const { ids, get } = bootDiagnose(responses);
+  const { ids, get } = await bootDiagnose(responses);
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
   const paras = ids["diag-paths"].children
@@ -554,7 +552,7 @@ test("verdict without steps falls back to the plain reason text", async () => {
 });
 
 test("verdict rows look expandable: button-like summary with chevron", async () => {
-  const { ids, get } = bootDiagnose(responses);
+  const { ids, get } = await bootDiagnose(responses);
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(sampleReport)})`);
   const details = ids["diag-paths"].children
@@ -590,7 +588,7 @@ const denyReport = {
 };
 
 test("expandFlow colors the route green up to the denying router", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
   const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
@@ -602,7 +600,7 @@ test("expandFlow colors the route green up to the denying router", async () => {
 });
 
 test("allowed path lights the whole route including destination", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
   const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
@@ -615,7 +613,7 @@ test("allowed path lights the whole route including destination", async () => {
 test("a denying router never turns green, even via another allowed path", async () => {
   const rep = JSON.parse(JSON.stringify(denyReport));
   rep.paths.push(JSON.parse(JSON.stringify(switchedReport.paths[0])));
-  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
   const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
@@ -626,7 +624,7 @@ test("a denying router never turns green, even via another allowed path", async 
 // The drop happens ON the denying router, so the hop leading into it has
 // been fully traversed and stays green; only segments past it turn red.
 test("hop into the denying router stays green, segments beyond it turn red", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
   const mark = get("Diagnose.flowMark(Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology))");
@@ -640,7 +638,7 @@ test("hop into the denying router stays green, segments beyond it turn red", asy
 // — половинная доступность (returnPathAllowed: false) —
 
 test("expandFlow marks the allowed route half-open when there is no return path", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   const rep = { ...switchedReport, returnPathAllowed: false };
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
@@ -653,7 +651,7 @@ test("expandFlow marks the allowed route half-open when there is no return path"
 });
 
 test("expandFlow leaves half empty when a return path exists", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   const rep = { ...switchedReport, returnPathAllowed: true };
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
@@ -663,7 +661,7 @@ test("expandFlow leaves half empty when a return path exists", async () => {
 });
 
 test("flowMark paints allowed segments yellow when there is no return path", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   const rep = { ...switchedReport, returnPathAllowed: false };
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
@@ -673,7 +671,7 @@ test("flowMark paints allowed segments yellow when there is no return path", asy
 });
 
 test("flowMark keeps deny red even without a return path", async () => {
-  const { get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   const rep = { ...denyReport, returnPathAllowed: false };
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
@@ -683,7 +681,7 @@ test("flowMark keeps deny red even without a return path", async () => {
 });
 
 test("renderReport notes the missing return path", async () => {
-  const { ids, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { ids, get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   const rep = { ...switchedReport, returnPathAllowed: false };
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
@@ -693,7 +691,7 @@ test("renderReport notes the missing return path", async () => {
 });
 
 test("renderReport says nothing about return paths when one exists", async () => {
-  const { ids, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { ids, get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   const rep = { ...switchedReport, returnPathAllowed: true };
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
@@ -702,7 +700,7 @@ test("renderReport says nothing about return paths when one exists", async () =>
 
 // переход потока анимируется через flowFade: старт прозрачный, финал — полный
 test("report flow fades in over animated frames", async () => {
-  const { get, frames } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get, frames } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
@@ -712,7 +710,7 @@ test("report flow fades in over animated frames", async () => {
 });
 
 test("map paints flow segments and marks the deny point with a tooltip", async () => {
-  const { get, frames } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { get, frames } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
@@ -734,7 +732,7 @@ test("map paints flow segments and marks the deny point with a tooltip", async (
 });
 
 test("hovering the denying router shows a delayed tooltip", async () => {
-  const { canvas, ids, frames, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { canvas, ids, frames, get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
@@ -759,7 +757,7 @@ test("hovering the denying router shows a delayed tooltip", async () => {
 });
 
 test("reset toolbar button is disabled until a diagnosis produces a result", async () => {
-  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { ids, frames, get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   assert.equal(ids["diag-tool-reset"].disabled, true, "nothing to reset yet");
@@ -770,7 +768,7 @@ test("reset toolbar button is disabled until a diagnosis produces a result", asy
 });
 
 test("reset button clears the report and the map highlight", async () => {
-  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { ids, frames, get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
@@ -787,7 +785,7 @@ test("reset button clears the report and the map highlight", async () => {
 });
 
 test("reset during the flow fade-in does not get overwritten by the stale animation", async () => {
-  const { ids, frames, get } = bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
+  const { ids, frames, get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
@@ -799,14 +797,14 @@ test("reset during the flow fade-in does not get overwritten by the stale animat
 // — плавающее окно параметров —
 
 test("panel opens by default and the toolbar toggle is active", async () => {
-  const { ids } = bootDiagnose(responses);
+  const { ids } = await bootDiagnose(responses);
   await tick();
   assert.equal(ids["diag-panel"].hidden, false);
   assert.ok(ids["diag-tool-path"].classList.contains("active"));
 });
 
 test("toolbar toggle closes and reopens the panel", async () => {
-  const { ids } = bootDiagnose(responses);
+  const { ids } = await bootDiagnose(responses);
   await tick();
   fire(ids["diag-tool-path"], "click", {});
   assert.equal(ids["diag-panel"].hidden, true);
@@ -817,7 +815,7 @@ test("toolbar toggle closes and reopens the panel", async () => {
 });
 
 test("close button hides the panel and deactivates the toggle", async () => {
-  const { ids } = bootDiagnose(responses);
+  const { ids } = await bootDiagnose(responses);
   await tick();
   fire(ids["diag-panel-close"], "click", {});
   assert.equal(ids["diag-panel"].hidden, true);
@@ -825,7 +823,7 @@ test("close button hides the panel and deactivates the toggle", async () => {
 });
 
 test("opening the panel snaps it back into the viewport if it drifted off-screen", async () => {
-  const { ids } = bootDiagnose(responses);
+  const { ids } = await bootDiagnose(responses);
   await tick();
   const panel = ids["diag-panel"];
   panel.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
@@ -838,7 +836,7 @@ test("opening the panel snaps it back into the viewport if it drifted off-screen
 });
 
 test("opening the panel leaves it in place when it's already within the viewport", async () => {
-  const { ids } = bootDiagnose(responses);
+  const { ids } = await bootDiagnose(responses);
   await tick();
   const panel = ids["diag-panel"];
   panel.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
@@ -851,7 +849,7 @@ test("opening the panel leaves it in place when it's already within the viewport
 });
 
 test("dragging the header moves the panel and persists its position", async () => {
-  const { ids, doc, store } = bootDiagnose(responses);
+  const { ids, doc, store } = await bootDiagnose(responses);
   await tick();
   fire(ids["diag-panel-header"], "mousedown", { button: 0, clientX: 100, clientY: 100 });
   fire(doc, "mousemove", { clientX: 160, clientY: 130 });
@@ -862,7 +860,7 @@ test("dragging the header moves the panel and persists its position", async () =
 });
 
 test("saved panel position is restored on boot", async () => {
-  const { ids } = bootDiagnose(responses, { "firenet-diag-panel-pos-v2": JSON.stringify({ x: 200, y: 80 }) });
+  const { ids } = await bootDiagnose(responses, { "firenet-diag-panel-pos-v2": JSON.stringify({ x: 200, y: 80 }) });
   // boot clamps an initially-open panel into the viewport; give it a
   // realistic footprint so a saved position well within 1200x800 survives.
   (ids["diag-panel"] ||= makeEl("div")).getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
@@ -874,7 +872,7 @@ test("saved panel position is restored on boot", async () => {
 // — запоминание введённых параметров формы —
 
 test("editing a form field persists all fields to localStorage", async () => {
-  const { ids, store } = bootDiagnose(responses);
+  const { ids, store } = await bootDiagnose(responses);
   await tick();
   for (const id of ["diag-src", "diag-dst", "diag-proto", "diag-dstports"]) ids[id] ||= makeEl("input");
   ids["diag-src"].value = "10.0.0.5";
@@ -889,7 +887,7 @@ test("editing a form field persists all fields to localStorage", async () => {
 
 test("saved form values are restored on boot", async () => {
   const saved = { "diag-src": "10.0.0.5", "diag-dst": "10.0.1.7", "diag-proto": "udp", "diag-dstports": "53" };
-  const { ids } = bootDiagnose(responses, { "firenet-diag-form-v1": JSON.stringify(saved) });
+  const { ids } = await bootDiagnose(responses, { "firenet-diag-form-v1": JSON.stringify(saved) });
   await tick();
   assert.equal(ids["diag-src"].value, "10.0.0.5");
   assert.equal(ids["diag-dst"].value, "10.0.1.7");
@@ -900,7 +898,7 @@ test("saved form values are restored on boot", async () => {
 // — распространение сети (инструмент «Распространение сети») —
 
 test("resolveSpreadSources resolves a subnet name to its base IP", async () => {
-  const { get } = bootDiagnose(responses);
+  const { get } = await bootDiagnose(responses);
   await tick();
   const out = JSON.parse(get(
     'JSON.stringify(Diagnose.resolveSpreadSources("main", [{name:"main",cidr:"10.0.0.0/24"},{name:"office-net",cidr:"10.0.1.0/24"}], []))',
@@ -909,7 +907,7 @@ test("resolveSpreadSources resolves a subnet name to its base IP", async () => {
 });
 
 test("resolveSpreadSources resolves a network name to every attached subnet", async () => {
-  const { get } = bootDiagnose(responses);
+  const { get } = await bootDiagnose(responses);
   await tick();
   const out = JSON.parse(get(
     'JSON.stringify(Diagnose.resolveSpreadSources("HQ", ' +
@@ -920,14 +918,14 @@ test("resolveSpreadSources resolves a network name to every attached subnet", as
 });
 
 test("resolveSpreadSources treats unmatched input as a literal IP", async () => {
-  const { get } = bootDiagnose(responses);
+  const { get } = await bootDiagnose(responses);
   await tick();
   const out = JSON.parse(get('JSON.stringify(Diagnose.resolveSpreadSources("10.0.0.5", [{name:"main",cidr:"10.0.0.0/24"}], []))'));
   assert.deepEqual(out, [{ ip: "10.0.0.5", subnetName: null }]);
 });
 
 test("mergeFlows unions ok/deny/edge/half sets from several reports and promotes half to ok when another pair round-trips through the same element", async () => {
-  const { get } = bootDiagnose(responses);
+  const { get } = await bootDiagnose(responses);
   await tick();
   const out = JSON.parse(get(`JSON.stringify((() => {
     // f1: one-way-only pair — "a" and "r1" (and the edge between them) are
@@ -1012,7 +1010,7 @@ const spreadResponses = {
 };
 
 test("spread combobox lists every network and subnet name with its CIDR", async () => {
-  const { ids, frames } = bootDiagnose(spreadResponses);
+  const { ids, frames } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
   const names = ids["spread-suggestions"].children.map((o) => o.textContent).sort();
@@ -1023,7 +1021,7 @@ test("spread combobox lists every network and subnet name with its CIDR", async 
 });
 
 test("spread combobox typing filters options by name and a pick fills the input", async () => {
-  const { ids, frames } = bootDiagnose(spreadResponses);
+  const { ids, frames } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
   const input = ids["spread-src"];
@@ -1038,7 +1036,7 @@ test("spread combobox typing filters options by name and a pick fills the input"
 });
 
 test("spread combobox filters subnets by IP and CIDR substring", async () => {
-  const { ids, frames } = bootDiagnose(spreadResponses);
+  const { ids, frames } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
   const input = ids["spread-src"];
@@ -1053,7 +1051,7 @@ test("spread combobox filters subnets by IP and CIDR substring", async () => {
 });
 
 test("spread combobox matches a network whose subnet contains a typed IP", async () => {
-  const { ids, frames } = bootDiagnose(spreadResponses);
+  const { ids, frames } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
   const input = ids["spread-src"];
@@ -1064,7 +1062,7 @@ test("spread combobox matches a network whose subnet contains a typed IP", async
 });
 
 test("spread combobox toggle shows and hides the options list", async () => {
-  const { ids, frames } = bootDiagnose(spreadResponses);
+  const { ids, frames } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
   assert.equal(ids["spread-suggestions"].hidden, true);
@@ -1077,7 +1075,7 @@ test("spread combobox toggle shows and hides the options list", async () => {
 });
 
 test("spread combobox arrow keys move the cursor and enter picks the highlighted option", async () => {
-  const { ids, frames } = bootDiagnose(spreadResponses);
+  const { ids, frames } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
   const input = ids["spread-src"];
@@ -1089,7 +1087,7 @@ test("spread combobox arrow keys move the cursor and enter picks the highlighted
 });
 
 test("spread clear button empties the field and clicking outside closes the list", async () => {
-  const { ids, frames, doc } = bootDiagnose(spreadResponses);
+  const { ids, frames, doc } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
   const input = ids["spread-src"];
@@ -1110,7 +1108,7 @@ test("spread clear button empties the field and clicking outside closes the list
 });
 
 test("spread panel starts closed while the path panel starts open", async () => {
-  const { ids } = bootDiagnose(spreadResponses);
+  const { ids } = await bootDiagnose(spreadResponses);
   await tick();
   assert.equal(ids["diag-panel"].hidden, false);
   assert.equal(ids["spread-panel"].hidden, true);
@@ -1120,7 +1118,7 @@ test("spread panel starts closed while the path panel starts open", async () => 
 });
 
 test("spread form queries every other subnet and highlights what's reachable", async () => {
-  const { ids, calls, frames, get } = bootDiagnose(spreadResponses);
+  const { ids, calls, frames, get } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
   ids["spread-src"] ||= makeEl("input");
@@ -1163,7 +1161,7 @@ test("spread form queries every other subnet and highlights what's reachable", a
 });
 
 test("reset button also clears the spread result", async () => {
-  const { ids, calls, frames, get } = bootDiagnose(spreadResponses);
+  const { ids, calls, frames, get } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
   ids["spread-src"] ||= makeEl("input");
@@ -1178,3 +1176,4 @@ test("reset button also clears the spread result", async () => {
   assert.equal(ids["spread-summary"].hidden, true);
   assert.equal(ids["diag-tool-reset"].disabled, true);
 });
+})();

@@ -1,5 +1,17 @@
 "use strict";
 
+import { NetMap } from "./netmap.js";
+import { Camera } from "./camera.js";
+import { CameraControls } from "./camera_input.js";
+import { CanvasTheme } from "./canvas_theme.js";
+import { CanvasView } from "./canvas_view.js";
+import { HitTest } from "./hit_test.js";
+import { Minimap } from "./minimap.js";
+import { NetInfo } from "./net_info.js";
+import { TopoScene } from "./topo_scene.js";
+import { Tween } from "./tween.js";
+import { Api, showBanner, apiPath } from "./common.js";
+
 // Diagnose — карта топологии на canvas с подсветкой путей и отчёт
 // диагностики трафика (POST /api/diagnose). Карта только для чтения:
 // перетаскивание узлов и правка — на /ui/topology.
@@ -885,6 +897,8 @@ const Diagnose = (() => {
     resolveSpreadSources, mergeFlows, runSpread,
   };
 })();
+
+export { Diagnose };
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", Diagnose.boot);
