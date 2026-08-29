@@ -9,12 +9,12 @@ function sum(widths) {
   return widths.reduce((total, width) => total + width, 0);
 }
 
-function toPercentages(widths) {
+export function toPercentages(widths) {
   const total = sum(widths);
   return total ? widths.map((width) => Number(((width * 100) / total).toFixed(6))) : [];
 }
 
-function parseColumnWidths(raw, count, version) {
+export function parseColumnWidths(raw, count, version) {
   try {
     const saved = JSON.parse(raw);
     if (saved?.version !== version || !Array.isArray(saved.widths) || saved.widths.length !== count) return null;
@@ -25,7 +25,7 @@ function parseColumnWidths(raw, count, version) {
   }
 }
 
-function resizePair(widths, index, delta, minimums) {
+export function resizePair(widths, index, delta, minimums) {
   const next = widths.slice();
   const limited = Math.min(
     Math.max(delta, -(next[index] - minimums[index])),
@@ -36,7 +36,7 @@ function resizePair(widths, index, delta, minimums) {
   return next;
 }
 
-function resetPair(widths, index, defaults, minimums) {
+export function resetPair(widths, index, defaults, minimums) {
   const pairWidth = widths[index] + widths[index + 1];
   const desired = (pairWidth * defaults[index]) / (defaults[index] + defaults[index + 1]);
   return resizePair(widths, index, desired - widths[index], minimums);
@@ -69,7 +69,7 @@ function restoreColumnWidths(table, key, version) {
   return Boolean(widths);
 }
 
-function makeColumnsResizable(table, key, version) {
+export function makeColumnsResizable(table, key, version) {
   const columns = columnElements(table);
   const ths = table.querySelectorAll("thead tr:first-child th");
   const minimums = columns.map((column) => Number(column.dataset.minWidth));
@@ -104,12 +104,13 @@ function makeColumnsResizable(table, key, version) {
   });
 }
 
-function initializeColumns(table, key, version) {
+export function initializeColumns(table, key, version) {
   if (restoreColumnWidths(table, key, version)) return;
   const widths = headerWidths(table);
   if (sum(widths)) applyColumnWidths(table, widths);
 }
 
-if (typeof module !== "undefined") {
-  module.exports = { parseColumnWidths, resetPair, resizePair, toPercentages };
+if (typeof window !== "undefined") {
+  window.makeColumnsResizable = makeColumnsResizable; // TODO(Task 28): remove once every classic-script consumer imports these directly
+  window.initializeColumns = initializeColumns;
 }
