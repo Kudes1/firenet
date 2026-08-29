@@ -2,9 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 // Minimal DOM stub to run common.js outside a browser and exercise the
 // sidebar shell built by buildNav.
@@ -34,33 +32,26 @@ function makeEl(tag) {
   return el;
 }
 
-function loadCommon(store, me) {
+async function loadCommon(store, me) {
   const doc = makeEl("#document");
   doc.body = makeEl("body");
   doc.documentElement = { dataset: {} };
   doc.createElement = (tag) => makeEl(tag);
-  const sandbox = {
-    document: doc,
-    window: { addEventListener() {}, location: { href: "" } },
-    localStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = v; },
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class {},
-    dispatchEvent() {},
-    confirm: () => false,
-    fetch: () => Promise.resolve(me ? { ok: true, json: () => Promise.resolve(me) } : { ok: false }),
-    setTimeout,
-    clearTimeout,
-    console,
+  global.document = doc;
+  global.window = { addEventListener() {}, location: { href: "" } };
+  global.localStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "common.js"), "utf8"), sandbox, { filename: "common.js" });
-  const { buildNav } = vm.runInContext("({ buildNav })", sandbox);
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class {};
+  global.confirm = () => false;
+  global.fetch = () => Promise.resolve(me ? { ok: true, json: () => Promise.resolve(me) } : { ok: false });
+  const { buildNav } = await import(path.join(__dirname, "common.js") + `?t=${Date.now()}-${Math.random()}`);
   return { buildNav, doc };
 }
+
+(async () => {
 
 function fire(target, type, ev = {}) {
   ev.type = type;
@@ -73,7 +64,7 @@ const byTag = (root, tag) => root.children.filter((c) => c.tag === tag);
 const label = (a) => a.children[a.children.length - 1].textContent;
 
 test("buildNav renders an aside.sidebar with brand, groups and nav links", async () => {
-  const { buildNav, doc } = loadCommon({}, { username: "root", role: "admin" });
+  const { buildNav, doc } = await loadCommon({}, { username: "root", role: "admin" });
   await buildNav("rules");
 
   const aside = doc.body.children[0];
@@ -116,7 +107,7 @@ test("buildNav renders an aside.sidebar with brand, groups and nav links", async
 });
 
 test("buildNav hides the users link for a non-admin", async () => {
-  const { buildNav, doc } = loadCommon({}, { username: "alice", role: "user" });
+  const { buildNav, doc } = await loadCommon({}, { username: "alice", role: "user" });
   await buildNav("rules");
 
   const nav = byTag(doc.body.children[0], "nav")[0];
@@ -131,7 +122,7 @@ test("buildNav hides the users link for a non-admin", async () => {
 
 test("group header toggles the group and persists the state", async () => {
   const store = {};
-  const { buildNav, doc } = loadCommon(store, { username: "root", role: "admin" });
+  const { buildNav, doc } = await loadCommon(store, { username: "root", role: "admin" });
   await buildNav("topology");
 
   const nav = byTag(doc.body.children[0], "nav")[0];
@@ -149,7 +140,7 @@ test("group header toggles the group and persists the state", async () => {
 
 test("group with the active link is expanded regardless of the stored state", async () => {
   const store = { "firenet-nav-firewall": "closed" };
-  const { buildNav, doc } = loadCommon(store, { username: "root", role: "admin" });
+  const { buildNav, doc } = await loadCommon(store, { username: "root", role: "admin" });
   await buildNav("rules");
 
   const nav = byTag(doc.body.children[0], "nav")[0];
@@ -160,7 +151,7 @@ test("group with the active link is expanded regardless of the stored state", as
 
 test("toggle collapses the sidebar and persists the state", async () => {
   const store = {};
-  const { buildNav, doc } = loadCommon(store, { username: "root", role: "admin" });
+  const { buildNav, doc } = await loadCommon(store, { username: "root", role: "admin" });
   await buildNav("topology");
 
   const aside = doc.body.children[0];
@@ -176,13 +167,13 @@ test("toggle collapses the sidebar and persists the state", async () => {
 });
 
 test("collapsed state is restored on load", async () => {
-  const { buildNav, doc } = loadCommon({ "firenet-sidebar": "collapsed" }, { username: "root", role: "admin" });
+  const { buildNav, doc } = await loadCommon({ "firenet-sidebar": "collapsed" }, { username: "root", role: "admin" });
   await buildNav("topology");
   assert.ok(doc.body.children[0].classList.contains("collapsed"), "sidebar starts collapsed");
 });
 
 test("brand keeps its height when collapsed by swapping the label for a short letter", async () => {
-  const { buildNav, doc } = loadCommon({}, { username: "root", role: "admin" });
+  const { buildNav, doc } = await loadCommon({}, { username: "root", role: "admin" });
   await buildNav("topology");
 
   const brand = byTag(doc.body.children[0], "strong")[0];
@@ -191,3 +182,4 @@ test("brand keeps its height when collapsed by swapping the label for a short le
   assert.equal(full.textContent, "firenet", "full brand name in expanded state");
   assert.equal(short.textContent, "F", "single letter in collapsed state");
 });
+})();

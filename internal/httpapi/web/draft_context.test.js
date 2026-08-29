@@ -2,36 +2,33 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
-function loadCommon(store = {}, localStore = {}) {
-  const sandbox = {
-    document: { addEventListener() {} },
-    window: {},
-    localStorage: {
-      getItem: (k) => (k in localStore ? localStore[k] : null),
-      setItem: (k, v) => { localStore[k] = v; },
-      removeItem: (k) => { delete localStore[k]; },
-    },
-    sessionStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = v; },
-      removeItem: (k) => { delete store[k]; },
-    },
-    matchMedia: () => ({ matches: false }),
-    console,
+// Загружает свежий экземпляр модуля (cache-busting) с глобальными
+// sessionStorage/localStorage над переданными хранилищами. Функции модуля
+// читают глобальные объекты в момент вызова, поэтому при работе с двумя
+// «вкладками» тест должен вернуть нужные глобальные объекты через `session`.
+async function loadCommon(store = {}, localStore = {}) {
+  global.document = { addEventListener() {} };
+  global.window = {};
+  global.localStorage = {
+    getItem: (k) => (k in localStore ? localStore[k] : null),
+    setItem: (k, v) => { localStore[k] = v; },
+    removeItem: (k) => { delete localStore[k]; },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "common.js"), "utf8"), sandbox, { filename: "common.js" });
-  const names = vm.runInContext("({ currentDraftID, setCurrentDraftID, isReadOnly, apiPath, assertEditable, ReadOnlyError, Api })", sandbox);
-  return { ...names, sandbox, store, localStore };
+  global.sessionStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
+  };
+  global.matchMedia = () => ({ matches: false });
+  const names = await import(path.join(__dirname, "common.js") + `?t=${Date.now()}-${Math.random()}`);
+  return { ...names, session: global.sessionStorage, store, localStore };
 }
 
-test("currentDraftID/setCurrentDraftID round-trip through sessionStorage", () => {
-  const { currentDraftID, setCurrentDraftID, store } = loadCommon();
+(async () => {
+test("currentDraftID/setCurrentDraftID round-trip through sessionStorage", async () => {
+  const { currentDraftID, setCurrentDraftID, store } = await loadCommon();
   assert.equal(currentDraftID(), null);
   setCurrentDraftID("draft-1");
   assert.equal(store["firenet-draft-id"], "draft-1");
@@ -40,30 +37,33 @@ test("currentDraftID/setCurrentDraftID round-trip through sessionStorage", () =>
   assert.equal(currentDraftID(), null);
 });
 
-test("currentDraftID restores the last draft from localStorage in a new session", () => {
-  const { currentDraftID } = loadCommon({}, { "firenet-last-draft-id": "draft-1" });
+test("currentDraftID restores the last draft from localStorage in a new session", async () => {
+  const { currentDraftID } = await loadCommon({}, { "firenet-last-draft-id": "draft-1" });
   assert.equal(currentDraftID(), "draft-1");
 });
 
-test("restored draft remains fixed in its tab after another tab selects a draft", () => {
+test("restored draft remains fixed in its tab after another tab selects a draft", async () => {
   const localStore = { "firenet-last-draft-id": "draft-a" };
-  const firstTab = loadCommon({}, localStore);
+  const firstTab = await loadCommon({}, localStore);
   assert.equal(firstTab.currentDraftID(), "draft-a");
 
-  const secondTab = loadCommon({}, localStore);
+  const secondTab = await loadCommon({}, localStore);
   secondTab.setCurrentDraftID("draft-b");
 
+  // модуль видит глобальные хранилища в момент вызова — вернуть окружение
+  // первой вкладки перед её проверкой
+  global.sessionStorage = firstTab.session;
   assert.equal(firstTab.currentDraftID(), "draft-a");
 });
 
-test("setCurrentDraftID stores the active draft as the last draft", () => {
-  const { setCurrentDraftID, localStore } = loadCommon();
+test("setCurrentDraftID stores the active draft as the last draft", async () => {
+  const { setCurrentDraftID, localStore } = await loadCommon();
   setCurrentDraftID("draft-1");
   assert.equal(localStore["firenet-last-draft-id"], "draft-1");
 });
 
-test("clearing the active draft clears its persisted last-draft value", () => {
-  const { setCurrentDraftID, localStore } = loadCommon(
+test("clearing the active draft clears its persisted last-draft value", async () => {
+  const { setCurrentDraftID, localStore } = await loadCommon(
     { "firenet-draft-id": "draft-1" },
     { "firenet-last-draft-id": "draft-1" },
   );
@@ -71,8 +71,8 @@ test("clearing the active draft clears its persisted last-draft value", () => {
   assert.equal(localStore["firenet-last-draft-id"], undefined);
 });
 
-test("clearing a tab draft keeps another last draft and makes the tab read-only", () => {
-  const { currentDraftID, setCurrentDraftID, localStore } = loadCommon(
+test("clearing a tab draft keeps another last draft and makes the tab read-only", async () => {
+  const { currentDraftID, setCurrentDraftID, localStore } = await loadCommon(
     { "firenet-draft-id": "draft-a" },
     { "firenet-last-draft-id": "draft-b" },
   );
@@ -81,32 +81,32 @@ test("clearing a tab draft keeps another last draft and makes the tab read-only"
   assert.equal(localStore["firenet-last-draft-id"], "draft-b");
 });
 
-test("isReadOnly reflects whether a draft is active", () => {
-  const { isReadOnly, setCurrentDraftID } = loadCommon();
+test("isReadOnly reflects whether a draft is active", async () => {
+  const { isReadOnly, setCurrentDraftID } = await loadCommon();
   assert.equal(isReadOnly(), true);
   setCurrentDraftID("draft-1");
   assert.equal(isReadOnly(), false);
 });
 
-test("apiPath routes to the active draft, or the current version otherwise", () => {
-  const { apiPath, setCurrentDraftID } = loadCommon();
+test("apiPath routes to the active draft, or the current version otherwise", async () => {
+  const { apiPath, setCurrentDraftID } = await loadCommon();
   assert.equal(apiPath("topology"), "/api/versions/current/topology");
   setCurrentDraftID("draft-1");
   assert.equal(apiPath("topology"), "/api/drafts/draft-1/topology");
   assert.equal(apiPath("link-exports?link=0&side=a"), "/api/drafts/draft-1/link-exports?link=0&side=a");
 });
 
-test("assertEditable throws ReadOnlyError only when read-only", () => {
-  const { assertEditable, setCurrentDraftID, ReadOnlyError } = loadCommon();
+test("assertEditable throws ReadOnlyError only when read-only", async () => {
+  const { assertEditable, setCurrentDraftID, ReadOnlyError } = await loadCommon();
   assert.throws(() => assertEditable(), ReadOnlyError);
   setCurrentDraftID("draft-1");
   assert.doesNotThrow(() => assertEditable());
 });
 
 test("Api.put sends the revision from the last Api.get and updates it from the response", async () => {
-  const { Api, sandbox } = loadCommon({ "firenet-draft-id": "draft-1" });
+  const { Api } = await loadCommon({ "firenet-draft-id": "draft-1" });
   const requests = [];
-  sandbox.fetch = async (url, opts) => {
+  global.fetch = async (url, opts) => {
     requests.push({ url, headers: opts?.headers || {} });
     if (!opts) {
       return { ok: true, status: 200, headers: { get: (h) => (h === "X-Draft-Revision" ? "3" : null) }, json: async () => ({}) };
@@ -122,9 +122,9 @@ test("Api.put sends the revision from the last Api.get and updates it from the r
 });
 
 test("Api.post sends the revision from the last Api.get and updates it from the response", async () => {
-  const { Api, sandbox } = loadCommon({ "firenet-draft-id": "draft-1" });
+  const { Api } = await loadCommon({ "firenet-draft-id": "draft-1" });
   const requests = [];
-  sandbox.fetch = async (url, opts) => {
+  global.fetch = async (url, opts) => {
     requests.push({ url, headers: opts?.headers || {} });
     if (!opts) {
       return { ok: true, status: 200, headers: { get: (h) => (h === "X-Draft-Revision" ? "3" : null) }, json: async () => ({}) };
@@ -138,3 +138,4 @@ test("Api.post sends the revision from the last Api.get and updates it from the 
   await Api.post("/api/drafts/draft-1/topology/operations", { kind: "create-device" });
   assert.equal(requests[2].headers["X-Draft-Revision"], "4");
 });
+})();

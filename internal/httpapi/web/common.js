@@ -3,7 +3,7 @@
 // Shared page plumbing: Alpine app state, API helpers and the sidebar shell
 // injected into every standalone UI page.
 
-function appData() {
+export function appData() {
   return {
     theme: localStorage.getItem("firenet-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
     banner: { show: false, message: "", kind: "error", timer: null },
@@ -22,7 +22,7 @@ function appData() {
   };
 }
 
-function showBanner(message, kind) {
+export function showBanner(message, kind) {
   window.dispatchEvent(new CustomEvent("notify", { detail: { message, kind: kind || "error" } }));
 }
 
@@ -30,7 +30,7 @@ function showBanner(message, kind) {
 // A page arms it with a getter for its editable document and marks the
 // clean baseline after load/save; nav clicks and tab close then compare
 // against that baseline.
-const DirtyGuard = (() => {
+export const DirtyGuard = (() => {
   const MESSAGE = "Есть несохранённые изменения. Покинуть страницу без сохранения?";
   let getData = null;
   let clean = null;
@@ -65,7 +65,7 @@ const DRAFT_ID_KEY = "firenet-draft-id";
 const LAST_DRAFT_ID_KEY = "firenet-last-draft-id";
 const READONLY_DRAFT_CONTEXT_KEY = "firenet-draft-readonly";
 
-function currentDraftID() {
+export function currentDraftID() {
   const draftID = sessionStorage.getItem(DRAFT_ID_KEY);
   if (draftID) return draftID;
   if (sessionStorage.getItem(READONLY_DRAFT_CONTEXT_KEY)) return null;
@@ -74,7 +74,7 @@ function currentDraftID() {
   return lastDraftID || null;
 }
 
-function setCurrentDraftID(id) {
+export function setCurrentDraftID(id) {
   const activeID = currentDraftID();
   lastDraftRevision = null;
   if (id) {
@@ -90,7 +90,7 @@ function setCurrentDraftID(id) {
   }
 }
 
-function isReadOnly() {
+export function isReadOnly() {
   return !currentDraftID();
 }
 
@@ -98,7 +98,7 @@ function isReadOnly() {
 // this tab is viewing the read-only current version or editing inside a
 // draft, with the action to switch. If the active draft no longer exists
 // (deleted or confirmed from another tab), the tab drops back to read-only.
-async function renderDraftBanner() {
+export async function renderDraftBanner() {
   const banner = document.createElement("div");
   banner.className = "draft-banner";
   const draftID = currentDraftID();
@@ -159,19 +159,19 @@ async function renderDraftBanner() {
 // reads/writes project data goes through this instead of a literal
 // "/api/..." string, so there is exactly one place that knows the
 // draft-vs-current routing rule.
-function apiPath(suffix) {
+export function apiPath(suffix) {
   const draftID = currentDraftID();
   return draftID ? `/api/drafts/${draftID}/${suffix}` : `/api/versions/current/${suffix}`;
 }
 
-class ReadOnlyError extends Error {
+export class ReadOnlyError extends Error {
   constructor() {
     super("Только чтение — откройте черновик, чтобы редактировать");
   }
 }
 
 // assertEditable is the one-line guard every save path calls first.
-function assertEditable() {
+export function assertEditable() {
   if (isReadOnly()) throw new ReadOnlyError();
 }
 
@@ -184,7 +184,7 @@ let lastDraftRevision = null;
 // request, preserving where the user was so they land back there after
 // logging in. Guards against open redirects: only same-origin, absolute
 // paths are honored as the "next" target.
-function loginRedirectURL(pathname, search) {
+export function loginRedirectURL(pathname, search) {
   const target = pathname + search;
   const safe = target.startsWith("/") && !target.startsWith("//");
   return "/login" + (safe ? "?next=" + encodeURIComponent(target) : "");
@@ -195,7 +195,7 @@ async function redirectToLogin() {
   return new Promise(() => {}); // navigation is underway; never resolve
 }
 
-const Api = {
+export const Api = {
   async get(path) {
     const res = await fetch(path);
     if (res.status === 401) return redirectToLogin();
@@ -244,7 +244,7 @@ async function apiError(res) {
 // ipv4CidrOverlap is a best-effort client-side hint for the same check
 // internal/topology.Validate() performs authoritatively on save; it only
 // understands IPv4 and silently skips anything else.
-function ipv4CidrOverlap(a, b) {
+export function ipv4CidrOverlap(a, b) {
   const parse = (cidr) => {
     const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)$/.exec(cidr);
     if (!m) return null;
@@ -264,11 +264,11 @@ function ipv4CidrOverlap(a, b) {
 // Client-side column search, ported from the rules page (which mirrors
 // internal/rules/filter.go). Best-effort IPv4 only, like ipv4CidrOverlap.
 
-function containsFold(s, sub) {
+export function containsFold(s, sub) {
   return !sub || String(s || "").toLowerCase().includes(sub.toLowerCase());
 }
 
-function parseIPv4(s) {
+export function parseIPv4(s) {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
   if (!m) return null;
   const o = m.slice(1).map(Number);
@@ -281,7 +281,7 @@ function normPrefix(base, bits) {
   return { base: (base & mask) >>> 0, mask, bits };
 }
 
-function parsePrefix(s) {
+export function parsePrefix(s) {
   const i = s.indexOf("/");
   if (i < 0) return null;
   const base = parseIPv4(s.slice(0, i));
@@ -307,7 +307,7 @@ function partialPrefix(q) {
   return normPrefix(((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0, parts.length * 8);
 }
 
-function parseQueryPrefix(q) {
+export function parseQueryPrefix(q) {
   if (!q.includes("/")) {
     const addr = parseIPv4(q);
     if (addr !== null) return normPrefix(addr, 32);
@@ -316,12 +316,12 @@ function parseQueryPrefix(q) {
   return parsePrefix(q);
 }
 
-function formatIPv4(n) {
+export function formatIPv4(n) {
   return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
 }
 
-const prefixContains = (p, addr) => (addr & p.mask) === p.base;
-const prefixOverlap = (a, b) => {
+export const prefixContains = (p, addr) => (addr & p.mask) === p.base;
+export const prefixOverlap = (a, b) => {
   const common = a.mask & b.mask;
   return (a.base & common) === (b.base & common);
 };
@@ -330,7 +330,7 @@ const prefixOverlap = (a, b) => {
 // "address") for a filter value: an IP/partial-IP/CIDR query is matched
 // semantically against the parsed prefixes, anything else as a
 // case-insensitive substring over the raw values.
-function matchPrefixQuery(entries, q) {
+export function matchPrefixQuery(entries, q) {
   const query = (q || "").trim();
   if (!query) return true;
   const qp = parseQueryPrefix(query);
@@ -344,7 +344,7 @@ function matchPrefixQuery(entries, q) {
 // matchSubnetMembers searches a subnet-membership cell (networks/sets
 // pages) for a filter value: member names and their CIDRs as substrings,
 // IP/partial-IP/CIDR queries semantically against the members' CIDRs.
-function matchSubnetMembers(subnets, cidrOf, q) {
+export function matchSubnetMembers(subnets, cidrOf, q) {
   const names = subnets || [];
   return matchPrefixQuery([...names, ...names.map((s) => cidrOf(s))], q);
 }
@@ -401,7 +401,7 @@ const NAV_ICONS = {
 // buildNav renders the shared sidebar shell (brand, collapsible nav with
 // icons, theme toggle, banner host). The collapsed state is kept in
 // localStorage so it survives reloads and page switches.
-async function buildNav(active) {
+export async function buildNav(active) {
   const me = await fetch("/api/me")
     .then((res) => (res.ok ? res.json() : null))
     .catch(() => null);
@@ -550,3 +550,30 @@ document.addEventListener("DOMContentLoaded", () => {
     void renderDraftBanner().catch((e) => showBanner("Не удалось загрузить статус версии: " + e.message));
   }
 });
+
+// Bridges for not-yet-converted classic-script consumers (page .js files and
+// Alpine's x-data="appData()" inline expression, which always needs the
+// global). TODO(Task 28): drop every line except appData once every page
+// imports these directly.
+if (typeof window !== "undefined") {
+  window.appData = appData; // permanent: Alpine evaluates x-data="appData()" against the global scope
+  window.showBanner = showBanner;
+  window.DirtyGuard = DirtyGuard;
+  window.currentDraftID = currentDraftID;
+  window.setCurrentDraftID = setCurrentDraftID;
+  window.isReadOnly = isReadOnly;
+  window.apiPath = apiPath;
+  window.assertEditable = assertEditable;
+  window.loginRedirectURL = loginRedirectURL;
+  window.Api = Api;
+  window.ipv4CidrOverlap = ipv4CidrOverlap;
+  window.containsFold = containsFold;
+  window.parseIPv4 = parseIPv4;
+  window.parsePrefix = parsePrefix;
+  window.parseQueryPrefix = parseQueryPrefix;
+  window.formatIPv4 = formatIPv4;
+  window.prefixContains = prefixContains;
+  window.prefixOverlap = prefixOverlap;
+  window.matchPrefixQuery = matchPrefixQuery;
+  window.matchSubnetMembers = matchSubnetMembers;
+}

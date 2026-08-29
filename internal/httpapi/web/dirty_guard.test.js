@@ -2,9 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 // Minimal DOM stub to run common.js outside a browser and exercise the
 // DirtyGuard navigation interception.
@@ -51,31 +49,20 @@ function makeDoc() {
   return doc;
 }
 
-function loadCommon({ confirmResult }) {
+async function loadCommon({ confirmResult }) {
   const doc = makeDoc();
   const winListeners = {};
   const location = { href: "http://x/ui/topology" };
-  const sandbox = {
-    document: doc,
-    window: { addEventListener: (t, fn) => { (winListeners[t] ||= []).push(fn); }, location },
-    localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class {},
-    dispatchEvent() {},
-    confirm: () => confirmResult,
-    fetch: () => Promise.resolve({ ok: false }),
-    setTimeout,
-    clearTimeout,
-    console,
-  };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "common.js"), "utf8"), sandbox, { filename: "common.js" });
-  // top-level const bindings live in the context's lexical env, not on
-  // globalThis; evaluate an expression to grab them
-  const { DirtyGuard, buildNav } = vm.runInContext("({ DirtyGuard, buildNav })", sandbox);
-  return { sandbox: { ...sandbox, DirtyGuard, buildNav }, doc, winListeners, location };
+  global.document = doc;
+  global.window = { addEventListener: (t, fn) => { (winListeners[t] ||= []).push(fn); }, location };
+  global.localStorage = { getItem: () => null, setItem() {} };
+  global.sessionStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class {};
+  global.confirm = () => confirmResult;
+  global.fetch = () => Promise.resolve({ ok: false });
+  const { DirtyGuard, buildNav } = await import(path.join(__dirname, "common.js") + `?t=${Date.now()}-${Math.random()}`);
+  return { sandbox: { DirtyGuard, buildNav }, doc, winListeners, location };
 }
 
 function fire(target, type, ev) {
@@ -102,8 +89,9 @@ async function clickNavLink(ctx, doc) {
 
 const noop = () => {};
 
+(async () => {
 test("clean page navigates without confirmation", async () => {
-  const ctx = loadCommon({ confirmResult: false });
+  const ctx = await loadCommon({ confirmResult: false });
   const { DirtyGuard } = ctx.sandbox;
   const doc = makeDoc();
   DirtyGuard.arm(noop);
@@ -113,7 +101,7 @@ test("clean page navigates without confirmation", async () => {
 });
 
 test("dirty page blocks navigation until confirmed", async () => {
-  const ctx = loadCommon({ confirmResult: false });
+  const ctx = await loadCommon({ confirmResult: false });
   const { DirtyGuard } = ctx.sandbox;
   let data = { devices: [] };
   DirtyGuard.arm(() => data);
@@ -123,7 +111,7 @@ test("dirty page blocks navigation until confirmed", async () => {
   assert.equal(await clickNavLink(ctx, ctx.doc), true, "navigation blocked");
   assert.equal(ctx.location.href, "http://x/ui/topology", "no redirect happened");
 
-  const ctxYes = loadCommon({ confirmResult: true });
+  const ctxYes = await loadCommon({ confirmResult: true });
   const dg2 = ctxYes.sandbox.DirtyGuard;
   let data2 = { devices: [] };
   dg2.arm(() => data2);
@@ -133,8 +121,8 @@ test("dirty page blocks navigation until confirmed", async () => {
   assert.equal(ctxYes.location.href, "/ui/topology", "confirmed navigation redirects to the clicked link");
 });
 
-test("markClean after save clears the dirty flag", () => {
-  const ctx = loadCommon({ confirmResult: false });
+test("markClean after save clears the dirty flag", async () => {
+  const ctx = await loadCommon({ confirmResult: false });
   const { DirtyGuard } = ctx.sandbox;
   let data = { devices: [] };
   DirtyGuard.arm(() => data);
@@ -145,13 +133,13 @@ test("markClean after save clears the dirty flag", () => {
   assert.equal(DirtyGuard.isDirty(), false);
 });
 
-test("unarmed guard never reports dirty", () => {
-  const ctx = loadCommon({ confirmResult: false });
+test("unarmed guard never reports dirty", async () => {
+  const ctx = await loadCommon({ confirmResult: false });
   assert.equal(ctx.sandbox.DirtyGuard.isDirty(), false);
 });
 
-test("beforeunload flags unsaved changes", () => {
-  const ctx = loadCommon({ confirmResult: false });
+test("beforeunload flags unsaved changes", async () => {
+  const ctx = await loadCommon({ confirmResult: false });
   const { DirtyGuard } = ctx.sandbox;
   let data = { devices: [] };
   DirtyGuard.arm(() => data);
@@ -167,3 +155,4 @@ test("beforeunload flags unsaved changes", () => {
   handlers.forEach((fn) => fn(ev2));
   assert.equal(ev2.returnValue, "", "dirty page sets returnValue");
 });
+})();
