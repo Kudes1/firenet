@@ -1,5 +1,7 @@
 "use strict";
 
+import { Api, showBanner, setCurrentDraftID } from "./common.js";
+
 // Version history: the confirmed-version list, a diff of any entry against
 // the one immediately before it, and — admin only — restoring an older
 // version (which creates a new version on top, never rewrites history).
@@ -120,5 +122,7 @@ const History = (() => {
     get diffs() { return diffs; },
   };
 })();
+
+export { History };
 
 document.addEventListener("DOMContentLoaded", History.boot);
