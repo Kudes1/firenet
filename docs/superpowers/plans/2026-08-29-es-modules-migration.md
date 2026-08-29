@@ -91,7 +91,7 @@ git commit -m "refactor(web): convert tween.js to an ES module"
 - Test: `internal/httpapi/web/camera.test.js`
 
 **Interfaces:**
-- Produces: `export const Camera` — `{ MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, fitView }` (unchanged shape). Also assigned to `window.Camera` (temporary bridge, removed in Task 29) because `diagnose.js` and `topology.js` read `Camera.create()` at their own top level (module-load time), not inside a function.
+- Produces: `export const Camera` — `{ MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, fitView }` (unchanged shape). Also assigned to `window.Camera` (temporary bridge, removed in Task 28) because `diagnose.js` and `topology.js` read `Camera.create()` at their own top level (module-load time), not inside a function.
 
 **Why `diagnose.js`/`topology.js`'s `<script>` tags flip to `type="module"` here, not at their own Task 15/16:** `diagnose.js:8` does `camera: Camera.create()` and `topology.js:7` does `camera: Camera.create()` as literal top-level statements (inside the `state`/`State` object literal), executed the instant the script runs — not deferred to a later call. Once `camera.js` becomes a module (deferred, waits for the whole document to parse), a still-classic `diagnose.js`/`topology.js` positioned later in the document would keep running immediately during parsing — i.e. *before* `camera.js`'s deferred module sets `window.Camera` — and throw `Camera is not defined`. Flipping their own tags to `type="module"` moves them into the same deferred queue, where document order is preserved, so `camera.js` (earlier tag) still runs before them. Their content is untouched — no `import`/`export` yet, just the `type="module"` attribute — which is valid because a module needs no import/export statements to be a module. All other files loaded by these two pages remain classic scripts for now; their only use of `Camera`/`NetMap`/etc. is inside functions called after `boot()`, verified in Task 7 and the spec's risk section.
 
@@ -99,15 +99,14 @@ git commit -m "refactor(web): convert tween.js to an ES module"
 
 `internal/httpapi/web/camera.js`:
 ```diff
--const Camera = (() => {
-+const Camera = (() => {
+ const Camera = (() => {
    const MIN_ZOOM = 0.1;
    ...
    return { MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, fitView };
  })();
 +
 +export { Camera };
-+window.Camera = Camera; // TODO(Task 29): remove once every classic-script consumer imports Camera directly
++window.Camera = Camera; // TODO(Task 28): remove once every classic-script consumer imports Camera directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -206,14 +205,13 @@ git commit -m "refactor(web): convert camera.js to an ES module"
 - Test: `internal/httpapi/web/canvas_theme.test.js`
 
 **Interfaces:**
-- Produces: `export const CanvasTheme` — `{ create, fromComputed }` (unchanged shape). `window.CanvasTheme` bridge added (removed Task 29): `diagnose.js`/`topology.js` read `CanvasTheme.fromComputed(...)` only inside `boot()` (verified line 850/1318 respectively — inside functions), so no HTML changes are needed here beyond the tag flip already done in Task 2 covering the whole page's deferred queue.
+- Produces: `export const CanvasTheme` — `{ create, fromComputed }` (unchanged shape). `window.CanvasTheme` bridge added (removed Task 28): `diagnose.js`/`topology.js` read `CanvasTheme.fromComputed(...)` only inside `boot()` (verified line 850/1318 respectively — inside functions), so no HTML changes are needed here beyond the tag flip already done in Task 2 covering the whole page's deferred queue.
 
 - [ ] **Step 1: Add `export` and drop the dead CommonJS interop line**
 
 `internal/httpapi/web/canvas_theme.js`:
 ```diff
--const CanvasTheme = (() => {
-+const CanvasTheme = (() => {
+ const CanvasTheme = (() => {
    const NAMES = [...];
    ...
    return Object.freeze({ create, fromComputed });
@@ -222,7 +220,7 @@ git commit -m "refactor(web): convert camera.js to an ES module"
 -if (typeof module !== "undefined") module.exports = CanvasTheme;
 +
 +export { CanvasTheme };
-+window.CanvasTheme = CanvasTheme; // TODO(Task 29): remove once every classic-script consumer imports CanvasTheme directly
++window.CanvasTheme = CanvasTheme; // TODO(Task 28): remove once every classic-script consumer imports CanvasTheme directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -287,14 +285,13 @@ git commit -m "refactor(web): convert canvas_theme.js to an ES module"
 - Test: `internal/httpapi/web/hit_test.test.js`
 
 **Interfaces:**
-- Produces: `export const HitTest` — `{ bbox, pick, pickNodes }` (unchanged shape). `window.HitTest` bridge added (removed Task 29): all `HitTest.*` reads in `diagnose.js`/`topology.js` are inside event-handler functions (verified above), never at top level.
+- Produces: `export const HitTest` — `{ bbox, pick, pickNodes }` (unchanged shape). `window.HitTest` bridge added (removed Task 28): all `HitTest.*` reads in `diagnose.js`/`topology.js` are inside event-handler functions (verified above), never at top level.
 
 - [ ] **Step 1: Add `export` and drop the dead CommonJS interop line**
 
 `internal/httpapi/web/hit_test.js`:
 ```diff
--const HitTest = (() => {
-+const HitTest = (() => {
+ const HitTest = (() => {
    const PAD = 4;
    ...
    return Object.freeze({ bbox, pick, pickNodes });
@@ -303,7 +300,7 @@ git commit -m "refactor(web): convert canvas_theme.js to an ES module"
 -if (typeof module !== "undefined") module.exports = HitTest;
 +
 +export { HitTest };
-+window.HitTest = HitTest; // TODO(Task 29): remove once every classic-script consumer imports HitTest directly
++window.HitTest = HitTest; // TODO(Task 28): remove once every classic-script consumer imports HitTest directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -344,7 +341,7 @@ git commit -m "refactor(web): convert hit_test.js to an ES module"
 - Test: `internal/httpapi/web/rules_columns.test.js`
 
 **Interfaces:**
-- Produces: `export function parseColumnWidths`, `export function resetPair`, `export function resizePair`, `export function toPercentages`, `export function makeColumnsResizable`, `export function initializeColumns`. `window.makeColumnsResizable` and `window.initializeColumns` bridges added (removed Task 29) — these are the only two names read as bare globals by `networks.js`/`rules.js`/`sets.js`/`subnets.js`/`unions.js` (all inside `alpine:init` callbacks, never at top level, so no HTML tag flips are needed for those five pages here).
+- Produces: `export function parseColumnWidths`, `export function resetPair`, `export function resizePair`, `export function toPercentages`, `export function makeColumnsResizable`, `export function initializeColumns`. `window.makeColumnsResizable` and `window.initializeColumns` bridges added (removed Task 28) — these are the only two names read as bare globals by `networks.js`/`rules.js`/`sets.js`/`subnets.js`/`unions.js` (all inside `alpine:init` callbacks, never at top level, so no HTML tag flips are needed for those five pages here).
 
 No HTML changes: `columns.js`'s consumers (`networks.js`, `rules.js`, `sets.js`, `subnets.js`, `unions.js`) all call `initializeColumns`/`makeColumnsResizable` from inside a `document.addEventListener("alpine:init", ...)` callback (verified), never at top level — safe to stay classic scripts until their own Phase 4 task.
 
@@ -395,7 +392,7 @@ No HTML changes: `columns.js`'s consumers (`networks.js`, `rules.js`, `sets.js`,
 -if (typeof module !== "undefined") {
 -  module.exports = { parseColumnWidths, resetPair, resizePair, toPercentages };
 -}
-+window.makeColumnsResizable = makeColumnsResizable; // TODO(Task 29): remove once every classic-script consumer imports these directly
++window.makeColumnsResizable = makeColumnsResizable; // TODO(Task 28): remove once every classic-script consumer imports these directly
 +window.initializeColumns = initializeColumns;
 ```
 
@@ -448,7 +445,7 @@ git commit -m "refactor(web): convert columns.js to an ES module"
 - Test: the 5 test files listed above
 
 **Interfaces:**
-- Produces: `export function appData`, `export function showBanner`, `export const DirtyGuard`, `export function currentDraftID`, `export function setCurrentDraftID`, `export function isReadOnly`, `export async function renderDraftBanner`, `export function apiPath`, `export class ReadOnlyError`, `export function assertEditable`, `export function loginRedirectURL`, `export const Api`, `export function ipv4CidrOverlap`, `export function containsFold`, `export function matchPrefixQuery`, `export function matchSubnetMembers`, `export async function buildNav`. `window.appData = appData` bridge added and kept permanently (not removed in Task 29 — `x-data="appData()"` is an inline HTML attribute expression Alpine evaluates against the global object; it can never become a static `import`). Every other export above additionally gets a `window.X = X` bridge, removed in Task 29 once its last bare-global consumer (a page `.js` file, listed per name below) is converted:
+- Produces: `export function appData`, `export function showBanner`, `export const DirtyGuard`, `export function currentDraftID`, `export function setCurrentDraftID`, `export function isReadOnly`, `export async function renderDraftBanner`, `export function apiPath`, `export class ReadOnlyError`, `export function assertEditable`, `export function loginRedirectURL`, `export const Api`, `export function ipv4CidrOverlap`, `export function containsFold`, `export function matchPrefixQuery`, `export function matchSubnetMembers`, `export async function buildNav`. `window.appData = appData` bridge added and kept permanently (not removed in Task 28 — `x-data="appData()"` is an inline HTML attribute expression Alpine evaluates against the global object; it can never become a static `import`). Every other export above additionally gets a `window.X = X` bridge, removed in Task 28 once its last bare-global consumer (a page `.js` file, listed per name below) is converted:
   - `showBanner`, `Api`, `apiPath`, `containsFold`: consumed by `compile.js`, `diagnose.js`, `drafts.js`, `history.js`, `link_panel.js`, `links.js`, `networks.js`, `rules.js`, `sets.js`, `subnets.js`, `topology.js`, `unions.js`, `users.js` (showBanner only, not the other three).
   - `assertEditable`: `links.js`, `networks.js`, `rules.js`, `sets.js`, `subnets.js`, `topology.js`, `unions.js`.
   - `DirtyGuard`, `isReadOnly`: `topology.js`.
@@ -477,32 +474,31 @@ All 13 not-yet-converted page files keep working unchanged through the bridges; 
 +export function showBanner(message, kind) {
    window.dispatchEvent(new CustomEvent("notify", { detail: { message, kind: kind || "error" } }));
  }
-+window.showBanner = showBanner; // TODO(Task 29): remove once every classic-script consumer imports showBanner directly
++window.showBanner = showBanner; // TODO(Task 28): remove once every classic-script consumer imports showBanner directly
 
--const DirtyGuard = (() => {
-+const DirtyGuard = (() => {
+ const DirtyGuard = (() => {
    ...
    return { arm, markClean, isDirty };
  })();
-+window.DirtyGuard = DirtyGuard; // TODO(Task 29): remove once topology.js imports DirtyGuard directly
++window.DirtyGuard = DirtyGuard; // TODO(Task 28): remove once topology.js imports DirtyGuard directly
 
 -function currentDraftID() {
 +export function currentDraftID() {
    ...
  }
-+window.currentDraftID = currentDraftID; // TODO(Task 29)
++window.currentDraftID = currentDraftID; // TODO(Task 28)
 
 -function setCurrentDraftID(id) {
 +export function setCurrentDraftID(id) {
    ...
  }
-+window.setCurrentDraftID = setCurrentDraftID; // TODO(Task 29)
++window.setCurrentDraftID = setCurrentDraftID; // TODO(Task 28)
 
 -function isReadOnly() {
 +export function isReadOnly() {
    return !currentDraftID();
  }
-+window.isReadOnly = isReadOnly; // TODO(Task 29)
++window.isReadOnly = isReadOnly; // TODO(Task 28)
 
 -async function renderDraftBanner() {
 +export async function renderDraftBanner() {
@@ -513,7 +509,7 @@ All 13 not-yet-converted page files keep working unchanged through the bridges; 
 +export function apiPath(suffix) {
    ...
  }
-+window.apiPath = apiPath; // TODO(Task 29)
++window.apiPath = apiPath; // TODO(Task 28)
 
 -class ReadOnlyError extends Error {
 +export class ReadOnlyError extends Error {
@@ -524,55 +520,55 @@ All 13 not-yet-converted page files keep working unchanged through the bridges; 
 +export function assertEditable() {
    if (isReadOnly()) throw new ReadOnlyError();
  }
-+window.assertEditable = assertEditable; // TODO(Task 29)
++window.assertEditable = assertEditable; // TODO(Task 28)
 
 -function loginRedirectURL(pathname, search) {
 +export function loginRedirectURL(pathname, search) {
    ...
  }
-+window.loginRedirectURL = loginRedirectURL; // TODO(Task 29)
++window.loginRedirectURL = loginRedirectURL; // TODO(Task 28)
 
 -const Api = {
 +export const Api = {
    ...
  };
-+window.Api = Api; // TODO(Task 29)
++window.Api = Api; // TODO(Task 28)
 
 -function ipv4CidrOverlap(a, b) {
 +export function ipv4CidrOverlap(a, b) {
    ...
  }
-+window.ipv4CidrOverlap = ipv4CidrOverlap; // TODO(Task 29)
++window.ipv4CidrOverlap = ipv4CidrOverlap; // TODO(Task 28)
 
 -function containsFold(s, sub) {
 +export function containsFold(s, sub) {
    return !sub || String(s || "").toLowerCase().includes(sub.toLowerCase());
  }
-+window.containsFold = containsFold; // TODO(Task 29)
++window.containsFold = containsFold; // TODO(Task 28)
 
 -function parseIPv4(s) {
 +export function parseIPv4(s) {
    ...
  }
-+window.parseIPv4 = parseIPv4; // TODO(Task 29)
++window.parseIPv4 = parseIPv4; // TODO(Task 28)
 
 -function parsePrefix(s) {
 +export function parsePrefix(s) {
    ...
  }
-+window.parsePrefix = parsePrefix; // TODO(Task 29)
++window.parsePrefix = parsePrefix; // TODO(Task 28)
 
 -function parseQueryPrefix(q) {
 +export function parseQueryPrefix(q) {
    ...
  }
-+window.parseQueryPrefix = parseQueryPrefix; // TODO(Task 29)
++window.parseQueryPrefix = parseQueryPrefix; // TODO(Task 28)
 
 -function formatIPv4(n) {
 +export function formatIPv4(n) {
    return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
  }
-+window.formatIPv4 = formatIPv4; // TODO(Task 29)
++window.formatIPv4 = formatIPv4; // TODO(Task 28)
 
 -const prefixContains = (p, addr) => (addr & p.mask) === p.base;
 -const prefixOverlap = (a, b) => {
@@ -581,20 +577,20 @@ All 13 not-yet-converted page files keep working unchanged through the bridges; 
    const common = a.mask & b.mask;
    return (a.base & common) === (b.base & common);
  };
-+window.prefixContains = prefixContains; // TODO(Task 29)
-+window.prefixOverlap = prefixOverlap; // TODO(Task 29)
++window.prefixContains = prefixContains; // TODO(Task 28)
++window.prefixOverlap = prefixOverlap; // TODO(Task 28)
 
 -function matchPrefixQuery(entries, q) {
 +export function matchPrefixQuery(entries, q) {
    ...
  }
-+window.matchPrefixQuery = matchPrefixQuery; // TODO(Task 29)
++window.matchPrefixQuery = matchPrefixQuery; // TODO(Task 28)
 
 -function matchSubnetMembers(subnets, cidrOf, q) {
 +export function matchSubnetMembers(subnets, cidrOf, q) {
    return matchPrefixQuery([...names, ...names.map((s) => cidrOf(s))], q);
  }
-+window.matchSubnetMembers = matchSubnetMembers; // TODO(Task 29)
++window.matchSubnetMembers = matchSubnetMembers; // TODO(Task 28)
 
 -async function buildNav(active) {
 +export async function buildNav(active) {
@@ -770,14 +766,13 @@ git commit -m "refactor(web): convert common.js to an ES module, reorder alpine.
 - Test: `internal/httpapi/web/netmap.test.js`
 
 **Interfaces:**
-- Produces: `export const NetMap` — `{ DEVICE_W, DEVICE_H, NET_W, NET_H, UNION_COLORS, KINDS, center, linkOffsets, spreadOffset, pointAt, insertIndex, cloudSegs }` (unchanged shape). `window.NetMap` bridge added (removed Task 29) — needed because `topo_scene.js` (Task 13) destructures `NetMap` at its own top level (`const { DEVICE_W, ... } = NetMap;` on line 9, before any function), and `topo_scene.js`'s `<script>` tag does not flip to module until Task 13. Since `netmap.js`'s tag flips to module now, and `topo_scene.js` stays classic non-deferred until Task 13, `topo_scene.js` running before `netmap.js` executes is exactly the hazard: the bridge (`window.NetMap`) covers it because `netmap.js`, though deferred, still runs before the DOMContentLoaded/boot() sequence that would need it — but `topo_scene.js`'s own top-level destructure runs at parse time, immediately, which is *before* any deferred script including `netmap.js`. This means the bridge alone is not sufficient for `topo_scene.js` specifically until `topo_scene.js`'s own tag also becomes `type="module"` at Task 13 — tracked there, not here (this task cannot pre-empt Task 13's own HTML edit since `topo_scene.js` is not yet touched by this task).
+- Produces: `export const NetMap` — `{ DEVICE_W, DEVICE_H, NET_W, NET_H, UNION_COLORS, KINDS, center, linkOffsets, spreadOffset, pointAt, insertIndex, cloudSegs }` (unchanged shape). `window.NetMap` bridge added (removed Task 28) — needed because `topo_scene.js` (Task 13) destructures `NetMap` at its own top level (`const { DEVICE_W, ... } = NetMap;` on line 9, before any function), and `topo_scene.js`'s `<script>` tag does not flip to module until Task 13. Since `netmap.js`'s tag flips to module now, and `topo_scene.js` stays classic non-deferred until Task 13, `topo_scene.js` running before `netmap.js` executes is exactly the hazard: the bridge (`window.NetMap`) covers it because `netmap.js`, though deferred, still runs before the DOMContentLoaded/boot() sequence that would need it — but `topo_scene.js`'s own top-level destructure runs at parse time, immediately, which is *before* any deferred script including `netmap.js`. This means the bridge alone is not sufficient for `topo_scene.js` specifically until `topo_scene.js`'s own tag also becomes `type="module"` at Task 13 — tracked there, not here (this task cannot pre-empt Task 13's own HTML edit since `topo_scene.js` is not yet touched by this task).
 
 - [ ] **Step 1: Add `export` and the `window` bridge**
 
 `internal/httpapi/web/netmap.js`:
 ```diff
--const NetMap = (() => {
-+const NetMap = (() => {
+ const NetMap = (() => {
    const DEVICE_W = 140;
    ...
    return Object.freeze({
@@ -787,7 +782,7 @@ git commit -m "refactor(web): convert common.js to an ES module, reorder alpine.
  })();
 +
 +export { NetMap };
-+window.NetMap = NetMap; // TODO(Task 29): remove once every classic-script consumer imports NetMap directly
++window.NetMap = NetMap; // TODO(Task 28): remove once every classic-script consumer imports NetMap directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -848,14 +843,13 @@ git commit -m "refactor(web): convert netmap.js to an ES module"
 - Test: `internal/httpapi/web/canvas_view.test.js`
 
 **Interfaces:**
-- Produces: `export const CanvasView` — `{ create }` (unchanged shape). `window.CanvasView` bridge added (removed Task 29) — `diagnose.js`/`topology.js` call `CanvasView.create(...)` only inside `boot()` (verified lines 851/1319), no top-level hazard.
+- Produces: `export const CanvasView` — `{ create }` (unchanged shape). `window.CanvasView` bridge added (removed Task 28) — `diagnose.js`/`topology.js` call `CanvasView.create(...)` only inside `boot()` (verified lines 851/1319), no top-level hazard.
 
 - [ ] **Step 1: Add `export`, drop the dead CommonJS interop line, add the bridge**
 
 `internal/httpapi/web/canvas_view.js`:
 ```diff
--const CanvasView = (() => {
-+const CanvasView = (() => {
+ const CanvasView = (() => {
    const raf = ...
    ...
    return Object.freeze({ create });
@@ -864,7 +858,7 @@ git commit -m "refactor(web): convert netmap.js to an ES module"
 -if (typeof module !== "undefined") module.exports = CanvasView;
 +
 +export { CanvasView };
-+window.CanvasView = CanvasView; // TODO(Task 29): remove once every classic-script consumer imports CanvasView directly
++window.CanvasView = CanvasView; // TODO(Task 28): remove once every classic-script consumer imports CanvasView directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -953,14 +947,13 @@ git commit -m "refactor(web): convert canvas_view.js to an ES module"
 - Test: `internal/httpapi/web/camera_input.test.js`
 
 **Interfaces:**
-- Produces: `export const CameraControls` — `{ wire }` (unchanged shape). `window.CameraControls` bridge added (removed Task 29) — `diagnose.js`/`topology.js` call `CameraControls.wire(...)` only inside `boot()` (lines 825/364), no top-level hazard. `camera_input.js` itself reads `Camera.zoomAt(...)` at line 35, inside the nested `schedule` function — bare global read, resolved via `window.Camera` (bridge set by Task 2), no import needed since this task keeps the file's internals otherwise unchanged.
+- Produces: `export const CameraControls` — `{ wire }` (unchanged shape). `window.CameraControls` bridge added (removed Task 28) — `diagnose.js`/`topology.js` call `CameraControls.wire(...)` only inside `boot()` (lines 825/364), no top-level hazard. `camera_input.js` itself reads `Camera.zoomAt(...)` at line 35, inside the nested `schedule` function — bare global read, resolved via `window.Camera` (bridge set by Task 2), no import needed since this task keeps the file's internals otherwise unchanged.
 
 - [ ] **Step 1: Add `export` and the bridge**
 
 `internal/httpapi/web/camera_input.js`:
 ```diff
--const CameraControls = (() => {
-+const CameraControls = (() => {
+ const CameraControls = (() => {
    function wire(svg, { getCam, setCam, buttons = [0, 1], onChange, onDragEnd }) {
      ...
    }
@@ -969,7 +962,7 @@ git commit -m "refactor(web): convert canvas_view.js to an ES module"
  })();
 +
 +export { CameraControls };
-+window.CameraControls = CameraControls; // TODO(Task 29): remove once every classic-script consumer imports CameraControls directly
++window.CameraControls = CameraControls; // TODO(Task 28): remove once every classic-script consumer imports CameraControls directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -1068,14 +1061,13 @@ git commit -m "refactor(web): convert camera_input.js to an ES module"
 - Test: `internal/httpapi/web/minimap.test.js`
 
 **Interfaces:**
-- Produces: `export const Minimap` — `{ layout, overflows, viewportRect, create }` (unchanged shape). `window.Minimap` bridge added (removed Task 29) — `diagnose.js`/`topology.js` call `Minimap.create(...)` only inside `boot()` (lines 857/1325), no top-level hazard. `minimap.js` itself reads `Camera.screenToWorld`/`Camera.worldToScreen` (lines 25-28, 54, 78) inside nested functions only — resolved via the `window.Camera` bridge from Task 2.
+- Produces: `export const Minimap` — `{ layout, overflows, viewportRect, create }` (unchanged shape). `window.Minimap` bridge added (removed Task 28) — `diagnose.js`/`topology.js` call `Minimap.create(...)` only inside `boot()` (lines 857/1325), no top-level hazard. `minimap.js` itself reads `Camera.screenToWorld`/`Camera.worldToScreen` (lines 25-28, 54, 78) inside nested functions only — resolved via the `window.Camera` bridge from Task 2.
 
 - [ ] **Step 1: Add `export` and the bridge**
 
 `internal/httpapi/web/minimap.js`:
 ```diff
--const Minimap = (() => {
-+const Minimap = (() => {
+ const Minimap = (() => {
    function layout(b, mw, mh, pad) {
      ...
    }
@@ -1084,7 +1076,7 @@ git commit -m "refactor(web): convert camera_input.js to an ES module"
  })();
 +
 +export { Minimap };
-+window.Minimap = Minimap; // TODO(Task 29): remove once every classic-script consumer imports Minimap directly
++window.Minimap = Minimap; // TODO(Task 28): remove once every classic-script consumer imports Minimap directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -1149,21 +1141,20 @@ git commit -m "refactor(web): convert minimap.js to an ES module"
 - Test: `internal/httpapi/web/net_info.test.js`
 
 **Interfaces:**
-- Produces: `export const NetInfo` — `{ show, hide, attach }` (unchanged shape). `window.NetInfo` bridge added (removed Task 29) — `diagnose.js`/`topology.js` call `NetInfo.show`/`NetInfo.attach` only inside functions (lines 239, 871 in diagnose.js; similar in topology.js), no top-level hazard.
+- Produces: `export const NetInfo` — `{ show, hide, attach }` (unchanged shape). `window.NetInfo` bridge added (removed Task 28) — `diagnose.js`/`topology.js` call `NetInfo.show`/`NetInfo.attach` only inside functions (lines 239, 871 in diagnose.js; similar in topology.js), no top-level hazard.
 
 - [ ] **Step 1: Add `export` and the bridge**
 
 `internal/httpapi/web/net_info.js`:
 ```diff
--const NetInfo = (() => {
-+const NetInfo = (() => {
+ const NetInfo = (() => {
    const PLACE = { w: 280, h: 90, margin: 8 };
    ...
    return Object.freeze({ show, hide, attach });
  })();
 +
 +export { NetInfo };
-+window.NetInfo = NetInfo; // TODO(Task 29): remove once every classic-script consumer imports NetInfo directly
++window.NetInfo = NetInfo; // TODO(Task 28): remove once every classic-script consumer imports NetInfo directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -1256,15 +1247,14 @@ git commit -m "refactor(web): convert net_info.js to an ES module"
 
 `internal/httpapi/web/topology_sync.js`:
 ```diff
--const TopologySync = (() => {
-+const TopologySync = (() => {
+ const TopologySync = (() => {
    const SAVING = "saving";
    ...
    return { create };
  })();
 +
 +export { TopologySync };
-+window.TopologySync = TopologySync; // TODO(Task 29): remove once topology.js imports TopologySync directly
++window.TopologySync = TopologySync; // TODO(Task 28): remove once topology.js imports TopologySync directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -1315,21 +1305,20 @@ git commit -m "refactor(web): convert topology_sync.js to an ES module"
 - Test: `internal/httpapi/web/topo_scene.test.js`
 
 **Interfaces:**
-- Produces: `export const TopoScene` — `{ ensureLayout, buildScene, bounds }` (unchanged shape). `window.TopoScene` bridge added (removed Task 29). `topo_scene.js` itself has the same top-level-destructure hazard as `diagnose.js`/`topology.js` did in Task 2 (`const { DEVICE_W, ... } = NetMap;` at line 9, the first line of its IIFE) — but its own tag flips to `type="module"` *in this same task* (not pre-emptively, unlike Task 2's special case), because nothing downstream of `topo_scene.js` reads *its* exports at top level, so there is no other file whose tag needs to move early on `topo_scene.js`'s account. The hazard this task must not reintroduce is the reverse: `topo_scene.js`'s tag must flip in the *same* task as its `export` is added, otherwise a still-classic `topo_scene.js` would run before `netmap.js`'s deferred module (converted in Task 7) sets `window.NetMap`, even with the bridge in place — since bridges fix visibility, not order, exactly as analyzed in Task 2.
+- Produces: `export const TopoScene` — `{ ensureLayout, buildScene, bounds }` (unchanged shape). `window.TopoScene` bridge added (removed Task 28). `topo_scene.js` itself has the same top-level-destructure hazard as `diagnose.js`/`topology.js` did in Task 2 (`const { DEVICE_W, ... } = NetMap;` at line 9, the first line of its IIFE) — but its own tag flips to `type="module"` *in this same task* (not pre-emptively, unlike Task 2's special case), because nothing downstream of `topo_scene.js` reads *its* exports at top level, so there is no other file whose tag needs to move early on `topo_scene.js`'s account. The hazard this task must not reintroduce is the reverse: `topo_scene.js`'s tag must flip in the *same* task as its `export` is added, otherwise a still-classic `topo_scene.js` would run before `netmap.js`'s deferred module (converted in Task 7) sets `window.NetMap`, even with the bridge in place — since bridges fix visibility, not order, exactly as analyzed in Task 2.
 
 - [ ] **Step 1: Add `export` and the bridge**
 
 `internal/httpapi/web/topo_scene.js`:
 ```diff
--const TopoScene = (() => {
-+const TopoScene = (() => {
+ const TopoScene = (() => {
    const { DEVICE_W, DEVICE_H, NET_W, NET_H, KINDS, center, linkOffsets, spreadOffset, pointAt, cloudSegs, UNION_COLORS } = NetMap;
    ...
    return Object.freeze({ ensureLayout, buildScene, bounds });
  })();
 +
 +export { TopoScene };
-+window.TopoScene = TopoScene; // TODO(Task 29): remove once every classic-script consumer imports TopoScene directly
++window.TopoScene = TopoScene; // TODO(Task 28): remove once every classic-script consumer imports TopoScene directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -1396,14 +1385,13 @@ git commit -m "refactor(web): convert topo_scene.js to an ES module"
 - Test: `internal/httpapi/web/link_panel.test.js`
 
 **Interfaces:**
-- Produces: `export const LinkPanel` — `{ show, hide, attach }` (unchanged shape). `window.LinkPanel` bridge added (removed Task 29) — only consumer is `topology.js` (Task 16), inside functions only. `link_panel.js` itself reads `showBanner` (line 240) guarded by `typeof showBanner === "function"` — already resolved via the `window.showBanner` bridge from Task 6, no change needed here.
+- Produces: `export const LinkPanel` — `{ show, hide, attach }` (unchanged shape). `window.LinkPanel` bridge added (removed Task 28) — only consumer is `topology.js` (Task 16), inside functions only. `link_panel.js` itself reads `showBanner` (line 240) guarded by `typeof showBanner === "function"` — already resolved via the `window.showBanner` bridge from Task 6, no change needed here.
 
 - [ ] **Step 1: Add `export`, drop the dead CommonJS interop line, add the bridge**
 
 `internal/httpapi/web/link_panel.js`:
 ```diff
--const LinkPanel = (() => {
-+const LinkPanel = (() => {
+ const LinkPanel = (() => {
    const PLACE = { w: 380, h: 320, margin: 8 };
    ...
    return Object.freeze({ show, hide, attach });
@@ -1412,7 +1400,7 @@ git commit -m "refactor(web): convert topo_scene.js to an ES module"
 -if (typeof module !== "undefined") module.exports = LinkPanel;
 +
 +export { LinkPanel };
-+window.LinkPanel = LinkPanel; // TODO(Task 29): remove once topology.js imports LinkPanel directly
++window.LinkPanel = LinkPanel; // TODO(Task 28): remove once topology.js imports LinkPanel directly
 ```
 
 - [ ] **Step 2: Rewrite the test loader to `import()`**
@@ -1489,8 +1477,7 @@ git commit -m "refactor(web): convert link_panel.js to an ES module"
  // Diagnose — карта топологии на canvas с подсветкой путей и отчёт
  // диагностики трафика (POST /api/diagnose). Карта только для чтения:
  // перетаскивание узлов и правка — на /ui/topology.
--const Diagnose = (() => {
-+const Diagnose = (() => {
+ const Diagnose = (() => {
    const { DEVICE_W, DEVICE_H, NET_W, NET_H } = NetMap;
    ...
    return {
@@ -1593,7 +1580,7 @@ git commit -m "refactor(web): convert diagnose.js to an ES module, collapse diag
 - Consumes: `NetMap` (`./netmap.js`), `Camera` (`./camera.js`), `CameraControls` (`./camera_input.js`), `CanvasTheme` (`./canvas_theme.js`), `CanvasView` (`./canvas_view.js`), `HitTest` (`./hit_test.js`), `Minimap` (`./minimap.js`), `NetInfo` (`./net_info.js`), `LinkPanel` (`./link_panel.js`), `TopoScene` (`./topo_scene.js`), `Tween` (`./tween.js`), `TopologySync` (`./topology_sync.js`), `Api`, `showBanner`, `apiPath`, `assertEditable`, `DirtyGuard`, `currentDraftID`, `isReadOnly`, `containsFold` (`./common.js`).
 - Produces: `export const Topology` — unchanged shape (`{ render, boot }`); `export const State` — the module-level mutable state object, needed by `topology_render.test.js`/`topology_search.test.js`'s `get("State...")` expressions.
 
-This is the last consumer of every Phase 1-3 bridge except `showBanner`/`Api`/`apiPath`/`assertEditable`/`containsFold` (still used by the remaining 11 CRUD/simple pages) — Task 29 removes the `Camera`, `NetMap`, `CameraControls`, `CanvasTheme`, `CanvasView`, `HitTest`, `Minimap`, `NetInfo`, `LinkPanel`, `TopoScene`, `Tween`, `TopologySync`, `DirtyGuard`, `isReadOnly`, `currentDraftID` (partially — `drafts.js` still needs it until Task 23) bridges once this task lands.
+This is the last consumer of every Phase 1-3 bridge except `showBanner`/`Api`/`apiPath`/`assertEditable`/`containsFold` (still used by the remaining 11 CRUD/simple pages) — Task 28 removes the `Camera`, `NetMap`, `CameraControls`, `CanvasTheme`, `CanvasView`, `HitTest`, `Minimap`, `NetInfo`, `LinkPanel`, `TopoScene`, `Tween`, `TopologySync`, `DirtyGuard`, `isReadOnly`, `currentDraftID` (partially — `drafts.js` still needs it until Task 23) bridges once this task lands.
 
 - [ ] **Step 1: Add the `import` block and exports to `topology.js`**
 
@@ -2344,11 +2331,11 @@ Every page `.js` file now imports what it needs directly (Tasks 15-27) — no fi
 
 - [ ] **Step 1: Verify no bare-global reads remain**
 
-Run, for each name above: `command grep -rn "\b<Name>\b" internal/httpapi/web/*.js | command grep -v "\.test\.js\|import \|export \|window\.<Name> =\|// TODO(Task 29)"` — expect no output (every remaining occurrence should be inside its own defining file's `export`/module-scope, not a bare cross-file read). Example for `Camera`: `command grep -n "\bCamera\b" internal/httpapi/web/diagnose.js internal/httpapi/web/topology.js` should show only the `import { Camera } from "./camera.js";` line and calls that resolve through it.
+Run, for each name above: `command grep -rn "\b<Name>\b" internal/httpapi/web/*.js | command grep -v "\.test\.js\|import \|export \|window\.<Name> =\|// TODO(Task 28)"` — expect no output (every remaining occurrence should be inside its own defining file's `export`/module-scope, not a bare cross-file read). Example for `Camera`: `command grep -n "\bCamera\b" internal/httpapi/web/diagnose.js internal/httpapi/web/topology.js` should show only the `import { Camera } from "./camera.js";` line and calls that resolve through it.
 
-- [ ] **Step 2: Delete every `window.X = X; // TODO(Task 29): ...` line**
+- [ ] **Step 2: Delete every `window.X = X; // TODO(Task 28): ...` line**
 
-Remove the one-line bridge assignment (and its trailing `// TODO(Task 29)` comment) added in Tasks 1-14 from: `tween.js`, `camera.js`, `canvas_theme.js`, `hit_test.js`, `columns.js` (both `makeColumnsResizable`/`initializeColumns` lines), `common.js` (every bridge except `window.appData = appData;`, which stays permanently with its comment updated to drop the `Task 29` reference since it is no longer a TODO):
+Remove the one-line bridge assignment (and its trailing `// TODO(Task 28)` comment) added in Tasks 1-14 from: `tween.js`, `camera.js`, `canvas_theme.js`, `hit_test.js`, `columns.js` (both `makeColumnsResizable`/`initializeColumns` lines), `common.js` (every bridge except `window.appData = appData;`, which stays permanently with its comment updated to drop the `Task 28` reference since it is no longer a TODO):
 ```diff
 -window.appData = appData; // permanent: Alpine evaluates x-data="appData()" against the global scope
 +window.appData = appData; // Alpine evaluates x-data="appData()" against the global scope; this stays forever, not a migration leftover
