@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -33,13 +34,13 @@ func TestLoadLegacyProjectDocMissingFilesYieldsDefaults(t *testing.T) {
 
 func TestLoadLegacyProjectDocReadsExistingFiles(t *testing.T) {
 	store := testLegacyStore(t)
-	if err := store.WriteTopology([]byte("devices:\n  - {name: r1, kind: router}\nlinks: []\nnetworks: []\nsets: []\nunions: []\n")); err != nil {
+	if err := os.WriteFile(store.TopologyPath, []byte("devices:\n  - {name: r1, kind: router}\nlinks: []\nnetworks: []\nsets: []\nunions: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteSubnets([]byte("subnets:\n  - {name: office, cidr: 10.0.0.0/24}\n")); err != nil {
+	if err := os.WriteFile(store.SubnetsPath, []byte("subnets:\n  - {name: office, cidr: 10.0.0.0/24}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteRules([]byte("defaultAction: deny\nrules: []\n")); err != nil {
+	if err := os.WriteFile(store.RulesPath, []byte("defaultAction: deny\nrules: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,7 +58,7 @@ func TestLoadLegacyProjectDocReadsExistingFiles(t *testing.T) {
 
 func TestLoadLegacyProjectDocNormalizesFlatRulesFile(t *testing.T) {
 	store := testLegacyStore(t)
-	if err := store.WriteRules([]byte("defaultAction: deny\nchainName: OLD\nrules: []\n")); err != nil {
+	if err := os.WriteFile(store.RulesPath, []byte("defaultAction: deny\nchainName: OLD\nrules: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
