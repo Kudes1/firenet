@@ -34,3 +34,6 @@ const Camera = (() => {
 
   return { MIN_ZOOM, MAX_ZOOM, create, zoomAt, screenToWorld, worldToScreen, fitView };
 })();
+
+export { Camera };
+if (typeof window !== "undefined") window.Camera = Camera; // TODO(Task 28): remove once every classic-script consumer imports Camera directly
