@@ -2,11 +2,9 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
-function bootPage(failPut = false) {
+async function bootPage(failPut = false) {
   const factories = {};
   const calls = [];
   const banners = [];
@@ -25,55 +23,46 @@ function bootPage(failPut = false) {
     sets: [],
     unions: [],
   };
-  const sandbox = {
-    document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
-    window: { dispatchEvent: notify },
-    localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = v; },
-      removeItem: (k) => { delete store[k]; },
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
-    dispatchEvent: notify,
-    confirm: () => true,
-    setTimeout,
-    clearTimeout,
-    console,
-    fetch: async (path_, opts) => {
-      calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
-      if (path_ === "/api/drafts/d1/topology") {
-        if (failPut && opts?.method === "PUT") return { ok: false, status: 422, json: async () => ({ error: "x" }) };
-        return { ok: true, status: 200, json: async () => calls.find((c) => c.method === "PUT")?.body || topoFixture };
-      }
-      if (path_ === "/api/drafts/d1/subnets") {
-        return { ok: true, status: 200, json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }] }) };
-      }
-      if (path_?.startsWith("/api/drafts/d1/link-exports")) {
-        const q = new URLSearchParams(path_.split("?")[1]);
-        const i = Number(q.get("link"));
-        if (failPut && i === 0) return { ok: false, status: 500, json: async () => ({ error: "x" }) };
-        // Reachability with the edited link excluded from the fixture
-        // topology: link m-o removed leaves plain m-d, and vice versa.
-        const side = q.get("side");
-        const na = [{ name: "NA" }, { name: "a", cidr: "10.0.0.0/24" }];
-        const entities = i === 0
-          ? side === "a" ? na : [{ name: "NB" }, { name: "b" }]
-          : side === "a"
-            ? [...na, { name: "NB" }, { name: "b" }]
-            : [{ name: "NC" }, { name: "c" }];
-        return { ok: true, status: 200, json: async () => ({ entities }) };
-      }
-      return { ok: false, status: 404, json: async () => ({}) };
-    },
-    Alpine: { data: (name, factory) => (factories[name] = factory) },
+  global.document = { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) };
+  global.window = { dispatchEvent: notify };
+  global.localStorage = { getItem: () => null, setItem() {} };
+  global.sessionStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of ["common.js", "links.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } };
+  global.confirm = () => true;
+  global.fetch = async (path_, opts) => {
+    calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
+    if (path_ === "/api/drafts/d1/topology") {
+      if (failPut && opts?.method === "PUT") return { ok: false, status: 422, json: async () => ({ error: "x" }) };
+      return { ok: true, status: 200, json: async () => calls.find((c) => c.method === "PUT")?.body || topoFixture };
+    }
+    if (path_ === "/api/drafts/d1/subnets") {
+      return { ok: true, status: 200, json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }] }) };
+    }
+    if (path_?.startsWith("/api/drafts/d1/link-exports")) {
+      const q = new URLSearchParams(path_.split("?")[1]);
+      const i = Number(q.get("link"));
+      if (failPut && i === 0) return { ok: false, status: 500, json: async () => ({ error: "x" }) };
+      // Reachability with the edited link excluded from the fixture
+      // topology: link m-o removed leaves plain m-d, and vice versa.
+      const side = q.get("side");
+      const na = [{ name: "NA" }, { name: "a", cidr: "10.0.0.0/24" }];
+      const entities = i === 0
+        ? side === "a" ? na : [{ name: "NB" }, { name: "b" }]
+        : side === "a"
+          ? [...na, { name: "NB" }, { name: "b" }]
+          : [{ name: "NC" }, { name: "c" }];
+      return { ok: true, status: 200, json: async () => ({ entities }) };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  global.Alpine = { data: (name, factory) => (factories[name] = factory) };
+  // cache-busting: links.js регистрирует alpine:init при каждом импорте
+  await import(path.join(__dirname, "links.js") + `?t=${Date.now()}-${Math.random()}`);
   (docListeners["alpine:init"] || []).forEach((fn) => fn());
   const page = factories.linksPage();
   page.$nextTick = (fn) => fn();
@@ -82,7 +71,7 @@ function bootPage(failPut = false) {
 }
 
 async function bootLoadedPage(failPut = false) {
-  const ctx = bootPage(failPut);
+  const ctx = await bootPage(failPut);
   await ctx.page.init();
   return ctx;
 }

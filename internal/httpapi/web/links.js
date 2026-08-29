@@ -1,5 +1,7 @@
 "use strict";
 
+import { Api, showBanner, apiPath, assertEditable, containsFold, matchSubnetMembers } from "./common.js";
+
 // Links page: table over topology.yaml links. A regular link can convert
 // to a filtered one (per-side export lists of networks/subnets) and back.
 // The canvas creates plain links only; conversion lives here. The server
