@@ -4,9 +4,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 function makeEl(tag) {
   const el = {
@@ -35,17 +33,17 @@ const fire = (target, type, ev) => {
   (target.listeners[type] || []).forEach((fn) => fn(ev));
 };
 
-function boot() {
-  const doc = makeEl("#document");
-  const sandbox = { document: doc };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of ["camera.js", "camera_input.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
-  const svg = makeEl("svg");
-  const Controls = vm.runInContext("CameraControls", sandbox);
-  let cam = { x: 0, y: 0, z: 1 };
+(async () => {
+  // camera_input.js читает Camera как bare global (zoomAt внутри schedule)
+  const { Camera } = await import(path.join(__dirname, "camera.js"));
+  global.Camera = Camera;
+  const { CameraControls: Controls } = await import(path.join(__dirname, "camera_input.js"));
+
+  function boot() {
+    const doc = makeEl("#document");
+    global.document = doc;
+    const svg = makeEl("svg");
+    let cam = { x: 0, y: 0, z: 1 };
   const wire = (buttons, opts = {}) => Controls.wire(svg, {
     getCam: () => cam,
     setCam: (c) => { cam = c; },
@@ -57,13 +55,14 @@ function boot() {
 
 // Координаты указателя берутся из прямоугольника холста: зум и пан
 // считаются относительно него, а не окна.
-test("pan applies the pointer delta relative to the canvas rect", () => {
-  const { doc, svg, wire, cam } = boot();
-  svg.getBoundingClientRect = () => ({ left: -100, top: -200, width: 1200, height: 800 });
-  wire([1, 2]);
-  fire(svg, "mousedown", { button: 2, clientX: 125, clientY: 150 });
-  fire(doc, "mousemove", { clientX: 175, clientY: 180 });
-  fire(doc, "mouseup", {});
-  const c = cam();
-  assert.deepEqual({ x: c.x, y: c.y, z: c.z }, { x: 50, y: 30, z: 1 }, "pan by pointer delta relative to the rect");
-});
+  test("pan applies the pointer delta relative to the canvas rect", () => {
+    const { doc, svg, wire, cam } = boot();
+    svg.getBoundingClientRect = () => ({ left: -100, top: -200, width: 1200, height: 800 });
+    wire([1, 2]);
+    fire(svg, "mousedown", { button: 2, clientX: 125, clientY: 150 });
+    fire(doc, "mousemove", { clientX: 175, clientY: 180 });
+    fire(doc, "mouseup", {});
+    const c = cam();
+    assert.deepEqual({ x: c.x, y: c.y, z: c.z }, { x: 50, y: 30, z: 1 }, "pan by pointer delta relative to the rect");
+  });
+})();

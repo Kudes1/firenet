@@ -85,3 +85,6 @@ const CameraControls = (() => {
 
   return Object.freeze({ wire });
 })();
+
+export { CameraControls };
+globalThis.CameraControls = CameraControls; // TODO(Task 28): remove once every classic-script consumer imports CameraControls directly
