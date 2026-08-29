@@ -20,6 +20,7 @@ function makeEl(tag) {
       setProperty(k, v) { this[k] = v; },
       getPropertyValue(k) { return this[k] ?? null; },
     },
+    value: "",
     setAttribute(k, v) { this.attrs[k] = v; },
     getAttribute(k) { return this.attrs[k]; },
     append(...cs) { this.children.push(...cs); },
@@ -27,6 +28,7 @@ function makeEl(tag) {
     appendChild(c) { this.children.push(c); return c; },
     remove() {},
     focus() {},
+    contains(o) { return o === el || (el.children || []).some((c) => c.contains && c.contains(o)); },
     getBoundingClientRect() { return { left: 0, top: 0, width: 1200, height: 800 }; },
     addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); },
     removeEventListener(t, fn) {
@@ -1009,12 +1011,102 @@ const spreadResponses = {
   },
 };
 
-test("the source datalist lists every network and subnet name", async () => {
+test("spread combobox lists every network and subnet name with its CIDR", async () => {
   const { ids, frames } = bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
-  const names = ids["spread-sources"].children.map((o) => o.value).sort();
-  assert.deepEqual(names, ["BRANCH", "DMZ", "MAIN", "OFFICE", "branch-net", "dmz", "main", "office-net"]);
+  const names = ids["spread-suggestions"].children.map((o) => o.textContent).sort();
+  assert.deepEqual(names, [
+    "BRANCH", "DMZ", "MAIN", "OFFICE",
+    "branch-net (10.0.3.0/24)", "dmz (10.0.2.0/24)", "main (10.0.0.0/24)", "office-net (10.0.1.0/24)",
+  ]);
+});
+
+test("spread combobox typing filters options by name and a pick fills the input", async () => {
+  const { ids, frames } = bootDiagnose(spreadResponses);
+  await tick();
+  await frames(1);
+  const input = ids["spread-src"];
+  input.value = "off";
+  fire(input, "input", {});
+  const names = ids["spread-suggestions"].children.map((o) => o.textContent).sort();
+  assert.deepEqual(names, ["OFFICE", "office-net (10.0.1.0/24)"], "options narrow to the typed prefix");
+  assert.equal(ids["spread-suggestions"].hidden, false, "list opens while typing");
+  fire(ids["spread-suggestions"].children[0], "mousedown", {});
+  assert.equal(input.value, "OFFICE", "picking fills the input");
+  assert.equal(ids["spread-suggestions"].hidden, true, "list closes after a pick");
+});
+
+test("spread combobox filters subnets by IP and CIDR substring", async () => {
+  const { ids, frames } = bootDiagnose(spreadResponses);
+  await tick();
+  await frames(1);
+  const input = ids["spread-src"];
+  input.value = "10.0.1";
+  fire(input, "input", {});
+  let names = ids["spread-suggestions"].children.map((o) => o.textContent).sort();
+  assert.deepEqual(names, ["office-net (10.0.1.0/24)"], "CIDR substring narrows to the owning subnet");
+  input.value = "10.10.10.1";
+  fire(input, "input", {});
+  const empty = ids["spread-suggestions"].children.map((o) => o.textContent);
+  assert.deepEqual(empty, ["Ничего не найдено"], "an address outside every subnet matches nothing");
+});
+
+test("spread combobox matches a network whose subnet contains a typed IP", async () => {
+  const { ids, frames } = bootDiagnose(spreadResponses);
+  await tick();
+  await frames(1);
+  const input = ids["spread-src"];
+  input.value = "10.0.2.7";
+  fire(input, "input", {});
+  const names = ids["spread-suggestions"].children.map((o) => o.textContent).sort();
+  assert.deepEqual(names, ["dmz (10.0.2.0/24)"], "full IP resolves to the subnet that contains it");
+});
+
+test("spread combobox toggle shows and hides the options list", async () => {
+  const { ids, frames } = bootDiagnose(spreadResponses);
+  await tick();
+  await frames(1);
+  assert.equal(ids["spread-suggestions"].hidden, true);
+  fire(ids["spread-toggle"], "click", {});
+  assert.equal(ids["spread-suggestions"].hidden, false);
+  assert.equal(ids["spread-suggestions"].style.position, "fixed", "list escapes the panel body so it cannot scroll");
+  assert.ok(ids["spread-toggle"].classList.contains("open"));
+  fire(ids["spread-toggle"], "click", {});
+  assert.equal(ids["spread-suggestions"].hidden, true);
+});
+
+test("spread combobox arrow keys move the cursor and enter picks the highlighted option", async () => {
+  const { ids, frames } = bootDiagnose(spreadResponses);
+  await tick();
+  await frames(1);
+  const input = ids["spread-src"];
+  fire(input, "focus", {});
+  fire(input, "keydown", { key: "ArrowDown", preventDefault: () => {} });
+  assert.equal(ids["spread-suggestions"].hidden, false, "arrow opens the closed list");
+  fire(input, "keydown", { key: "Enter", preventDefault: () => {} });
+  assert.equal(input.value, "OFFICE", "enter picks the highlighted second option");
+});
+
+test("spread clear button empties the field and clicking outside closes the list", async () => {
+  const { ids, frames, doc } = bootDiagnose(spreadResponses);
+  await tick();
+  await frames(1);
+  const input = ids["spread-src"];
+  input.value = "main";
+  fire(input, "input", {});
+  assert.equal(ids["spread-clear"].hidden, false, "clear button appears when the field is filled");
+  assert.equal(ids["spread-suggestions"].hidden, false, "typing opens the list");
+  fire(ids["spread-clear"], "click", {});
+  assert.equal(input.value, "");
+  assert.equal(ids["spread-clear"].hidden, true, "clear button hides when the field is empty");
+  assert.equal(ids["spread-suggestions"].hidden, false, "clearing keeps the list open for a fresh choice");
+  fire(ids["spread-toggle"], "click", {});
+  assert.equal(ids["spread-suggestions"].hidden, true, "toggle closes the open list");
+  fire(ids["spread-toggle"], "click", {});
+  assert.equal(ids["spread-suggestions"].hidden, false, "toggle reopens the list");
+  fire(doc, "click", { target: doc.body });
+  assert.equal(ids["spread-suggestions"].hidden, true, "click outside closes the list");
 });
 
 test("spread panel starts closed while the path panel starts open", async () => {

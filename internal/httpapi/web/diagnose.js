@@ -9,6 +9,7 @@ const Diagnose = (() => {
     topology: null, subnets: [], layout: null, camera: Camera.create(), result: null,
     list: [], // display list канвы (TopoScene.buildScene)
     hl: null, flow: null, flowFade: 0, // разметка потока и прогресс её проявления
+    spreadOpen: false, spreadCursor: 0, spreadOptions: [], // комбобокс «Источник» распространения
   };
   let theme = null, view = null, minimap = null;
 
@@ -270,7 +271,7 @@ const Diagnose = (() => {
     requestAnimationFrame(step);
   }
 
-  const setCam = (c) => { state.camera = c; view.invalidate(); minimap.update(); panels.forEach((p) => p.position()); };
+  const setCam = (c) => { state.camera = c; view.invalidate(); minimap.update(); panels.forEach((p) => p.position()); if (state.spreadOpen) setSpreadOpen(false); };
 
   // flyCam плавно ведёт камеру к цели (кнопка «вписать карту»)
   function flyCam(to, ms = 250) {
@@ -599,16 +600,155 @@ const Diagnose = (() => {
     }
   }
 
-  // fillSpreadSources заполняет datalist поля «Источник» именами всех сетей
-  // и подсетей топологии — подсказка для инструмента распространения.
+  // fillSpreadSources собирает сети и подсети топологии — опции комбобокса
+  // поля «Источник» инструмента распространения. Подсети несут свой CIDR
+  // (в строке подсказки и для поиска по адресам), сети — только имя.
   function fillSpreadSources() {
-    const dl = document.getElementById("spread-sources");
-    dl.innerHTML = "";
-    [...state.topology.networks.map((n) => n.name), ...state.subnets.map((s) => s.name)].forEach((name) => {
-      const opt = document.createElement("option");
-      opt.value = name;
-      dl.append(opt);
+    state.spreadOptions = [
+      ...state.topology.networks.map((n) => ({ name: n.name, cidr: null })),
+      ...state.subnets.map((s) => ({ name: s.name, cidr: s.cidr || null })),
+    ];
+    renderSpreadSuggestions();
+  }
+
+  const parseV4 = (s) => {
+    const p = String(s).split(".").map(Number);
+    return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
+      ? (((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0) : null;
+  };
+
+  // ipInCidr true, если q — полный IPv4-адрес, попадающий в префикс cidr.
+  function ipInCidr(q, cidr) {
+    const ip = parseV4(q);
+    if (ip === null) return false;
+    const [addr, bits] = String(cidr).split("/");
+    const base = parseV4(addr);
+    if (base === null || !bits || +bits < 0 || +bits > 32) return false;
+    const mask = (~0 << (32 - +bits)) >>> 0;
+    return (ip & mask) === (base & mask);
+  }
+
+  // optionMatches проверяет опцию комбобокса на запрос: имя-подстрока, либо
+  // для подсети — подстрока её CIDR или попадание полного IP внутрь неё.
+  function optionMatches(opt, q) {
+    if (opt.name.toLowerCase().includes(q)) return true;
+    return !!opt.cidr && (opt.cidr.toLowerCase().includes(q) || ipInCidr(q, opt.cidr));
+  }
+
+  // visibleSpreadOptions отдаёт опции, подходящие под текущее значение поля
+  // «Источник»: подстрока имени или CIDR, либо ввод полного IP, которому
+  // принадлежит подсеть. Сеть показывается, если совпала её имя или имя
+  // одной из её подсетей (опции сетей не имеют cidr — см. fillSpreadSources).
+  function visibleSpreadOptions() {
+    const q = document.getElementById("spread-src").value.trim().toLowerCase();
+    return state.spreadOptions.filter((o) => !q || optionMatches(o, q));
+  }
+
+  // setSpreadOpen показывает/прячет список подсказок и синхронизирует поворот
+  // стрелки-кнопки соседнего комбобокса. Список позиционируется fixed по
+  // координатам поля в момент открытия: он выпадает за пределы плавающего
+  // окна (слой .diag-panel-body скроллится), поэтому абсолютное
+  // позиционирование внутри окна давало бы полосу прокрутки.
+  function setSpreadOpen(open) {
+    state.spreadOpen = open;
+    const list = document.getElementById("spread-suggestions");
+    document.getElementById("spread-toggle").classList.toggle("open", open);
+    if (open) {
+      const combo = document.getElementById("spread-combo");
+      const rect = combo.getBoundingClientRect();
+      const vh = window.innerHeight || 0;
+      const avail = Math.max(80, vh - rect.bottom - 8);
+      list.style.position = "fixed";
+      list.style.left = `${rect.left}px`;
+      list.style.width = `${rect.width}px`;
+      list.style.top = `${rect.bottom}px`;
+      list.style.maxHeight = `${Math.min(220, avail)}px`;
+    }
+    list.hidden = !open;
+  }
+
+  // renderSpreadSuggestions перерисовывает список подсказок под текущий фильтр.
+  // Выбор оформляется кнопкой: mousedown (не click) предотвращает потерю фокуса
+  // инпутом до обработки выбора. Подсеть подписывается своим CIDR — так по
+  // введённому IP видно сеть, которой адрес принадлежит.
+  function renderSpreadSuggestions() {
+    const list = document.getElementById("spread-suggestions");
+    const options = visibleSpreadOptions();
+    if (state.spreadCursor >= options.length) state.spreadCursor = Math.max(0, options.length - 1);
+    list.innerHTML = "";
+    options.forEach((opt, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "member-suggestion" + (i === state.spreadCursor ? " active" : "");
+      btn.textContent = opt.cidr ? `${opt.name} (${opt.cidr})` : opt.name;
+      btn.addEventListener("mousedown", (ev) => { ev.preventDefault(); pickSpread(opt.name); });
+      list.append(btn);
     });
+    if (!options.length) {
+      const hint = document.createElement("p");
+      hint.className = "hint member-empty";
+      hint.textContent = "Ничего не найдено";
+      list.append(hint);
+    }
+  }
+
+  // pickSpread выбирает имя из выпадающего списка в поле «Источник».
+  function pickSpread(name) {
+    const input = document.getElementById("spread-src");
+    input.value = name;
+    input.focus();
+    setSpreadOpen(false);
+  }
+
+  // wireSpreadCombo включает комбобокс поля «Источник» распространения:
+  // открытие по фокусу/клику/вводу, навигация стрелками, выбор по Enter,
+  // Esc и клик мимо закрывают список, кнопка-стрелка сворачивает, крестик
+  // очищает поле.
+  function wireSpreadCombo() {
+    const input = document.getElementById("spread-src");
+    const clear = document.getElementById("spread-clear");
+    document.getElementById("spread-toggle").addEventListener("click", () => setSpreadOpen(!state.spreadOpen));
+    clear.addEventListener("click", () => {
+      input.value = "";
+      state.spreadCursor = 0;
+      clear.hidden = true;
+      input.focus();
+      setSpreadOpen(true);
+      renderSpreadSuggestions();
+    });
+    input.addEventListener("focus", () => setSpreadOpen(true));
+    input.addEventListener("click", () => setSpreadOpen(true));
+    input.addEventListener("input", () => {
+      state.spreadCursor = 0;
+      clear.hidden = !input.value;
+      setSpreadOpen(true);
+      renderSpreadSuggestions();
+    });
+    input.addEventListener("keydown", (ev) => {
+      const options = visibleSpreadOptions();
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        if (!state.spreadOpen) setSpreadOpen(true);
+        else {
+          const max = Math.max(0, options.length - 1);
+          state.spreadCursor = Math.min(Math.max(state.spreadCursor + (ev.key === "ArrowDown" ? 1 : -1), 0), max);
+          renderSpreadSuggestions();
+        }
+      } else if (ev.key === "Enter" && state.spreadOpen && options[state.spreadCursor]) {
+        ev.preventDefault();
+        pickSpread(options[state.spreadCursor].name);
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        setSpreadOpen(false);
+      }
+    });
+    document.addEventListener("click", (ev) => {
+      if (!document.getElementById("spread-combo").contains(ev.target)) setSpreadOpen(false);
+    });
+    // перетаскивание окна уносит поле с собой, а fixed-список остался бы на
+    // старых экранных координатах — закрываем его на начале движения заголовка.
+    document.getElementById("spread-panel-header").addEventListener("mousedown", () => setSpreadOpen(false));
+    setSpreadOpen(false);
   }
 
   // ownerNetwork находит сеть, которой принадлежит подсеть — для переноса
@@ -735,6 +875,7 @@ const Diagnose = (() => {
     }
     wirePanels();
     wireFormPersistence();
+    wireSpreadCombo();
     document.getElementById("diag-form").addEventListener("submit", run);
     document.getElementById("spread-form").addEventListener("submit", runSpread);
   }

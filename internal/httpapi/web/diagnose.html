@@ -85,8 +85,16 @@
         <div class="diag-panel-body">
           <form id="spread-form">
             <label>Источник (сеть, подсеть или IP)
-              <input id="spread-src" list="spread-sources" placeholder="office, 10.0.0.0/24 или 10.0.0.5" autocomplete="off" spellcheck="false" required>
-              <datalist id="spread-sources"></datalist>
+              <div class="member-combo diag-combo" id="spread-combo">
+                <input id="spread-src" placeholder="office, 10.0.0.0/24 или 10.0.0.5" autocomplete="off" spellcheck="false" required title="Сети и подсети; ввод фильтрует по имени, CIDR или IP внутри подсети">
+                <button type="button" id="spread-clear" class="member-clear" title="Очистить поле" aria-label="Очистить поле" hidden>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8"/><path d="M12 4L4 12"/></svg>
+                </button>
+                <button type="button" id="spread-toggle" class="member-combo-toggle" title="Показать или скрыть список" aria-label="Показать или скрыть список">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+                </button>
+                <div id="spread-suggestions" class="member-suggestions" hidden></div>
+              </div>
             </label>
             <button type="submit" class="primary">Показать распространение</button>
           </form>

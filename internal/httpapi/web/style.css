@@ -951,6 +951,22 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 }
 .member-suggestion.active, .member-suggestion:hover { background: var(--panel-bg-hover); }
 .member-suggestion.literal-add { color: var(--accent); }
+.member-clear {
+  position: absolute;
+  top: 50%;
+  right: 1.9rem;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  padding: 0.15rem;
+  color: var(--muted);
+  display: inline-flex;
+}
+.member-clear:hover { color: var(--fg); }
+.member-clear svg { width: 1rem; height: 1rem; }
+.member-clear[hidden], .member-suggestions[hidden] { display: none; }
+.diag-combo { margin-bottom: 0; }
+.diag-combo input { padding-right: 4.2rem; }
 
 /* — диагностика пути: плавающее окно параметров и отчёта — */
 .diag-panel {
