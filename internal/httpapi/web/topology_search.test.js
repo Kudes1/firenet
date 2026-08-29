@@ -2,9 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 // DOM stubs mirror topology_render.test.js; search needs the same boot
 // pipeline (common.js + camera.js + canvas modules + topology.js) plus the
@@ -47,6 +45,22 @@ function makeEl(tag) {
 }
 
 // recorder: ctx-стаб, записывающий вызовы методов canvas 2d context
+(async () => {
+  // зависимости topology.js импортируются как ES-модули; topology.js — внутри
+  // bootTopology с cache-busting'ом (каждый тест ждёт свежий State)
+  await import(path.join(__dirname, "camera.js"));
+  await import(path.join(__dirname, "minimap.js"));
+  await import(path.join(__dirname, "camera_input.js"));
+  await import(path.join(__dirname, "netmap.js"));
+  await import(path.join(__dirname, "tween.js"));
+  await import(path.join(__dirname, "canvas_theme.js"));
+  await import(path.join(__dirname, "hit_test.js"));
+  await import(path.join(__dirname, "canvas_view.js"));
+  await import(path.join(__dirname, "topo_scene.js"));
+  await import(path.join(__dirname, "net_info.js"));
+  await import(path.join(__dirname, "link_panel.js"));
+  await import(path.join(__dirname, "topology_sync.js"));
+
 function makeCtx() {
   const calls = [];
   const handler = {
@@ -70,7 +84,7 @@ function fire(target, type, ev) {
   if (type === "click" && target.onclick) target.onclick(ev);
 }
 
-function bootTopology(responses, draftID = "d1") {
+async function bootTopology(responses, draftID = "d1") {
   const draftStore = draftID ? { "firenet-draft-id": draftID } : {};
   const calls = [];
   const ctx = makeCtx();
@@ -97,49 +111,36 @@ function bootTopology(responses, draftID = "d1") {
   // твином камеры)
   let clock = 0;
   const rafQueue = [];
-  const sandbox = {
-    document: doc,
-    window: {
-      addEventListener(t, fn) { (doc.listeners["win-" + t] ||= []).push(fn); },
-      dispatchEvent() {},
-    },
-    localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: {
-      getItem: (k) => (k in draftStore ? draftStore[k] : null),
-      setItem: (k, v) => { draftStore[k] = v; },
-      removeItem: (k) => { delete draftStore[k]; },
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class {},
+  global.document = doc;
+  global.window = {
+    addEventListener(t, fn) { (doc.listeners["win-" + t] ||= []).push(fn); },
     dispatchEvent() {},
-    confirm: () => false,
-    prompt: () => null,
-    FormData: class { get() { return ""; } },
-    Path2D: class {},               // стаб для kind:"glyph"
-    getComputedStyle: () => ({ getPropertyValue: () => "" }),
-    performance: { now: () => clock },
-    requestAnimationFrame: (fn) => rafQueue.push(fn),
-    setTimeout,
-    clearTimeout,
-    Promise,
-    console,
-    fetch: async (p, opts) => {
-      calls.push({ path: p, method: opts?.method || "GET" });
-      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(responses[p] ?? null)) };
-    },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of [
-    "common.js", "camera.js", "minimap.js", "camera_input.js", "netmap.js", "tween.js",
-    "canvas_theme.js", "hit_test.js", "canvas_view.js", "topo_scene.js",
-    "net_info.js", "link_panel.js", "topology_sync.js", "topology.js",
-  ]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
+  global.localStorage = { getItem: () => null, setItem() {} };
+  global.sessionStorage = {
+    getItem: (k) => (k in draftStore ? draftStore[k] : null),
+    setItem: (k, v) => { draftStore[k] = v; },
+    removeItem: (k) => { delete draftStore[k]; },
+  };
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class { constructor(type, init = {}) { this.type = type; this.detail = init.detail; } };
+  global.confirm = () => false;
+  global.prompt = () => null;
+  global.FormData = class { get() { return ""; } };
+  global.Path2D = class {};               // стаб для kind:"glyph"
+  global.getComputedStyle = () => ({ getPropertyValue: () => "" });
+  global.performance = { now: () => clock };
+  global.requestAnimationFrame = (fn) => rafQueue.push(fn);
+  global.fetch = async (p, opts) => {
+    calls.push({ path: p, method: opts?.method || "GET" });
+    return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(responses[p] ?? null)) };
+  };
+  // cache-busting: каждый bootTopology ждёт свежие State и DirtyGuard
+  const { Topology, State, applyTopologyOp } = await import(path.join(__dirname, "topology.js") + `?t=${Date.now()}-${Math.random()}`);
+  var bootDirtyGuard = (await import(path.join(__dirname, "common.js") + `?t=${Date.now()}-${Math.random()}`)).DirtyGuard;
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
   return {
-    canvas, ctx, doc, ids, get: (expr) => vm.runInContext(expr, sandbox), sandbox, calls,
+    canvas, ctx, doc, ids, get: (expr) => new Function("State", "window", "document", `return (${expr});`)(State, global.window, doc), calls,
     // pump исполняет кадры до исчерпания очереди (твин камеры дошёл до цели)
     pump() {
       while (rafQueue.length) {
@@ -184,7 +185,7 @@ const responses = {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 test("search by device name highlights it and dims the rest", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   search(page.ids, "sw1");
   page.pump(); // твин затемнения проявляется кадрами
@@ -194,21 +195,21 @@ test("search by device name highlights it and dims the rest", async () => {
 });
 
 test("search is case-insensitive", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   search(page.ids, "SW1");
   assert.deepEqual(hitIds(page.get), ["device:sw1"], "case-insensitive name match");
 });
 
 test("network matches by subnet CIDR substring and highlights the network node", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   search(page.ids, "10.0.0");
   assert.deepEqual(hitIds(page.get), ["network:net1"], "net1 cloud highlighted via its subnet cidr");
 });
 
 test("host IP inside a subnet prefix finds the owning network", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   search(page.ids, "10.0.0.55");
   assert.deepEqual(hitIds(page.get), ["network:net1"], "net1 found by contained host address");
@@ -218,7 +219,7 @@ test("host IP inside a subnet prefix finds the owning network", async () => {
 });
 
 test("empty query clears highlighting and dimming", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   search(page.ids, "r1");
   search(page.ids, "");
@@ -228,7 +229,7 @@ test("empty query clears highlighting and dimming", async () => {
 });
 
 test("no-match query leaves everything dimmed and nothing hit", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   search(page.ids, "zzz");
   page.pump();
@@ -237,7 +238,7 @@ test("no-match query leaves everything dimmed and nothing hit", async () => {
 });
 
 test("first match centers the camera on the node", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   search(page.ids, "r1");
   page.pump(); // камера долетает коротким твином
@@ -246,7 +247,7 @@ test("first match centers the camera on the node", async () => {
 });
 
 test("search dim fades in and out through state.searchFade", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   search(page.ids, "r1");
   assert.equal(page.get("State.searchFade"), 0, "fade starts transparent");
@@ -258,7 +259,7 @@ test("search dim fades in and out through state.searchFade", async () => {
 });
 
 test("Enter cycles the camera through the matches", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   search(page.ids, "1"); // r1, sw1 и net1
   page.pump(); // первый хит тоже летит твином
@@ -275,7 +276,7 @@ test("Enter cycles the camera through the matches", async () => {
 });
 
 test("search field stays hidden until the magnifier is clicked", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   assert.equal(page.ids["topo-search"].hidden, true, "input hidden on load");
   fire(page.ids["topo-search-toggle"], "click", {});
@@ -283,7 +284,7 @@ test("search field stays hidden until the magnifier is clicked", async () => {
 });
 
 test("a background canvas click resets the search", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   fire(page.ids["topo-search-toggle"], "click", {});
   search(page.ids, "r1");
@@ -295,7 +296,7 @@ test("a background canvas click resets the search", async () => {
 });
 
 test("Escape clears the query and the highlighting", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   fire(page.ids["topo-search-toggle"], "click", {});
   search(page.ids, "r1");
@@ -308,7 +309,7 @@ test("Escape clears the query and the highlighting", async () => {
 });
 
 test("blurring an empty field hides it, a filled one stays visible", async () => {
-  const page = bootTopology(responses);
+  const page = await bootTopology(responses);
   await tick();
   fire(page.ids["topo-search-toggle"], "click", {});
   fire(page.ids["topo-search"], "blur", {});
@@ -318,3 +319,4 @@ test("blurring an empty field hides it, a filled one stays visible", async () =>
   fire(page.ids["topo-search"], "blur", {});
   assert.equal(page.ids["topo-search"].hidden, false, "active query keeps the input visible");
 });
+})();

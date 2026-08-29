@@ -1,6 +1,20 @@
 "use strict";
 
-const State = {
+import { NetMap } from "./netmap.js";
+import { Camera } from "./camera.js";
+import { CameraControls } from "./camera_input.js";
+import { CanvasTheme } from "./canvas_theme.js";
+import { CanvasView } from "./canvas_view.js";
+import { HitTest } from "./hit_test.js";
+import { Minimap } from "./minimap.js";
+import { NetInfo } from "./net_info.js";
+import { LinkPanel } from "./link_panel.js";
+import { TopoScene } from "./topo_scene.js";
+import { Tween } from "./tween.js";
+import { TopologySync } from "./topology_sync.js";
+import { Api, showBanner, apiPath, assertEditable, DirtyGuard, currentDraftID, isReadOnly, containsFold } from "./common.js";
+
+export const State = {
   topology: { devices: [], links: [], networks: [], unions: [] },
   subnets: [],
   layout: { devices: {}, networks: {}, links: {} },
@@ -109,7 +123,7 @@ function cloneSnapshot(snapshot) {
   };
 }
 
-function applyTopologyOp(snapshot, op) {
+export function applyTopologyOp(snapshot, op) {
   const next = cloneSnapshot(snapshot);
   const topo = next.topology;
   const layout = next.layout;
@@ -1377,6 +1391,8 @@ const Topology = (() => {
   };
   return Topology;
 })();
+
+export { Topology };
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", Topology.boot);
