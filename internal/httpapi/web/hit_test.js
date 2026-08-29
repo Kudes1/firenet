@@ -107,4 +107,5 @@ const HitTest = (() => {
   return Object.freeze({ bbox, pick, pickNodes });
 })();
 
-if (typeof module !== "undefined") module.exports = HitTest;
+export { HitTest };
+if (typeof window !== "undefined") window.HitTest = HitTest; // TODO(Task 28): remove once every classic-script consumer imports HitTest directly
