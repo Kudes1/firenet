@@ -1,5 +1,7 @@
 "use strict";
 
+import { showBanner, loginRedirectURL } from "./common.js";
+
 document.addEventListener("DOMContentLoaded", async () => {
   const table = document.getElementById("users-table");
   const tbody = table.querySelector("tbody");
