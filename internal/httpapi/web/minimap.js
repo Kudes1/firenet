@@ -103,3 +103,6 @@ const Minimap = (() => {
 
   return Object.freeze({ layout, overflows, viewportRect, create });
 })();
+
+export { Minimap };
+globalThis.Minimap = Minimap; // TODO(Task 28): remove once every classic-script consumer imports Minimap directly
