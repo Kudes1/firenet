@@ -1,5 +1,8 @@
 "use strict";
 
+import { Api, showBanner, apiPath, assertEditable, containsFold, matchPrefixQuery, matchSubnetMembers } from "./common.js";
+import { makeColumnsResizable, initializeColumns } from "./columns.js";
+
 // Sets page: read-only table over topology.yaml sets; editing happens one
 // set at a time in a native <dialog> modal. A set mixes subnet references
 // and individual host addresses into one ipset at compile time; the same
