@@ -48,4 +48,5 @@ const CanvasTheme = (() => {
   return Object.freeze({ create, fromComputed });
 })();
 
-if (typeof module !== "undefined") module.exports = CanvasTheme;
+export { CanvasTheme };
+if (typeof window !== "undefined") window.CanvasTheme = CanvasTheme; // TODO(Task 28): remove once every classic-script consumer imports CanvasTheme directly
