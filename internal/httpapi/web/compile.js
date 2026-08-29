@@ -1,5 +1,7 @@
 "use strict";
 
+import { Api, showBanner, apiPath } from "./common.js";
+
 // renderDevice builds one device's scripts as text nodes (never innerHTML —
 // compiler output is untrusted-ish generated text, not markup) plus a
 // download link per script, built from a Blob so no server round-trip is

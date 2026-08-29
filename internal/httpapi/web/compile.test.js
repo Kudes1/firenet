@@ -2,9 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 function makeEl(tag) {
   const el = {
@@ -18,7 +16,7 @@ function makeEl(tag) {
   return el;
 }
 
-function bootCompile(devicesResponse, draftID = "d1") {
+async function bootCompile(devicesResponse, draftID = "d1") {
   const doc = makeEl("#document");
   doc.body = makeEl("body");
   doc.body.dataset = {};
@@ -30,30 +28,24 @@ function bootCompile(devicesResponse, draftID = "d1") {
   const store = draftID ? { "firenet-draft-id": draftID } : {};
   const calls = [];
   const banners = [];
-  const sandbox = {
-    document: doc,
-    window: { dispatchEvent: (e) => { if (e.type === "notify") banners.push(e.detail); } },
-    localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = v; },
-      removeItem: (k) => { delete store[k]; },
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
-    URL: { createObjectURL: () => "blob:stub" },
-    Blob: class { constructor(parts) { this.parts = parts; } },
-    fetch: async (url, opts) => {
-      calls.push({ path: url, method: opts?.method });
-      return { ok: true, status: 200, headers: { get: () => null }, json: async () => devicesResponse };
-    },
-    console,
+  global.document = doc;
+  global.window = { dispatchEvent: (e) => { if (e.type === "notify") banners.push(e.detail); } };
+  global.localStorage = { getItem: () => null, setItem() {} };
+  global.sessionStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of ["common.js", "compile.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } };
+  global.URL = { createObjectURL: () => "blob:stub" };
+  global.Blob = class { constructor(parts) { this.parts = parts; } };
+  global.fetch = async (url, opts) => {
+    calls.push({ path: url, method: opts?.method });
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => devicesResponse };
+  };
+  // cache-busting: compile.js подписывается на DOMContentLoaded при каждом импорте
+  await import(path.join(__dirname, "compile.js") + `?t=${Date.now()}-${Math.random()}`);
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
   // common.js's own DOMContentLoaded listener kicks off the draft-banner
   // fetch as a page-load side effect (same as on every other page); clear
@@ -65,7 +57,7 @@ function bootCompile(devicesResponse, draftID = "d1") {
 const devices = [{ Name: "r1", IPSetsScript: "ipset restore r1", RulesScript: "iptables r1" }];
 
 test("compiles the active draft and renders per-device scripts", async () => {
-  const { ids, calls } = bootCompile(devices, "d1");
+  const { ids, calls } = await bootCompile(devices, "d1");
   await ids["compile-run"].listeners.click[0]();
   assert.equal(calls[0].path, "/api/drafts/d1/compile");
   assert.equal(calls[0].method, "POST");
@@ -74,7 +66,7 @@ test("compiles the active draft and renders per-device scripts", async () => {
 });
 
 test("compiles the current version when read-only (no active draft)", async () => {
-  const { ids, calls } = bootCompile(devices, null);
+  const { ids, calls } = await bootCompile(devices, null);
   await ids["compile-run"].listeners.click[0]();
   assert.equal(calls[0].path, "/api/versions/current/compile");
 });
@@ -89,25 +81,20 @@ test("a compile error shows a banner instead of throwing", async () => {
   doc.listeners = {};
   doc.addEventListener = (t, fn) => (doc.listeners[t] ||= []).push(fn);
   const banners = [];
-  const sandbox = {
-    document: doc,
-    window: { dispatchEvent: (e) => { if (e.type === "notify") banners.push(e.detail); } },
-    localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: {
-      getItem: (k) => (k === "firenet-draft-id" ? "d1" : null),
-      setItem() {},
-      removeItem() {},
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
-    fetch: async () => ({ ok: false, status: 422, headers: { get: () => null }, json: async () => ({ error: "правило x: неизвестный src" }) }),
-    console,
+  global.document = doc;
+  global.window = { dispatchEvent: (e) => { if (e.type === "notify") banners.push(e.detail); } };
+  global.localStorage = { getItem: () => null, setItem() {} };
+  global.sessionStorage = {
+    getItem: (k) => (k === "firenet-draft-id" ? "d1" : null),
+    setItem() {},
+    removeItem() {},
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of ["common.js", "compile.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } };
+  global.URL = { createObjectURL: () => "blob:stub" };
+  global.Blob = class { constructor(parts) { this.parts = parts; } };
+  global.fetch = async () => ({ ok: false, status: 422, headers: { get: () => null }, json: async () => ({ error: "правило x: неизвестный src" }) });
+  await import(path.join(__dirname, "compile.js") + `?t=${Date.now()}-${Math.random()}`);
   (doc.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
 
   await ids["compile-run"].listeners.click[0]();
