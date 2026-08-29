@@ -2,14 +2,12 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 // Boots the unions Alpine component outside a browser and exercises its
 // validation, filtering and persistence logic against a stubbed fetch.
 
-function bootPage() {
+async function bootPage() {
   const factories = {};
   const calls = [];
   const banners = [];
@@ -25,43 +23,34 @@ function bootPage() {
     sets: [{ name: "blocked", subnets: ["a"], addresses: ["10.0.0.9"] }],
     unions: [{ name: "hq", devices: ["r1"], networks: ["office"], description: "главный" }],
   };
-  const sandbox = {
-    document: { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) },
-    window: { dispatchEvent: notify },
-    localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = v; },
-      removeItem: (k) => { delete store[k]; },
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class {},
-    dispatchEvent: notify,
-    confirm: () => true,
-    setTimeout,
-    clearTimeout,
-    console,
-    fetch: async (path_, opts) => {
-      calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
-      if (path_ === "/api/drafts/d1/topology") {
-        return { ok: true, status: 200, json: async () => calls.find((c) => c.method === "PUT")?.body || topoFixture };
-      }
-      if (path_ === "/api/drafts/d1/subnets") {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }] }),
-        };
-      }
-      return { ok: false, status: 404, json: async () => ({}) };
-    },
-    Alpine: { data: (name, factory) => (factories[name] = factory) },
+  global.document = { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) };
+  global.window = { dispatchEvent: notify };
+  global.localStorage = { getItem: () => null, setItem() {} };
+  global.sessionStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of ["common.js", "columns.js", "unions.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class {};
+  global.confirm = () => true;
+  global.fetch = async (path_, opts) => {
+    calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
+    if (path_ === "/api/drafts/d1/topology") {
+      return { ok: true, status: 200, json: async () => calls.find((c) => c.method === "PUT")?.body || topoFixture };
+    }
+    if (path_ === "/api/drafts/d1/subnets") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ subnets: [{ name: "a", cidr: "10.0.0.0/24" }] }),
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  global.Alpine = { data: (name, factory) => (factories[name] = factory) };
+  // cache-busting: unions.js регистрирует alpine:init при каждом импорте
+  await import(path.join(__dirname, "unions.js") + `?t=${Date.now()}-${Math.random()}`);
   (docListeners["alpine:init"] || []).forEach((fn) => fn());
   const page = factories.unionsPage();
   page.$nextTick = (fn) => fn();
@@ -70,7 +59,7 @@ function bootPage() {
 }
 
 async function bootLoadedPage() {
-  const ctx = bootPage();
+  const ctx = await bootPage();
   await ctx.page.init();
   return ctx;
 }

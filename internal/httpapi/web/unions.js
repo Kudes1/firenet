@@ -1,5 +1,8 @@
 "use strict";
 
+import { Api, showBanner, apiPath, assertEditable, containsFold, matchPrefixQuery } from "./common.js";
+import { makeColumnsResizable, initializeColumns } from "./columns.js";
+
 // Unions page: table over topology.yaml unions; editing happens one union
 // at a time in a native <dialog> modal covering only name and description.
 // Membership (devices/networks) is assigned exclusively on the topology
