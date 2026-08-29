@@ -1,5 +1,7 @@
 "use strict";
 
+import { Api, showBanner, currentDraftID, setCurrentDraftID, loginRedirectURL } from "./common.js";
+
 // Drafts page: list your own drafts (or everyone's, for an admin), create,
 // delete, review a draft's diff against its base version (with conflicts
 // highlighted), and — admin only — confirm one into a new version.
@@ -204,5 +206,7 @@ const Drafts = (() => {
     get diffs() { return diffs; },
   };
 })();
+
+export { Drafts };
 
 document.addEventListener("DOMContentLoaded", Drafts.boot);

@@ -2,9 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 
 function makeEl(tag) {
   const el = {
@@ -21,7 +19,7 @@ function makeEl(tag) {
   return el;
 }
 
-function bootDrafts(fixture = {}) {
+async function bootDrafts(fixture = {}) {
   const drafts = fixture.drafts ?? [{ id: "d1", owner: "alice", name: "office", baseVersion: 5, status: "open" }];
   const me = fixture.me ?? { username: "alice", role: "user" };
   const diffs = fixture.diffs ?? [{ kind: "subnet", key: "a", change: "modified", conflict: false }];
@@ -50,77 +48,71 @@ function bootDrafts(fixture = {}) {
   const calls = [];
   const banners = [];
   const location = { href: "" };
-  const sandbox = {
-    document: doc,
-    window: { location, dispatchEvent: (e) => { if (e.type === "notify") banners.push(e.detail); } },
-    localStorage: { getItem: () => null, setItem() {} },
-    sessionStorage: {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = v; },
-      removeItem: (k) => { delete store[k]; },
-    },
-    matchMedia: () => ({ matches: false }),
-    CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } },
-    confirm: () => fixture.confirmResult ?? true,
-    fetch: async (url, opts) => {
-      calls.push({ path: url, method: opts?.method || "GET" });
-      if (url === "/api/me") return { ok: true, status: 200, headers: { get: () => null }, json: async () => me };
-      if (url.startsWith("/api/drafts/") && url.endsWith("/diff")) {
-        return { ok: true, status: 200, headers: { get: () => null }, json: async () => diffs };
-      }
-      if (url.startsWith("/api/drafts/") && url.endsWith("/confirm")) {
-        return { ok: confirmStatus === 200, status: confirmStatus, headers: { get: () => null }, json: async () => confirmBody };
-      }
-      if (opts?.method === "DELETE") {
-        return { ok: true, status: 204, headers: { get: () => null }, json: async () => null };
-      }
-      if (opts?.method === "POST" && url === "/api/drafts") {
-        return { ok: true, status: 201, headers: { get: () => null }, json: async () => ({ id: "new", owner: "alice", name: JSON.parse(opts.body).name, baseVersion: 5, status: "open" }) };
-      }
-      if (url.startsWith("/api/drafts")) {
-        if (fixture.draftsFail) {
-          return { ok: false, status: 500, headers: { get: () => null }, json: async () => ({ error: "boom" }) };
-        }
-        return { ok: true, status: 200, headers: { get: () => null }, json: async () => drafts };
-      }
-      return { ok: false, status: 404, headers: { get: () => null }, json: async () => ({}) };
-    },
-    console,
+  global.document = doc;
+  global.window = { location, dispatchEvent: (e) => { if (e.type === "notify") banners.push(e.detail); } };
+  global.localStorage = { getItem: () => null, setItem() {} };
+  global.sessionStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
   };
-  sandbox.globalThis = sandbox;
-  vm.createContext(sandbox);
-  for (const f of ["common.js", "drafts.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, f), "utf8"), sandbox, { filename: f });
-  }
-  return { get: (expr) => vm.runInContext(expr, sandbox), ids, calls, banners, store, location };
+  global.matchMedia = () => ({ matches: false });
+  global.CustomEvent = class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } };
+  global.confirm = () => fixture.confirmResult ?? true;
+  global.fetch = async (url, opts) => {
+    calls.push({ path: url, method: opts?.method || "GET" });
+    if (url === "/api/me") return { ok: true, status: 200, headers: { get: () => null }, json: async () => me };
+    if (url.startsWith("/api/drafts/") && url.endsWith("/diff")) {
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => diffs };
+    }
+    if (url.startsWith("/api/drafts/") && url.endsWith("/confirm")) {
+      return { ok: confirmStatus === 200, status: confirmStatus, headers: { get: () => null }, json: async () => confirmBody };
+    }
+    if (opts?.method === "DELETE") {
+      return { ok: true, status: 204, headers: { get: () => null }, json: async () => null };
+    }
+    if (opts?.method === "POST" && url === "/api/drafts") {
+      return { ok: true, status: 201, headers: { get: () => null }, json: async () => ({ id: "new", owner: "alice", name: JSON.parse(opts.body).name, baseVersion: 5, status: "open" }) };
+    }
+    if (url.startsWith("/api/drafts")) {
+      if (fixture.draftsFail) {
+        return { ok: false, status: 500, headers: { get: () => null }, json: async () => ({ error: "boom" }) };
+      }
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => drafts };
+    }
+    return { ok: false, status: 404, headers: { get: () => null }, json: async () => ({}) };
+  };
+  // cache-busting: drafts.js подписывается на DOMContentLoaded при каждом импорте
+  const { Drafts } = await import(path.join(__dirname, "drafts.js") + `?t=${Date.now()}-${Math.random()}`);
+  return { get: (expr) => new Function("Drafts", `return (${expr});`)(Drafts), ids, calls, banners, store, location };
 }
 
 test("boot loads the user and the drafts list", async () => {
-  const { get } = bootDrafts();
+  const { get } = await bootDrafts();
   await get("Drafts.boot()");
   assert.equal(get("Drafts.me").role, "user");
   assert.equal(get("Drafts.drafts").length, 1);
 });
 
 test("the all-drafts toggle is hidden for a non-admin, shown for an admin", async () => {
-  const nonAdmin = bootDrafts({ me: { username: "alice", role: "user" } });
+  const nonAdmin = await bootDrafts({ me: { username: "alice", role: "user" } });
   await nonAdmin.get("Drafts.boot()");
   assert.equal(nonAdmin.ids["all-toggle"].hidden, true);
 
-  const admin = bootDrafts({ me: { username: "root", role: "admin" } });
+  const admin = await bootDrafts({ me: { username: "root", role: "admin" } });
   await admin.get("Drafts.boot()");
   assert.equal(admin.ids["all-toggle"].hidden, false);
 });
 
-test("selectDraft stores the draft id in session storage and navigates to topology", () => {
-  const { get, store, location } = bootDrafts();
+test("selectDraft stores the draft id in session storage and navigates to topology", async () => {
+  const { get, store, location } = await bootDrafts();
   get(`Drafts.selectDraft({ id: "d1", name: "office", status: "open" })`);
   assert.equal(store["firenet-draft-id"], "d1");
   assert.equal(location.href, "/ui/topology");
 });
 
 test("loadDiff fetches the draft's diff and hides confirm for a non-admin", async () => {
-  const { get, ids } = bootDrafts();
+  const { get, ids } = await bootDrafts();
   await get(`Drafts.loadDiff({ id: "d1", name: "office" })`);
   assert.equal(get("Drafts.diffs").length, 1);
   assert.equal(get("Drafts.diffs")[0].key, "a");
@@ -128,7 +120,7 @@ test("loadDiff fetches the draft's diff and hides confirm for a non-admin", asyn
 });
 
 test("confirmSelected on success clears the selection and shows the new version", async () => {
-  const { get, banners } = bootDrafts({ confirmStatus: 200 });
+  const { get, banners } = await bootDrafts({ confirmStatus: 200 });
   await get(`Drafts.loadDiff({ id: "d1", name: "office" })`);
   await get("Drafts.confirmSelected()");
   assert.equal(get("Drafts.selected"), null);
@@ -136,7 +128,7 @@ test("confirmSelected on success clears the selection and shows the new version"
 });
 
 test("confirmSelected on success clears this tab's active draft id when it matches the confirmed draft", async () => {
-  const { get, store } = bootDrafts({ confirmStatus: 200 });
+  const { get, store } = await bootDrafts({ confirmStatus: 200 });
   store["firenet-draft-id"] = "d1";
   await get(`Drafts.loadDiff({ id: "d1", name: "office" })`);
   await get("Drafts.confirmSelected()");
@@ -144,7 +136,7 @@ test("confirmSelected on success clears this tab's active draft id when it match
 });
 
 test("confirmSelected on success leaves a different tab's active draft id untouched", async () => {
-  const { get, store } = bootDrafts({ confirmStatus: 200 });
+  const { get, store } = await bootDrafts({ confirmStatus: 200 });
   store["firenet-draft-id"] = "other-draft";
   await get(`Drafts.loadDiff({ id: "d1", name: "office" })`);
   await get("Drafts.confirmSelected()");
@@ -152,7 +144,7 @@ test("confirmSelected on success leaves a different tab's active draft id untouc
 });
 
 test("confirmSelected on a 409 conflict keeps the diff open, reloads it, and refreshes the table", async () => {
-  const { get, banners } = bootDrafts({ confirmStatus: 409 });
+  const { get, banners } = await bootDrafts({ confirmStatus: 409 });
   await get(`Drafts.loadDiff({ id: "d1", name: "office" })`);
   assert.equal(get("Drafts.drafts").length, 0, "table not yet loaded before the confirm attempt");
   await get("Drafts.confirmSelected()");
@@ -162,7 +154,7 @@ test("confirmSelected on a 409 conflict keeps the diff open, reloads it, and ref
 });
 
 test("confirmSelected on a non-conflict 409 shows the error and does not reload the diff", async () => {
-  const { get, banners, calls } = bootDrafts({
+  const { get, banners, calls } = await bootDrafts({
     confirmStatus: 409,
     confirmBody: { error: "версия черновика устарела" },
   });
@@ -176,26 +168,26 @@ test("confirmSelected on a non-conflict 409 shows the error and does not reload 
 });
 
 test("refresh shows a banner when loading the drafts list fails", async () => {
-  const { get, banners } = bootDrafts({ draftsFail: true });
+  const { get, banners } = await bootDrafts({ draftsFail: true });
   await get("Drafts.refresh()");
   assert.ok(banners.some((b) => b.message.includes("Не удалось загрузить список черновиков")));
 });
 
 test("deleteDraft asks for confirmation and is a no-op when declined", async () => {
-  const { get, calls } = bootDrafts({ confirmResult: false });
+  const { get, calls } = await bootDrafts({ confirmResult: false });
   await get(`Drafts.deleteDraft("d1")`);
   assert.ok(!calls.some((c) => c.method === "DELETE"), "declining the confirm must not delete");
 });
 
 test("deleteDraft clears a matching active draft id and refreshes", async () => {
-  const { get, store } = bootDrafts();
+  const { get, store } = await bootDrafts();
   store["firenet-draft-id"] = "d1";
   await get(`Drafts.deleteDraft("d1")`);
   assert.equal(store["firenet-draft-id"], undefined);
 });
 
 test("createDraft posts the name and refreshes the list", async () => {
-  const { get, calls } = bootDrafts();
+  const { get, calls } = await bootDrafts();
   await get(`Drafts.createDraft("new-work")`);
   assert.ok(calls.some((c) => c.method === "POST" && c.path === "/api/drafts"));
 });
