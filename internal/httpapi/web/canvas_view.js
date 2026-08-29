@@ -118,4 +118,6 @@ function create(canvas, { getList, getCam, getOverlay, textHideZoom = 0.5 }) {
   return Object.freeze({ create });
 })();
 
-if (typeof module !== "undefined") module.exports = CanvasView;
+
+export { CanvasView };
+globalThis.CanvasView = CanvasView; // TODO(Task 28): remove once every classic-script consumer imports CanvasView directly
