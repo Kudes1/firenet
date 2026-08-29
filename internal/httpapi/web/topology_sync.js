@@ -158,3 +158,6 @@ const TopologySync = (() => {
 
   return { create };
 })();
+
+export { TopologySync };
+globalThis.TopologySync = TopologySync; // TODO(Task 28): remove once topology.js imports TopologySync directly
