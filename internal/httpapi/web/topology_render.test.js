@@ -46,20 +46,20 @@ function makeEl(tag) {
 
 // recorder: ctx-стаб, записывающий вызовы методов canvas 2d context
 (async () => {
+  // common.js при импорте подписывается на document — стаб нужен до любых импортов
+  global.document ||= { addEventListener() {} };
   // зависимости topology.js импортируются как ES-модули; topology.js — внутри
   // bootTopology с cache-busting'ом (каждый тест ждёт свежий State)
-  await import(path.join(__dirname, "camera.js"));
-  await import(path.join(__dirname, "minimap.js"));
   await import(path.join(__dirname, "camera_input.js"));
-  await import(path.join(__dirname, "netmap.js"));
   await import(path.join(__dirname, "tween.js"));
-  await import(path.join(__dirname, "canvas_theme.js"));
-  await import(path.join(__dirname, "hit_test.js"));
   await import(path.join(__dirname, "canvas_view.js"));
-  await import(path.join(__dirname, "topo_scene.js"));
   await import(path.join(__dirname, "net_info.js"));
-  await import(path.join(__dirname, "link_panel.js"));
   await import(path.join(__dirname, "topology_sync.js"));
+  const { Camera } = await import(path.join(__dirname, "camera.js"));
+  const { Minimap } = await import(path.join(__dirname, "minimap.js"));
+  const { CanvasTheme } = await import(path.join(__dirname, "canvas_theme.js"));
+  const { HitTest } = await import(path.join(__dirname, "hit_test.js"));
+  const { TopoScene } = await import(path.join(__dirname, "topo_scene.js"));
 
 function makeCtx() {
   const calls = [];

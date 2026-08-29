@@ -36,4 +36,3 @@ const Camera = (() => {
 })();
 
 export { Camera };
-globalThis.Camera = Camera; // TODO(Task 28): remove once every classic-script consumer imports Camera directly

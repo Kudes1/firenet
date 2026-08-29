@@ -1,5 +1,7 @@
 "use strict";
 
+import { NetMap } from "./netmap.js";
+
 // TopoScene — сборка display list сцены топологии: рамки объединений, связи,
 // привязки сетей, устройства и сети-облака. Используется редактором
 // (topology.js) и read-only картой диагностики (diagnose.js). Взаимодействие
@@ -243,4 +245,3 @@ const TopoScene = (() => {
 })();
 
 export { TopoScene };
-globalThis.TopoScene = TopoScene; // TODO(Task 28): remove once every classic-script consumer imports TopoScene directly

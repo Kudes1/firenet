@@ -110,5 +110,3 @@ export function initializeColumns(table, key, version) {
   if (sum(widths)) applyColumnWidths(table, widths);
 }
 
-globalThis.makeColumnsResizable = makeColumnsResizable; // TODO(Task 28): remove once every classic-script consumer imports these directly
-globalThis.initializeColumns = initializeColumns;

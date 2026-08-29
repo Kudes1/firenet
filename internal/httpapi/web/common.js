@@ -551,27 +551,4 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-// Bridges for not-yet-converted classic-script consumers (page .js files and
-// Alpine's x-data="appData()" inline expression, which always needs the
-// global). TODO(Task 28): drop every line except appData once every page
-// imports these directly.
-globalThis.appData = appData; // permanent: Alpine evaluates x-data="appData()" against the global scope
-globalThis.showBanner = showBanner;
-globalThis.DirtyGuard = DirtyGuard;
-globalThis.currentDraftID = currentDraftID;
-globalThis.setCurrentDraftID = setCurrentDraftID;
-globalThis.isReadOnly = isReadOnly;
-globalThis.apiPath = apiPath;
-globalThis.assertEditable = assertEditable;
-globalThis.loginRedirectURL = loginRedirectURL;
-globalThis.Api = Api;
-globalThis.ipv4CidrOverlap = ipv4CidrOverlap;
-globalThis.containsFold = containsFold;
-globalThis.parseIPv4 = parseIPv4;
-globalThis.parsePrefix = parsePrefix;
-globalThis.parseQueryPrefix = parseQueryPrefix;
-globalThis.formatIPv4 = formatIPv4;
-globalThis.prefixContains = prefixContains;
-globalThis.prefixOverlap = prefixOverlap;
-globalThis.matchPrefixQuery = matchPrefixQuery;
-globalThis.matchSubnetMembers = matchSubnetMembers;
+globalThis.appData = appData; // Alpine evaluates x-data="appData()" against the global scope; this stays forever, not a migration leftover

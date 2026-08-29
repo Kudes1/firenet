@@ -96,6 +96,8 @@ function makeCtx() {
   await import(path.join(__dirname, "topo_scene.js"));
   await import(path.join(__dirname, "net_info.js"));
   const { CanvasTheme } = await import(path.join(__dirname, "canvas_theme.js"));
+  const { Camera } = await import(path.join(__dirname, "camera.js"));
+  const { TopoScene } = await import(path.join(__dirname, "topo_scene.js"));
 
   const topoFixture = {
   devices: [{ name: "r1", kind: "router" }, { name: "r2", kind: "router" }],
@@ -175,7 +177,7 @@ async function bootDiagnose(responses, savedStore, draftID = "d1") {
   const frames = async (n) => {
     for (let i = 0; i < n; i++) frame();
   };
-  const get = (expr) => new Function("Diagnose", "window", "document", "CanvasTheme", `return (${expr});`)(Diagnose, global.window, doc, CanvasTheme);
+  const get = (expr) => new Function("Diagnose", "window", "document", "CanvasTheme", "Camera", "TopoScene", `return (${expr});`)(Diagnose, global.window, doc, CanvasTheme, Camera, TopoScene);
   return { canvas, ctx, minimap, ids, calls, get, doc, store, frame, frames };
 }
 

@@ -1,5 +1,7 @@
 "use strict";
 
+import { HitTest } from "./hit_test.js";
+
 // CanvasView — рендерер display list в Canvas2D: полный redraw кадра по
 // invalidate (≤1 на rAF), камера через setTransform, culling вне вьюпорта.
 // Рендерер ничего не знает о топологии — только примитивы и стили.
@@ -120,4 +122,3 @@ function create(canvas, { getList, getCam, getOverlay, textHideZoom = 0.5 }) {
 
 
 export { CanvasView };
-globalThis.CanvasView = CanvasView; // TODO(Task 28): remove once every classic-script consumer imports CanvasView directly

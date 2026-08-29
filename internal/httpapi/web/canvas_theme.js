@@ -49,4 +49,3 @@ const CanvasTheme = (() => {
 })();
 
 export { CanvasTheme };
-globalThis.CanvasTheme = CanvasTheme; // TODO(Task 28): remove once every classic-script consumer imports CanvasTheme directly

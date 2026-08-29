@@ -46,6 +46,8 @@ function makeEl(tag) {
 
 // recorder: ctx-стаб, записывающий вызовы методов canvas 2d context
 (async () => {
+  // common.js при импорте подписывается на document — стаб нужен до любых импортов
+  global.document ||= { addEventListener() {} };
   // зависимости topology.js импортируются как ES-модули; topology.js — внутри
   // bootTopology с cache-busting'ом (каждый тест ждёт свежий State)
   await import(path.join(__dirname, "camera.js"));

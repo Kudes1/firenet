@@ -108,4 +108,3 @@ const HitTest = (() => {
 })();
 
 export { HitTest };
-globalThis.HitTest = HitTest; // TODO(Task 28): remove once every classic-script consumer imports HitTest directly

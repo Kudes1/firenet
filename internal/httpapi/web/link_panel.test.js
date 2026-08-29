@@ -63,6 +63,8 @@ function findBtn(node, text) {
 }
 
 (async () => {
+  // common.js при импорте подписывается на document — стаб нужен до импортов
+  global.document = { addEventListener() {} };
   const { LinkPanel } = await import(path.join(__dirname, "link_panel.js"));
 
   function boot() {
@@ -82,7 +84,8 @@ function findBtn(node, text) {
     };
     const banners = [];
     global.document = doc;
-    global.showBanner = (msg) => banners.push(msg);
+    // showBanner приходит из common.js и шлёт событие notify через window
+    global.window = { dispatchEvent: (e) => { if (e.type === "notify") banners.push(e.detail); } };
     return { canvas, doc, box, banners };
   }
 
@@ -269,6 +272,6 @@ function findBtn(node, text) {
       { x: 0, y: 0 }, { w: 1200, h: 800 });
     await Promise.resolve();
     await Promise.resolve();
-    assert.ok(page.banners.some((m) => m.includes("boom")), "error surfaced via showBanner");
+    assert.ok(page.banners.some((m) => m.message.includes("boom")), "error surfaced via showBanner");
   });
 })();

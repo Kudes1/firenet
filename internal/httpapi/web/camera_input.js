@@ -1,5 +1,7 @@
 "use strict";
 
+import { Camera } from "./camera.js";
+
 // CameraControls — общая обвязка ввода бесконечного холста: зум колесом,
 // привязанный к курсору, и пан перетаскиванием. Чистый ввод поверх
 // математики Camera (которая остаётся без DOM); что делать с камерой,
@@ -87,4 +89,3 @@ const CameraControls = (() => {
 })();
 
 export { CameraControls };
-globalThis.CameraControls = CameraControls; // TODO(Task 28): remove once every classic-script consumer imports CameraControls directly

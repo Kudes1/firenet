@@ -100,4 +100,3 @@ const NetMap = (() => {
 })();
 
 export { NetMap };
-globalThis.NetMap = NetMap; // TODO(Task 28): remove once every classic-script consumer imports NetMap directly

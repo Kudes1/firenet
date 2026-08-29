@@ -1,5 +1,7 @@
 "use strict";
 
+import { showBanner } from "./common.js";
+
 // LinkPanel — плавающая панель редактирования фильтра одной связи, открываемая
 // с холста топологии (ПКМ по связи → «Редактировать», недоступно пока
 // create-link этой связи не подтверждён — см. Topology.openLinkPanel).
@@ -281,4 +283,3 @@ const LinkPanel = (() => {
 
 
 export { LinkPanel };
-globalThis.LinkPanel = LinkPanel; // TODO(Task 28): remove once topology.js imports LinkPanel directly

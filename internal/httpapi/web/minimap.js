@@ -1,5 +1,7 @@
 "use strict";
 
+import { Camera } from "./camera.js";
+
 // Minimap — плавающий обзор всей схемы в углу канваса: показывается только
 // когда сцена не помещается в текущий вьюпорт, рисует упрощённые точки узлов
 // и рамку вьюпорта, клик/драг по ней двигает камеру страницы.
@@ -105,4 +107,3 @@ const Minimap = (() => {
 })();
 
 export { Minimap };
-globalThis.Minimap = Minimap; // TODO(Task 28): remove once every classic-script consumer imports Minimap directly
