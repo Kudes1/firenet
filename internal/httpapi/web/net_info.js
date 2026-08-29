@@ -65,3 +65,6 @@ const NetInfo = (() => {
 
   return Object.freeze({ show, hide, attach });
 })();
+
+export { NetInfo };
+globalThis.NetInfo = NetInfo; // TODO(Task 28): remove once every classic-script consumer imports NetInfo directly
