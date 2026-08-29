@@ -279,4 +279,6 @@ const LinkPanel = (() => {
   return Object.freeze({ show, hide, attach });
 })();
 
-if (typeof module !== "undefined") module.exports = LinkPanel;
+
+export { LinkPanel };
+globalThis.LinkPanel = LinkPanel; // TODO(Task 28): remove once topology.js imports LinkPanel directly
