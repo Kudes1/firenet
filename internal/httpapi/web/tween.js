@@ -3,7 +3,7 @@
 // Tween — мини-аниматор числовых свойств: to() ставит твин, tick(now)
 // продвигает все активные и возвращает признак активности. Чистая
 // математика, без DOM; страницы сами решают, когда перерисовывать кадр.
-const Tween = (() => {
+export const Tween = (() => {
   const easeOutCubic = (t) => 1 - (1 - t) ** 3;
 
   function create() {
@@ -34,4 +34,3 @@ const Tween = (() => {
   return Object.freeze({ create, easeOutCubic });
 })();
 
-if (typeof module !== "undefined") module.exports = Tween;
