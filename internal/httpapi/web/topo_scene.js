@@ -241,3 +241,6 @@ const TopoScene = (() => {
 
   return Object.freeze({ ensureLayout, buildScene, bounds });
 })();
+
+export { TopoScene };
+globalThis.TopoScene = TopoScene; // TODO(Task 28): remove once every classic-script consumer imports TopoScene directly
