@@ -4,7 +4,7 @@
 // login: the "next" query param if it's a same-origin absolute path,
 // otherwise the topology page. Guards against open redirects the same
 // way common.js's loginRedirectURL does for the outgoing direction.
-function loginRedirectTarget(search) {
+export function loginRedirectTarget(search) {
   const next = new URLSearchParams(search).get("next");
   const safe = next && next.startsWith("/") && !next.startsWith("//");
   return safe ? next : "/ui/topology";
