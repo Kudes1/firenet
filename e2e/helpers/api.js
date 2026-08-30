@@ -35,6 +35,13 @@ export async function op(request, draftId, body) {
   return res.json();
 }
 
+export async function confirmDraft(request, id) {
+  const res = await ensureOk(
+    await request.post(`${base()}/api/drafts/${id}/confirm`, { data: {} }),
+    "confirmDraft");
+  return res.json(); // {version}
+}
+
 async function get(request, path) {
   const res = await ensureOk(await request.get(base() + path), "GET " + path);
   return res.json();
@@ -48,6 +55,8 @@ export async function getTopology(request, id) {
 export const getSubnets = (request, id) => get(request, `/api/drafts/${id}/subnets`);
 export const getRules = (request, id) => get(request, `/api/drafts/${id}/rules`);
 export const getVersions = (request) => get(request, "/api/versions");
+export const getCurrentTopology = (request) =>
+  get(request, "/api/versions/current/topology").then((doc) => (doc.topology ? doc : { topology: doc }));
 
 export async function putSubnets(request, id, subnets) {
   await ensureOk(
