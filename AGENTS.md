@@ -43,7 +43,7 @@ No package.json / node_modules — only node built-ins.
  - topology.yaml / subnets.yaml / rules.yaml at repo root are the live working
    data for `validate`/`compile`/`serve`; examples/ holds pristine samples,
    out/ is generated output.
-  - Tests assert directly on structs/strings; there is no golden-file/-update infra.
+ - Tests assert directly on structs/strings; there is no golden-file/-update infra.
   - e2e/ has its own package.json (playwright) — the app itself doesn't depend
     on node; editing e2e helpers doesn't require rebuilding the binary, but
     make test-e2e rebuilds bin/firenet via its build dependency anyway.
