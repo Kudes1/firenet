@@ -53,3 +53,9 @@ export async function putRules(request, id, chains) {
     await request.put(`${base()}/api/drafts/${id}/rules`, { data: { chains } }),
     "putRules");
 }
+
+export async function putTopology(request, id, topology) {
+  await ensureOk(
+    await request.put(`${base()}/api/drafts/${id}/topology`, { data: topology }),
+    "putTopology");
+}
