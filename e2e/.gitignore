@@ -1,0 +1,5 @@
+node_modules/
+.e2e-env.json
+.tmp/
+test-results/
+playwright-report/

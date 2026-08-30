@@ -1,7 +1,7 @@
 BINARY := firenet
 BIN_DIR := bin
 
-.PHONY: build run test vet fmt tidy clean
+.PHONY: build run test test-e2e vet fmt tidy clean
 
 build:
 	go build -o $(BIN_DIR)/$(BINARY) ./cmd/firenet
@@ -11,6 +11,9 @@ run:
 
 test:
 	go test ./...
+
+test-e2e: build
+	cd e2e && npx playwright test
 
 vet:
 	go vet ./...
