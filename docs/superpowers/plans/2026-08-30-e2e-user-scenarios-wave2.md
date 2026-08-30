@@ -80,7 +80,7 @@ e2e/
   - `getVersions(request) -> [{id, createdAt, confirmedBy?, note?}]`.
   - `loginViaUI(page, creds?)` — креды параметром, по умолчанию admin.
 
-- [ ] **Step 1: Написать спек (падает: хелперов нет)**
+- [x] **Step 1: Написать спек (падает: хелперов нет)**
 
 `e2e/scenarios/drafts.spec.js`:
 
@@ -183,7 +183,7 @@ test("не-admin: подтверждение недоступно", async ({ pag
 Run: `cd e2e && npx playwright test scenarios/drafts.spec.js`
 Expected: FAIL — `registerUser is not a function` / импорт не находится.
 
-- [ ] **Step 2: Реализовать хелперы**
+- [x] **Step 2: Реализовать хелперы**
 
 `e2e/helpers/api.js` — заменить `login` и добавить:
 
@@ -215,17 +215,17 @@ export async function loginViaUI(page, creds) {
 }
 ```
 
-- [ ] **Step 3: Прогон**
+- [x] **Step 3: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/drafts.spec.js`
 Expected: PASS 6.
 
-- [ ] **Step 4: Go-проверки не задеты**
+- [x] **Step 4: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add e2e/helpers/api.js e2e/helpers/ui.js e2e/scenarios/drafts.spec.js
@@ -243,7 +243,7 @@ git commit -m "test(e2e): draft lifecycle scenarios with multi-user helpers"
 - Consumes: `login(creds)`, `registerUser`, `loginViaUI(creds)` из Task 1.
 - Produces: ничего.
 
-- [ ] **Step 1: Написать спек (падать не должен — хелперы есть; но сценарий 9 требует registerUser, всё уже есть)**
+- [x] **Step 1: Написать спек (падать не должен — хелперы есть; но сценарий 9 требует registerUser, всё уже есть)**
 
 `e2e/scenarios/users.spec.js`:
 
@@ -305,17 +305,17 @@ test("logout возвращает на страницу логина", async ({ 
 });
 ```
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/users.spec.js`
 Expected: PASS 4. Если «logout» падает на последнем `waitForURL` — проверить редирект логина в `internal/httpapi/auth_handlers.go` (код 302 против UI-редиректа) и поправить селектор ожидания, не смысл.
 
-- [ ] **Step 3: Go-проверки не задеты**
+- [x] **Step 3: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/scenarios/users.spec.js
@@ -336,7 +336,7 @@ git commit -m "test(e2e): users page and logout scenarios"
   - `confirmDraft(request, draftId) -> {version:number}`.
   - `getCurrentTopology(request) -> {topology:{devices,links,networks,sets,unions}}` — текущая подтверждённая версия.
 
-- [ ] **Step 1: Написать спек (падает: хелперов нет)**
+- [x] **Step 1: Написать спек (падает: хелперов нет)**
 
 `e2e/scenarios/history.spec.js`:
 
@@ -382,7 +382,7 @@ test("восстановление пустой версии опустошае�
 
 Первая строка спека использует `env0` опечаткой — заменить на `env().baseURL` при написании (в итоговом файле `const { baseURL } = env();` в начале файла, а в тестах `baseURL + "/ui/history"`).
 
-- [ ] **Step 2: Реализовать хелперы**
+- [x] **Step 2: Реализовать хелперы**
 
 `e2e/helpers/api.js` — добавить:
 
@@ -398,17 +398,17 @@ export const getCurrentTopology = (request) =>
   get(request, "/api/versions/current/topology").then((doc) => (doc.topology ? doc : { topology: doc }));
 ```
 
-- [ ] **Step 3: Прогон**
+- [x] **Step 3: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/history.spec.js`
 Expected: PASS 2. Если diff версии 2 не содержит устройства — сверить `pgstore.DiffVersions` (diff ведётся против предыдущей версии) и поправить ожидания, не смысл.
 
-- [ ] **Step 4: Go-проверки не задеты**
+- [x] **Step 4: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add e2e/helpers/api.js e2e/scenarios/history.spec.js
@@ -426,7 +426,7 @@ git commit -m "test(e2e): version history diff and restore scenarios"
 - Consumes: `login, createDraft, op, getSubnets, getTopology, putSubnets` (Tasks 1–3).
 - Produces: ничего.
 
-- [ ] **Step 1: Написать спек**
+- [x] **Step 1: Написать спек**
 
 `e2e/scenarios/table-create.spec.js`:
 
@@ -534,17 +534,17 @@ test("создание и удаление объединения", async ({ pag
 });
 ```
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/table-create.spec.js`
 Expected: PASS 5. Если «плохой CIDR» падает из-за того, что клиентский draftHint всё же блокирует кнопку — сверить `ipv4CidrOverlap` в `common.js` и заменить негатив на пересечение CIDR с существующей подсетью (arrange: `putSubnets` c "10.31.0.0/24", ввод "10.31.1.0/24") с assert'ом на текст draftHint в модалке; не менять суть проверки.
 
-- [ ] **Step 3: Go-проверки не задеты**
+- [x] **Step 3: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/scenarios/table-create.spec.js
@@ -562,7 +562,7 @@ git commit -m "test(e2e): create subnet, network member, set, union via table fo
 - Consumes: `login, createDraft, getRules, putRules, putSubnets` (Tasks 1–3).
 - Produces: ничего.
 
-- [ ] **Step 1: Написать спек**
+- [x] **Step 1: Написать спек**
 
 `e2e/scenarios/rules.spec.js`:
 
@@ -651,17 +651,17 @@ test("«Проверить» на корректных правилах — на
 });
 ```
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/rules.spec.js`
 Expected: PASS 4. Если первый chain после bootstrap не называется «main» — в тестах «правило» и «удаление» используется `flatMap`, имя цепочки не предполагается; в тесте «цепочка» имя не может конфликтовать (уникально? проверяется только содержимое). Если lint даёт находки на пустых правилах — сверить `internal/app/lint.go` и поправить arrange (не assert).
 
-- [ ] **Step 3: Go-проверки не задеты**
+- [x] **Step 3: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/scenarios/rules.spec.js
@@ -679,7 +679,7 @@ git commit -m "test(e2e): rules editor - chain, rule with endpoints, delete, lin
 - Consumes: `login, createDraft, op, getTopology` (Tasks 1–3).
 - Produces: ничего.
 
-- [ ] **Step 1: Написать спек**
+- [x] **Step 1: Написать спек**
 
 `e2e/scenarios/links-table.spec.js`:
 
@@ -716,17 +716,17 @@ test("переключение фильтра связи из таблицы с�
 });
 ```
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/links-table.spec.js`
 Expected: PASS 1.
 
-- [ ] **Step 3: Go-проверки не задеты**
+- [x] **Step 3: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/scenarios/links-table.spec.js
@@ -744,7 +744,7 @@ git commit -m "test(e2e): toggle link filter from links table"
 - Consumes: `login, createDraft, op, putRules, putSubnets` (Tasks 1–3).
 - Produces: ничего.
 
-- [ ] **Step 1: Написать спек**
+- [x] **Step 1: Написать спек**
 
 `e2e/scenarios/compile.spec.js`:
 
@@ -803,17 +803,17 @@ test("компиляция с недостижимым правилом пока
 });
 ```
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/compile.spec.js`
 Expected: PASS 2. Если первый тест падает на `toHaveCount(2)` — сверить `compiler.Compile` (какие устройства попадают в вывод: все или «managed»), поправить arrange/assert по факту, не суть.
 
-- [ ] **Step 3: Go-проверки не задеты**
+- [x] **Step 3: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/scenarios/compile.spec.js
@@ -833,7 +833,7 @@ git commit -m "test(e2e): compile output and compile error scenarios"
 
 Arrange общий: две подсети с хостами, две сети, привязанные к устройствам, связь, allow-правило (варианты: с mirror / без mirror / без связи).
 
-- [ ] **Step 1: Написать спек**
+- [x] **Step 1: Написать спек**
 
 `e2e/scenarios/diagnose.spec.js`:
 
@@ -927,17 +927,17 @@ test("распространение сети", async ({ page, request }) => {
 
 Замечание: в `arrangeTwoSites` имена сетей содержат суффикс uid — report.srcSubnet/dstSubnet это имена подсетей (имена в report — имена подсетей, см. `diagnose.js:487`).
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/diagnose.spec.js`
 Expected: PASS 4. Числа в «распространении» (ожидается 1 из 2: вторая подсеть достижима через связь, источник сам не считается) сверить по факту; правка — в ожидаемом regex, не в сути.
 
-- [ ] **Step 3: Go-проверки не задеты**
+- [x] **Step 3: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/scenarios/diagnose.spec.js
@@ -956,7 +956,7 @@ git commit -m "test(e2e): traffic diagnose - path found, unreachable, half-path,
 - Consumes: `login, createDraft, op, confirmDraft` (Tasks 1–3), `waitTopology` (волна 1).
 - Produces: ничего (листовые сценарии).
 
-- [ ] **Step 1: Написать спек (падает: хелперов нет)**
+- [x] **Step 1: Написать спек (падает: хелперов нет)**
 
 `e2e/scenarios/canvas-editor.spec.js`:
 
@@ -1016,7 +1016,7 @@ test("поиск на канвасе выделяет узел", async ({ page, 
 
 (В третьем тесте импорт `env` может не понадобиться — убрать неиспользуемый импорт при написании, keep-it-simple.)
 
-- [ ] **Step 2: Реализовать хелперы**
+- [x] **Step 2: Реализовать хелперы**
 
 `e2e/helpers/api.js` — добавить:
 
@@ -1042,17 +1042,17 @@ export async function dragNode(page, from, to) {
 }
 ```
 
-- [ ] **Step 3: Прогон**
+- [x] **Step 3: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/canvas-editor.spec.js`
 Expected: PASS 3. Если drag не двигает узел — убедиться с `--headed`, что mousedown попал в узел (центр 470,330 при позиции 400,300 и камере {0,0,1}); если read-only баннер не появляется — сверить `renderDraftBanner` (`.draft-banner-readonly`), поправить селектор, не суть.
 
-- [ ] **Step 4: Go-проверки не задеты**
+- [x] **Step 4: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add e2e/helpers/api.js e2e/helpers/ui.js e2e/scenarios/canvas-editor.spec.js
@@ -1066,17 +1066,17 @@ git commit -m "test(e2e): canvas editor - node drag layout, read-only version, s
 **Files:**
 - Modify: `docs/superpowers/plans/2026-08-30-e2e-user-scenarios-wave2.md` (checkboxes)
 
-- [ ] **Step 1: Полный прогон**
+- [x] **Step 1: Полный прогон**
 
 Run: `make test-e2e`
 Expected: все спеки PASS (wave-1 + wave-2, fixme волны 1 пропущен); teardown чистит контейнер (`docker ps | grep firenet-e2e` пуст).
 
-- [ ] **Step 2: Полная верификация**
+- [x] **Step 2: Полная верификация**
 
 Run: `go build ./... && go vet ./... && gofmt -l . && go test ./... && node --test 'internal/httpapi/web/*.test.js' && make test-e2e`
 Expected: всё зелёное.
 
-- [ ] **Step 3: Отметить выполнение в плане**
+- [x] **Step 3: Отметить выполнение в плане**
 
 Все `- [ ]` этого плана → `- [x]`; commit:
 
