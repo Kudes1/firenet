@@ -16,7 +16,7 @@ export async function openWithDraft(page, draftId, path) {
     sessionStorage.setItem("firenet-draft-id", id);
   }, draftId);
   await page.goto(env().baseURL + path);
-  await page.locator("#topo-canvas").waitFor();
+  await expect(page.locator("#tool-select")).toHaveClass(/\bactive\b/);
 }
 
 export function activateTool(page, tool) {
@@ -25,6 +25,11 @@ export function activateTool(page, tool) {
 
 export function canvasClick(page, x, y, opts = {}) {
   return page.locator("#topo-canvas").click({ position: { x, y }, ...opts });
+}
+
+export async function contextMenuItem(page, x, y, label) {
+  await canvasClick(page, x, y, { button: "right" });
+  await page.locator("#topo-context-menu").getByText(label, { exact: true }).click();
 }
 
 export async function createNode(page, name, at, kind = null) {
