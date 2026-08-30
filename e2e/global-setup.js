@@ -32,7 +32,9 @@ async function waitFor(label, fn, timeoutMs = 60_000) {
 
 export async function waitForPostgres(container) {
   await waitFor("Postgres", () => {
-    execSync(`docker exec ${container} pg_isready -U ${PG.user} -d ${PG.db}`, { stdio: "pipe" });
+    // -h 127.0.0.1 проверяет именно TCP-слушателя: unix-сокет готов раньше,
+    // и без -h сервер может сделать одиночный ping в недоступное TCP и умереть.
+    execSync(`docker exec ${container} pg_isready -h 127.0.0.1 -U ${PG.user} -d ${PG.db}`, { stdio: "pipe" });
     return true;
   });
 }
