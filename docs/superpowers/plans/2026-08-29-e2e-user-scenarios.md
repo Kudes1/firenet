@@ -1057,12 +1057,12 @@ git commit -m "test(e2e): delete scenarios for device with link, network, subnet
 **Files:**
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Полный прогон**
+- [x] **Step 1: Полный прогон**
 
 Run: `make test-e2e`
 Expected: все спеки PASS (fixme пропущен), teardown чистит контейнер (`docker ps | grep firenet-e2e` пуст).
 
-- [ ] **Step 2: Обновить AGENTS.md**
+- [x] **Step 2: Обновить AGENTS.md**
 
 В раздел Verification добавить пункт:
 
@@ -1080,12 +1080,12 @@ Expected: все спеки PASS (fixme пропущен), teardown чистит
    зависимость build.
 ```
 
-- [ ] **Step 3: Полная верификация**
+- [x] **Step 3: Полная верификация**
 
 Run: `go build ./... && go vet ./... && gofmt -l . && go test ./... && node --test 'internal/httpapi/web/*.test.js' && make test-e2e`
 Expected: всё зелёное.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add AGENTS.md
