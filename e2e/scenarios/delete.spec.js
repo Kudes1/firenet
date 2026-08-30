@@ -21,17 +21,39 @@ async function arrangeDeviceWithLink(request, id) {
   });
 }
 
-async function selectSearchResult(page, query) {
+// selectSearchResult выделяет поисковый хит кликом в центр канваса и
+// удаляет его. Клик во время полёта камеры (tween 180ms после поиска) может
+// зацепить провод привязки или связь: #topo-delete при этом активируется, а
+// связи и привязки удаляются молча, без confirm (topology.js: setupDeleteButton).
+// Поэтому цель проверяем по тексту подтверждающего диалога: не тот объект —
+// диалог отклоняем и выбираем заново; после остановки полёта центр канваса
+// попадает в сам узел.
+async function selectSearchResult(page, query, expectDeleted) {
   await page.locator("#topo-search-toggle").click();
   await page.locator("#topo-search").fill(query);
   const box = await page.locator("#topo-canvas").boundingBox();
   if (!box) throw new Error("канвас не виден");
   const canvas = page.locator("#topo-canvas");
   const remove = page.locator("#topo-delete");
-  await expect.poll(async () => {
+  const select = () => expect.poll(async () => {
     await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
     return remove.isEnabled();
   }, { timeout: 2_000 }).toBe(true);
+  for (;;) {
+    await select();
+    const dialogP = page.waitForEvent("dialog", { timeout: 5_000 });
+    dialogP.catch(() => {});
+    const silentP = page
+      .waitForFunction(() => document.getElementById("topo-delete").disabled, null, { timeout: 5_000 })
+      .then(() => null);
+    silentP.catch(() => {});
+    const clickP = remove.click();
+    const dialog = await Promise.race([dialogP, silentP]);
+    const matched = !!dialog && dialog.message().includes(expectDeleted);
+    if (dialog) await (matched ? dialog.accept() : dialog.dismiss());
+    await clickP;
+    if (matched) return;
+  }
 }
 
 test("удаление устройства со связью убирает и связь", async ({ page, request }) => {
@@ -40,9 +62,7 @@ test("удаление устройства со связью убирает и 
   await loginViaUI(page);
   await openWithDraft(page, id, "/ui/topology");
 
-  await selectSearchResult(page, "d-r1");
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.locator("#topo-delete").click();
+  await selectSearchResult(page, "d-r1", "устройство d-r1");
 
   await waitTopology(request, id, (doc) => doc.topology.devices.every((d) => d.name !== "d-r1"));
   const doc = await getTopology(request, id);
@@ -66,9 +86,7 @@ test("удаление сети чистит экспорты фильтров",
   await loginViaUI(page);
   await openWithDraft(page, id, "/ui/topology");
 
-  await selectSearchResult(page, "dn-net");
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.locator("#topo-delete").click();
+  await selectSearchResult(page, "dn-net", "сеть dn-net");
 
   await waitTopology(request, id, (doc) => (doc.topology.networks || []).length === 0);
   const doc = await getTopology(request, id);
