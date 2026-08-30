@@ -19,6 +19,14 @@ export async function openWithDraft(page, draftId, path) {
   await expect(page.locator("#tool-select")).toHaveClass(/\bactive\b/);
 }
 
+export async function openTablePage(page, draftId, path) {
+  await page.addInitScript((id) => {
+    localStorage.setItem("firenet-last-draft-id", id);
+    sessionStorage.setItem("firenet-draft-id", id);
+  }, draftId);
+  await page.goto(env().baseURL + path);
+}
+
 export function activateTool(page, tool) {
   return page.locator(`#tool-${tool}`).click();
 }
