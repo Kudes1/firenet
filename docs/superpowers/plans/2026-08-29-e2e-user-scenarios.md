@@ -76,7 +76,7 @@ e2e/
 - Consumes: бинарник `bin/firenet` (сборка в шаге), docker CLI.
 - Produces: `e2e/.e2e-env.json` вида `{"baseURL":"http://127.0.0.1:PORT","container":"firenet-e2e-pg-...","admin":{"username":"e2e-admin","password":"e2e-admin-password-1"}}` — его читают все последующие задачи через `env()`; make-цель `make test-e2e`.
 
-- [ ] **Step 1: Инициализировать e2e-пакет**
+- [x] **Step 1: Инициализировать e2e-пакет**
 
 `e2e/package.json`:
 
@@ -108,7 +108,7 @@ playwright-report/
 cd e2e && npm install && npx playwright install chromium
 ```
 
-- [ ] **Step 2: Написать global-setup.js**
+- [x] **Step 2: Написать global-setup.js**
 
 ```js
 import { execSync, spawn } from "node:child_process";
@@ -192,7 +192,7 @@ export default async function globalSetup() {
 }
 ```
 
-- [ ] **Step 3: Написать global-teardown.js**
+- [x] **Step 3: Написать global-teardown.js**
 
 ```js
 import { execSync } from "node:child_process";
@@ -210,7 +210,7 @@ export default async function globalTeardown() {
 }
 ```
 
-- [ ] **Step 4: playwright.config.js и smoke-тест**
+- [x] **Step 4: playwright.config.js и smoke-тест**
 
 `e2e/playwright.config.js`:
 
@@ -253,7 +253,7 @@ export function env() {
 }
 ```
 
-- [ ] **Step 5: Makefile-цель**
+- [x] **Step 5: Makefile-цель**
 
 В `Makefile` (после цели `test`):
 
@@ -264,17 +264,17 @@ test-e2e: build
 
 В `.PHONY` добавить `test-e2e`.
 
-- [ ] **Step 6: Прогон smoke-теста**
+- [x] **Step 6: Прогон smoke-теста**
 
 Run: `make test-e2e`
 Expected: PASS 1 test; в логе виден запуск postgres-контейнера и `serve`. Повторный запуск проходит так же (контейнер и сервер пересоздаются).
 
-- [ ] **Step 7: Go-проверки не задеты**
+- [x] **Step 7: Go-проверки не задеты**
 
 Run: `go build ./... && go vet ./... && gofmt -l .`
 Expected: пусто; `go test ./...` PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add e2e/package.json e2e/.gitignore e2e/playwright.config.js e2e/global-setup.js e2e/global-teardown.js e2e/scenarios/smoke.spec.js e2e/helpers/api.js Makefile .gitignore
@@ -302,7 +302,7 @@ git commit -m "test(e2e): playwright scaffold with per-run postgres and serve li
   - `putRules(request, draftId, chains)` — `chains: [{name,defaultAction,rules:[...]}]` (тело PolicyDoc `{chains}`).
   - `getRules(request, draftId)`, `getSubnets(request, draftId)`.
 
-- [ ] **Step 1: Написать тест-заготовку (сначала падает: функций нет)**
+- [x] **Step 1: Написать тест-заготовку (сначала падает: функций нет)**
 
 `e2e/scenarios/api-helpers.spec.js`:
 
@@ -324,7 +324,7 @@ test("draft создаётся и принимает операции", async ({
 Run: `cd e2e && npx playwright test scenarios/api-helpers.spec.js`
 Expected: FAIL — `login is not a function` / импорт не находится.
 
-- [ ] **Step 2: Реализовать helpers/api.js**
+- [x] **Step 2: Реализовать helpers/api.js**
 
 Дописать к заглушке `env()` из Task 1:
 
@@ -378,12 +378,12 @@ export async function putRules(request, id, chains) {
 
 Замечание: если реальный ответ `GET /api/drafts/{id}/topology` оборачивает данные иначе (проверить по `getDraftTopology` в `internal/httpapi/handlers.go` и по форме, которую читает `web/common.js`/`Api`), хелпер возвращает форму, ожидаемую тестами: `{topology: {devices, links, networks, sets, unions}}`. Расхождение чинится в хелпере, не в тестах.
 
-- [ ] **Step 3: Прогон**
+- [x] **Step 3: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/api-helpers.spec.js`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/helpers/api.js e2e/scenarios/api-helpers.spec.js
@@ -408,7 +408,7 @@ git commit -m "test(e2e): api helper for draft arrange"
   - `contextMenuItem(page, x, y, label)` — ПКМ по канвасу и клик по пункту меню с текстом `label`.
   - `waitTopology(request, draftId, predicate)` — `expect.poll` по `getTopology`, ждёт, пока `predicate(doc)` истинно (5с).
 
-- [ ] **Step 1: Написать сценарий логина (падает: ui.js пуст)**
+- [x] **Step 1: Написать сценарий логина (падает: ui.js пуст)**
 
 `e2e/scenarios/login.spec.js`:
 
@@ -434,7 +434,7 @@ test("верные креды ведут на topology", async ({ page }) => {
 Run: `cd e2e && npx playwright test scenarios/login.spec.js`
 Expected: FAIL — `loginViaUI is not a function`.
 
-- [ ] **Step 2: Реализовать helpers/ui.js**
+- [x] **Step 2: Реализовать helpers/ui.js**
 
 ```js
 import { expect } from "@playwright/test";
@@ -504,12 +504,12 @@ export async function openTablePage(page, draftId, path) {
 }
 ```
 
-- [ ] **Step 3: Прогон**
+- [x] **Step 3: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/login.spec.js`
 Expected: PASS 2 test.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/helpers/ui.js e2e/scenarios/login.spec.js
@@ -527,7 +527,7 @@ git commit -m "test(e2e): ui helpers and login scenarios"
 - Consumes: `login`, `createDraft`, `getTopology` (api.js), `loginViaUI`, `openWithDraft`, `activateTool`, `createNode`, `waitTopology` (ui.js).
 - Produces: ничего (листовой сценарий).
 
-- [ ] **Step 1: Написать сценарий**
+- [x] **Step 1: Написать сценарий**
 
 ```js
 import { test, expect } from "@playwright/test";
@@ -568,12 +568,12 @@ test("создание роутера, свитча и сети инструме
 
 Важно: `createNode` вызывается при активном инструменте (инструмент не сбрасывается после popover — клики по канвасу продолжают открывать его). Проверка «узел реально нарисован» — последняя секция: клик в точку создания выделяет узел, кнопка удаления становится активной.
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/create-objects.spec.js`
 Expected: PASS. При падении — как минимум один раз прогнать с `--headed` (`npx playwright test --headed ...`) и убедиться глазами, что узлы появились и координаты кликов попадают в канвас (а не в тулбар).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add e2e/scenarios/create-objects.spec.js
@@ -590,7 +590,7 @@ git commit -m "test(e2e): user scenario - create router, switch, network via can
 **Interfaces:**
 - Consumes: хелперы Tasks 2–4 (имя `freshDraft` повторить локально в спеке — код в шаге).
 
-- [ ] **Step 1: Написать сценарий**
+- [x] **Step 1: Написать сценарий**
 
 ```js
 import { test, expect } from "@playwright/test";
@@ -632,12 +632,12 @@ test("connect-инструмент: связь устройство–устро
 });
 ```
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/link-tool.spec.js`
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add e2e/scenarios/link-tool.spec.js
@@ -655,9 +655,11 @@ git commit -m "test(e2e): user scenario - link tool connects devices and attache
 - Consumes: хелперы Tasks 2–4.
 - Produces: ничего.
 
-- [ ] **Step 1: Написать сценарий**
+- [x] **Step 1: Написать сценарий**
 
 Arrange — всё через UI (нужны видимые узлы и привязанные сети — кандидаты экспортов берутся из сетей, привязанных к концам связи). Середина связи r1–r2 — точка (550,300) (узлы в (400,300) и (700,300)).
+
+Реализация создаёт две подсети и назначает их сетям через страницы `/ui/subnets` и `/ui/networks`; API оставлен только для создания черновика и проверки сохранённой топологии. Селекторы экспортов находятся по `.member-add select`.
 
 ```js
 import { test, expect } from "@playwright/test";
@@ -704,7 +706,7 @@ test("связь становится фильтрованной с экспор
 
   // включаем фильтр, добавляем по экспорту на каждую сторону
   await panel.getByRole("button", { name: "Сделать фильтрованной" }).click();
-  const selects = panel.locator("select.member-add");
+  const selects = panel.locator(".member-add select");
   await selects.nth(0).selectOption({ label: "lf-net-a" });
   await selects.nth(1).selectOption({ label: "lf-net-b" });
   await panel.getByRole("button", { name: "Применить" }).click();
@@ -725,12 +727,12 @@ test("связь становится фильтрованной с экспор
 });
 ```
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/link-filter.spec.js`
 Expected: PASS. Если порядок `select.member-add` не соответствует сторонам A/B (первый select — сторона A), убедиться по рендеру `sideColumn("a")` в `link_panel.js` и поправить `nth()` (не менять смысл теста).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add e2e/scenarios/link-filter.spec.js
@@ -748,7 +750,9 @@ git commit -m "test(e2e): user scenario - toggle link between plain and filtered
 - Consumes: `login, createDraft, op, getTopology, getRules, putRules, putSubnets, putTopology` (api.js), `loginViaUI, openTablePage` (ui.js).
 - Produces: ничего.
 
-- [ ] **Step 1: Написать сценарии**
+Имена черновиков в реализованных спеках получают случайный суффикс, поэтому повтор и retry не сталкиваются с уже созданным черновиком.
+
+- [x] **Step 1: Написать сценарии**
 
 ```js
 import { test, expect } from "@playwright/test";
@@ -872,7 +876,7 @@ export async function putTopology(request, id, topology) {
 
 Проверить в `internal/httpapi/handlers.go` (`putDraftTopology`), какова точная форма тела (`{topology, layout}` или плоский документ), и привести `data` в соответствие; при расхождении правится хелпер, не тест.
 
-- [ ] **Step 2: Известный разрыв — переименование подсети-члена сети (test.fixme)**
+- [x] **Step 2: Известный разрыв — переименование подсети-члена сети (test.fixme)**
 
 Сервер отвергает PUT subnets, если сеть ссылается на старое имя (`unknown subnet`, validate.go:120), а UI подсетей не переименовывает ссылки — пользовательская задача «переименовать подсеть внутри сети» сегодня не решается. Документируем тестом, помеченным `test.fixme` (выполняется, когда каскадное переименование реализуют):
 
@@ -897,12 +901,12 @@ test.fixme("переименование подсети-члена сети об
 });
 ```
 
-- [ ] **Step 3: Прогон**
+- [x] **Step 3: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/rename.spec.js`
 Expected: PASS 3 (fixme — пропущен). Если тест «набор» падает на проверке `rules` — сначала убедиться по `web/sets.js`, что переименование набора в UI вообще не трогает правила; если это так — привести тест к документированию фактического поведения (assert на старое имя в правиле + комментарий), не оставлять падающим.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add e2e/scenarios/rename.spec.js e2e/helpers/api.js
@@ -920,7 +924,9 @@ git commit -m "test(e2e): rename scenarios for network, subnet, set"
 - Consumes: `login, createDraft, op, getTopology, getSubnets, putSubnets, putTopology` (api.js), `loginViaUI, openWithDraft, openTablePage, waitTopology` (ui.js).
 - Produces: ничего.
 
-- [ ] **Step 1: Написать сценарии**
+У созданных API узлов фиксируются позиции. Поиск на канвасе центрирует камеру, но не выделяет объект, поэтому после ввода запроса тест кликает по центру канваса и удаляет выделенное кнопкой `#topo-delete`.
+
+- [x] **Step 1: Написать сценарии**
 
 ```js
 import { test, expect } from "@playwright/test";
@@ -1032,12 +1038,12 @@ test("удаление набора (сценарий 5)", async ({ page, reques
 
 (`putTopology` — из Task 7. Селектор баннера ошибки уточнить по `web/common.js` `showBanner` — класс контейнера; в тесте правится селектор, не суть проверки.)
 
-- [ ] **Step 2: Прогон**
+- [x] **Step 2: Прогон**
 
 Run: `cd e2e && npx playwright test scenarios/delete.spec.js`
 Expected: PASS 5. Особое внимание тесту «удаление сети»: `deleteByIdentity` для выделенной сети зовёт `delete-network`; если после `Enter` в поиске выделена не сеть, а устройство — выделение уточнить (`fitNode` выделяет хит, см. `computeSearchHits`: сети матчатся по имени/CIDR подсетей).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add e2e/scenarios/delete.spec.js
