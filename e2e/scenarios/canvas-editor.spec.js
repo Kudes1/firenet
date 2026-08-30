@@ -1,8 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { login, createDraft, op, confirmDraft, getLayout } from "../helpers/api.js";
+import { login, createDraft, op, confirmDraft, getLayout, uid } from "../helpers/api.js";
 import { loginViaUI, openWithDraft, openCurrentVersion, dragNode } from "../helpers/ui.js";
-
-const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 test("перетаскивание узла сохраняет позицию", async ({ page, request }) => {
   await login(request);

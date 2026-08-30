@@ -1,13 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { login, createDraft, op, putRules, putSubnets } from "../helpers/api.js";
+import { op, putRules, putSubnets, freshDraft, uid } from "../helpers/api.js";
 import { loginViaUI, openTablePage } from "../helpers/ui.js";
-
-const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-async function freshDraft(request, name) {
-  await login(request);
-  return createDraft(request, `${name}-${uid()}`);
-}
 
 async function arrangeTwoSites(request, id, { linked = true, mirror = true } = {}) {
   const a = `dg-a-${uid()}`, b = `dg-b-${uid()}`;
@@ -54,6 +47,7 @@ test("путь не найден без связи", async ({ page, request }) =
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/diagnose");
   if (await page.locator("#diag-panel").isHidden()) await page.locator("#diag-tool-path").click();
+  await expect(page.locator("#diag-panel")).toBeVisible();
   await page.locator("#diag-src").fill("10.50.0.7");
   await page.locator("#diag-dst").fill("10.51.0.7");
   await page.getByRole("button", { name: "Диагностировать" }).click();
@@ -67,6 +61,7 @@ test("односторонняя доступность без mirror", async ({
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/diagnose");
   if (await page.locator("#diag-panel").isHidden()) await page.locator("#diag-tool-path").click();
+  await expect(page.locator("#diag-panel")).toBeVisible();
   await page.locator("#diag-src").fill("10.50.0.7");
   await page.locator("#diag-dst").fill("10.51.0.7");
   await page.getByRole("button", { name: "Диагностировать" }).click();

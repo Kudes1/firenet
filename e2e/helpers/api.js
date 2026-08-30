@@ -6,6 +6,19 @@ export function env() {
 
 const base = () => env().baseURL;
 
+export const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+export const userCreds = () => ({
+  username: `e2e-user-${uid()}`,
+  password: "e2e-user-password-1",
+  role: "user",
+});
+
+export async function freshDraft(request, name) {
+  await login(request);
+  return createDraft(request, `${name}-${uid()}`);
+}
+
 async function ensureOk(res, what) {
   if (!res.ok()) throw new Error(`${what}: ${res.status()} ${await res.text()}`);
   return res;

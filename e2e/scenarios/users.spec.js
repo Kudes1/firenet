@@ -1,14 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { env, login, registerUser } from "../helpers/api.js";
+import { env, login, registerUser, uid, userCreds } from "../helpers/api.js";
 import { loginViaUI } from "../helpers/ui.js";
-
-const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-const userCreds = () => ({
-  username: `e2e-u-${uid()}`,
-  password: "e2e-user-password-1",
-  role: "user",
-});
 
 test("admin создаёт пользователя формой", async ({ page }) => {
   await loginViaUI(page);
@@ -51,5 +43,7 @@ test("logout возвращает на страницу логина", async ({ 
   await page.locator(".logout-btn").click();
   await page.waitForURL(/\/login/);
   await page.goto(env().baseURL + "/ui/topology");
-  await page.waitForURL(/\/login/);
+  // expect-поллинг вместо waitForURL: клиентский редирект на /login
+  // абортит навигацию (ERR_ABORTED), waitForURL на этом флакует.
+  await expect(page).toHaveURL(/\/login/);
 });

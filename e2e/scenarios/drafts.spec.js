@@ -1,16 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { env, login, createDraft, op, registerUser, getVersions } from "../helpers/api.js";
+import { env, login, createDraft, op, registerUser, getVersions, uid, userCreds } from "../helpers/api.js";
 import { loginViaUI } from "../helpers/ui.js";
 
-const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-const userCreds = () => ({
-  username: `e2e-user-${uid()}`,
-  password: "e2e-user-password-1",
-  role: "user",
-});
-
-test("создание черновика формой", async ({ page, request }) => {
+test("создание черновика формой", async ({ page }) => {
   await loginViaUI(page);
   await page.goto(env().baseURL + "/ui/drafts");
   const name = `df-form-${uid()}`;

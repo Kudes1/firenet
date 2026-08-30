@@ -1,9 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { env, login, createDraft, op, confirmDraft, getCurrentTopology } from "../helpers/api.js";
+import { env, login, createDraft, op, confirmDraft, getCurrentTopology, uid } from "../helpers/api.js";
 import { loginViaUI } from "../helpers/ui.js";
 
 const { baseURL } = env();
-const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 test("diff новой версии против предыдущей", async ({ page, request }) => {
   await login(request);

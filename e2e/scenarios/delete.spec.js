@@ -1,15 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { login, createDraft, op, getTopology, getSubnets, putSubnets, putTopology } from "../helpers/api.js";
+import { op, getTopology, getSubnets, putSubnets, putTopology, freshDraft } from "../helpers/api.js";
 import {
   loginViaUI, openWithDraft, openTablePage, waitTopology,
 } from "../helpers/ui.js";
-
-const draftName = (name) => `${name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-async function freshDraft(request, name) {
-  await login(request);
-  return createDraft(request, draftName(name));
-}
 
 async function arrangeDeviceWithLink(request, id) {
   await op(request, id, { kind: "create-device", device: { name: "d-r1", kind: "router" } });

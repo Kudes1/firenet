@@ -1,15 +1,8 @@
 import { test, expect } from "@playwright/test";
 import {
-  login, createDraft, op, getTopology, getRules, getSubnets, putRules, putSubnets, putTopology,
+  op, getTopology, getRules, getSubnets, putRules, putSubnets, putTopology, freshDraft,
 } from "../helpers/api.js";
 import { loginViaUI, openTablePage } from "../helpers/ui.js";
-
-const draftName = (name) => `${name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-async function freshDraft(request, name) {
-  await login(request);
-  return createDraft(request, draftName(name));
-}
 
 async function arrangeConnected(request, id) {
   await putSubnets(request, id, [{ name: "rn-sub", cidr: "10.99.0.0/24" }]);

@@ -1,13 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { login, createDraft, op, putRules, putSubnets } from "../helpers/api.js";
+import { op, putRules, putSubnets, freshDraft } from "../helpers/api.js";
 import { loginViaUI, openTablePage } from "../helpers/ui.js";
-
-const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-async function freshDraft(request, name) {
-  await login(request);
-  return createDraft(request, `${name}-${uid()}`);
-}
 
 async function arrangeLinkedDevices(request, id, prefix) {
   await op(request, id, { kind: "create-device", device: { name: `${prefix}-r1`, kind: "router" } });

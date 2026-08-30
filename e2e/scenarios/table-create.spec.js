@@ -1,13 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { login, createDraft, op, getSubnets, getTopology, putSubnets } from "../helpers/api.js";
+import { op, getSubnets, getTopology, putSubnets, freshDraft, uid } from "../helpers/api.js";
 import { loginViaUI, openTablePage } from "../helpers/ui.js";
-
-const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-async function freshDraft(request, name) {
-  await login(request);
-  return createDraft(request, `${name}-${uid()}`);
-}
 
 test("создание подсети формой", async ({ page, request }) => {
   const id = await freshDraft(request, "tcf-sub");
