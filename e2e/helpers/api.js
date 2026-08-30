@@ -54,6 +54,7 @@ export async function getTopology(request, id) {
 
 export const getSubnets = (request, id) => get(request, `/api/drafts/${id}/subnets`);
 export const getRules = (request, id) => get(request, `/api/drafts/${id}/rules`);
+export const getLayout = (request, id) => get(request, `/api/drafts/${id}/layout`);
 export const getVersions = (request) => get(request, "/api/versions");
 export const getCurrentTopology = (request) =>
   get(request, "/api/versions/current/topology").then((doc) => (doc.topology ? doc : { topology: doc }));

@@ -27,6 +27,20 @@ export async function openTablePage(page, draftId, path) {
   await page.goto(env().baseURL + path);
 }
 
+export async function openCurrentVersion(page, path) {
+  await page.goto(env().baseURL + path);
+}
+
+// drag по канвасу: from/to — экранные координаты относительно канваса
+// (мировые = экранным при камере по умолчанию).
+export async function dragNode(page, from, to) {
+  const box = await page.locator("#topo-canvas").boundingBox();
+  await page.mouse.move(box.x + from.x, box.y + from.y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + to.x, box.y + to.y, { steps: 5 });
+  await page.mouse.up();
+}
+
 export function activateTool(page, tool) {
   return page.locator(`#tool-${tool}`).click();
 }
