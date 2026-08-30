@@ -1,11 +1,11 @@
 import { expect } from "@playwright/test";
 import { env, getTopology } from "./api.js";
 
-export async function loginViaUI(page) {
-  const { admin } = env();
+export async function loginViaUI(page, creds) {
+  const c = creds || env().admin;
   await page.goto(env().baseURL + "/login");
-  await page.locator("#login-form input[name=username]").fill(admin.username);
-  await page.locator("#login-form input[name=password]").fill(admin.password);
+  await page.locator("#login-form input[name=username]").fill(c.username);
+  await page.locator("#login-form input[name=password]").fill(c.password);
   await page.locator("#login-form button[type=submit]").click();
   await page.waitForURL(/\/ui\/topology$/);
 }

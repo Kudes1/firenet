@@ -11,9 +11,15 @@ async function ensureOk(res, what) {
   return res;
 }
 
-export async function login(request) {
-  const { admin } = env();
-  await ensureOk(await request.post(base() + "/api/login", { data: admin }), "login");
+export async function login(request, creds) {
+  const c = creds || env().admin;
+  await ensureOk(await request.post(base() + "/api/login", { data: c }), "login");
+}
+
+export async function registerUser(request, { username, password, role }) {
+  await ensureOk(
+    await request.post(base() + "/api/users", { data: { username, password, role } }),
+    "registerUser");
 }
 
 export async function createDraft(request, name) {
@@ -41,6 +47,7 @@ export async function getTopology(request, id) {
 
 export const getSubnets = (request, id) => get(request, `/api/drafts/${id}/subnets`);
 export const getRules = (request, id) => get(request, `/api/drafts/${id}/rules`);
+export const getVersions = (request) => get(request, "/api/versions");
 
 export async function putSubnets(request, id, subnets) {
   await ensureOk(
