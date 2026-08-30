@@ -27,6 +27,8 @@
  2. `go vet ./...`
  3. `gofmt -l .` — must print nothing (`make fmt` to fix)
  4. `go test ./...`
+ 5. `make test-e2e` — E2E-сценарии Playwright (нужны docker и chromium;
+    первый запуск: `cd e2e && npm install && npx playwright install chromium`).
 
 No linter beyond `go vet` is configured — don't try golangci-lint.
 
@@ -41,7 +43,10 @@ No package.json / node_modules — only node built-ins.
  - topology.yaml / subnets.yaml / rules.yaml at repo root are the live working
    data for `validate`/`compile`/`serve`; examples/ holds pristine samples,
    out/ is generated output.
- - Tests assert directly on structs/strings; there is no golden-file/-update infra.
+  - Tests assert directly on structs/strings; there is no golden-file/-update infra.
+  - e2e/ has its own package.json (playwright) — the app itself doesn't depend
+    on node; editing e2e helpers doesn't require rebuilding the binary, but
+    make test-e2e rebuilds bin/firenet via its build dependency anyway.
 
 ## Общие правила
  - Отвечай в чате и задавай вопросы на русском языке
