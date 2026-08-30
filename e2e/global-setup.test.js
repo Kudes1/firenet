@@ -34,3 +34,32 @@ test("cleanupSetupResources останавливает сервер и удал�
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("waitForPostgres проверяет pg_isready до запуска сервера", async () => {
+  assert.equal(typeof setup.waitForPostgres, "function");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "firenet-e2e-"));
+  const log = path.join(dir, "docker.log");
+  const docker = path.join(dir, "docker");
+  fs.writeFileSync(docker, "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$E2E_DOCKER_LOG\"\n");
+  fs.chmodSync(docker, 0o755);
+
+  const oldPath = process.env.PATH;
+  const oldLog = process.env.E2E_DOCKER_LOG;
+  process.env.PATH = `${dir}:${oldPath}`;
+  process.env.E2E_DOCKER_LOG = log;
+
+  try {
+    await setup.waitForPostgres("firenet-e2e-pg-test");
+    assert.deepEqual(fs.readFileSync(log, "utf8").trim().split("\n"), [
+      "exec", "firenet-e2e-pg-test", "pg_isready", "-U", "firenet", "-d", "firenet",
+    ]);
+    const source = fs.readFileSync(new URL("./global-setup.js", import.meta.url), "utf8");
+    assert.ok(source.indexOf("await waitForPostgres(container)") < source.indexOf("server = spawn("));
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldLog === undefined) delete process.env.E2E_DOCKER_LOG;
+    else process.env.E2E_DOCKER_LOG = oldLog;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

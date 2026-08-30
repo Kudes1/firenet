@@ -30,6 +30,13 @@ async function waitFor(label, fn, timeoutMs = 60_000) {
   }
 }
 
+export async function waitForPostgres(container) {
+  await waitFor("Postgres", () => {
+    execSync(`docker exec ${container} pg_isready -U ${PG.user} -d ${PG.db}`, { stdio: "pipe" });
+    return true;
+  });
+}
+
 export function cleanupSetupResources(container, server) {
   if (server?.pid) {
     try { process.kill(server.pid, "SIGTERM"); } catch { /* уже умер */ }
@@ -51,6 +58,7 @@ export default async function globalSetup() {
       `-p 127.0.0.1:${pgPort}:5432 postgres:16-alpine`,
       { stdio: "pipe" }
     );
+    await waitForPostgres(container);
 
     const appPort = await freePort();
     fs.mkdirSync(new URL("./.tmp/", import.meta.url), { recursive: true });
