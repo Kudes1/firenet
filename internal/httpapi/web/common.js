@@ -224,6 +224,16 @@ export const Api = {
     if (rev) lastDraftRevision = rev;
     return res.status === 204 ? null : res.json();
   },
+  async patch(path, body) {
+    const headers = { "Content-Type": "application/json" };
+    if (lastDraftRevision) headers["X-Draft-Revision"] = lastDraftRevision;
+    const res = await fetch(path, { method: "PATCH", headers, body: JSON.stringify(body) });
+    if (res.status === 401) return redirectToLogin();
+    if (!res.ok) throw await apiError(res);
+    const rev = res.headers?.get("X-Draft-Revision");
+    if (rev) lastDraftRevision = rev;
+    return res.status === 204 ? null : res.json();
+  },
   async delete(path) {
     const res = await fetch(path, { method: "DELETE" });
     if (res.status === 401) return redirectToLogin();
