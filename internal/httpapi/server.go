@@ -67,6 +67,8 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/login", h.login)
 	mux.HandleFunc("POST /api/logout", h.logout)
+	mux.HandleFunc("GET /api/invites/{token}", h.getInvite)
+	mux.HandleFunc("POST /api/invites/{token}", h.acceptInvite)
 	mux.Handle("/api/", auth.RequireAuth(users)(apiMux))
 
 	// Standalone UI pages.
@@ -74,6 +76,7 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 		http.Redirect(w, r, "/ui/topology", http.StatusFound)
 	})
 	mux.HandleFunc("GET /login", servePage("login.html"))
+	mux.HandleFunc("GET /invite/{token}", servePage("invite.html"))
 	mux.HandleFunc("GET /ui/topology", servePage("topology.html"))
 	mux.HandleFunc("GET /ui/subnets", servePage("subnets.html"))
 	mux.HandleFunc("GET /ui/networks", servePage("networks.html"))
