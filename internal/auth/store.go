@@ -121,6 +121,51 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	return tx.Commit(ctx)
 }
 
+// UpdateUserRole changes the role of a user, refusing to demote the last
+// remaining admin so the team can never lock itself out of user management.
+func (s *Store) UpdateUserRole(ctx context.Context, id string, role Role) (User, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return User{}, fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var currentRole string
+	err = tx.QueryRow(ctx, `SELECT role FROM users WHERE id = $1 FOR UPDATE`, id).Scan(&currentRole)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("lookup user: %w", err)
+	}
+
+	if Role(currentRole) == RoleAdmin && role != RoleAdmin {
+		var admins int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM users WHERE role = 'admin'`).Scan(&admins); err != nil {
+			return User{}, fmt.Errorf("count admins: %w", err)
+		}
+		if admins <= 1 {
+			return User{}, ErrLastAdmin
+		}
+	}
+
+	var u User
+	var roleStr string
+	err = tx.QueryRow(ctx, `
+		UPDATE users SET role = $1 WHERE id = $2
+		RETURNING id, username, password_hash, role, created_at, activated`,
+		string(role), id,
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt, &u.Activated)
+	if err != nil {
+		return User{}, fmt.Errorf("update role: %w", err)
+	}
+	u.Role = Role(roleStr)
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, fmt.Errorf("commit: %w", err)
+	}
+	return u, nil
+}
+
 // BootstrapAdmin creates the first admin account from username/password
 // if the users table is empty; it is a no-op once any user exists, so
 // it's safe to call on every server startup.

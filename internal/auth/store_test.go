@@ -172,3 +172,43 @@ func TestCreateUserDefaultsToActivated(t *testing.T) {
 		t.Fatalf("ListUsers = %+v, want one activated user", users)
 	}
 }
+
+func TestUpdateUserRole(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	ctx := context.Background()
+	if _, err := store.CreateUser(ctx, "admin1", "hunter22222", RoleAdmin); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	target, err := store.CreateUser(ctx, "target", "hunter22222", RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	updated, err := store.UpdateUserRole(ctx, target.ID, RoleAdmin)
+	if err != nil {
+		t.Fatalf("UpdateUserRole: %v", err)
+	}
+	if updated.Role != RoleAdmin {
+		t.Fatalf("got role %q, want admin", updated.Role)
+	}
+}
+
+func TestUpdateUserRoleRefusesDemotingLastAdmin(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	ctx := context.Background()
+	admin, err := store.CreateUser(ctx, "onlyadmin2", "hunter22222", RoleAdmin)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	if _, err := store.UpdateUserRole(ctx, admin.ID, RoleUser); err != ErrLastAdmin {
+		t.Fatalf("got err %v, want ErrLastAdmin", err)
+	}
+}
+
+func TestUpdateUserRoleUnknownUser(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	if _, err := store.UpdateUserRole(context.Background(), "00000000-0000-0000-0000-000000000000", RoleAdmin); err != ErrUserNotFound {
+		t.Fatalf("got err %v, want ErrUserNotFound", err)
+	}
+}
