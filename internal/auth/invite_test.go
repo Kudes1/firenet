@@ -133,3 +133,46 @@ func TestActivateUserExpiredToken(t *testing.T) {
 		t.Fatalf("got err %v, want ErrInviteExpired", err)
 	}
 }
+
+func TestRegenerateInvite(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	ctx := context.Background()
+	user, firstToken, err := store.CreateUserInvite(ctx, "paul", RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUserInvite: %v", err)
+	}
+
+	secondToken, err := store.RegenerateInvite(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("RegenerateInvite: %v", err)
+	}
+	if secondToken == firstToken {
+		t.Fatal("RegenerateInvite should produce a fresh token")
+	}
+	if _, err := store.GetUserByInviteToken(ctx, firstToken); err != ErrUserNotFound {
+		t.Fatalf("got err %v, want ErrUserNotFound for the superseded token", err)
+	}
+	if _, err := store.GetUserByInviteToken(ctx, secondToken); err != nil {
+		t.Fatalf("GetUserByInviteToken(secondToken): %v", err)
+	}
+}
+
+func TestRegenerateInviteRejectsActivatedUser(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	ctx := context.Background()
+	user, err := store.CreateUser(ctx, "quinn", "hunter22222", RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	if _, err := store.RegenerateInvite(ctx, user.ID); err != ErrAlreadyActivated {
+		t.Fatalf("got err %v, want ErrAlreadyActivated", err)
+	}
+}
+
+func TestRegenerateInviteUnknownUser(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	if _, err := store.RegenerateInvite(context.Background(), "00000000-0000-0000-0000-000000000000"); err != ErrUserNotFound {
+		t.Fatalf("got err %v, want ErrUserNotFound", err)
+	}
+}

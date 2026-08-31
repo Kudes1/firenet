@@ -95,3 +95,28 @@ func (s *Store) ActivateUser(ctx context.Context, token, password string) (User,
 	user.Role = Role(roleStr)
 	return user, nil
 }
+
+func (s *Store) RegenerateInvite(ctx context.Context, id string) (string, error) {
+	var activated bool
+	err := s.db.QueryRow(ctx, `SELECT activated FROM users WHERE id = $1`, id).Scan(&activated)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrUserNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup user: %w", err)
+	}
+	if activated {
+		return "", ErrAlreadyActivated
+	}
+
+	token, err := newSessionToken()
+	if err != nil {
+		return "", err
+	}
+	expiresAt := time.Now().Add(InviteTTL)
+	if _, err := s.db.Exec(ctx, `UPDATE users SET invite_token = $1, invite_expires_at = $2 WHERE id = $3`,
+		token, expiresAt, id); err != nil {
+		return "", fmt.Errorf("regenerate invite: %w", err)
+	}
+	return token, nil
+}
