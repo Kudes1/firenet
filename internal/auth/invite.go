@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // InviteTTL is how long a freshly generated (or regenerated) invite link
@@ -46,4 +48,25 @@ func (s *Store) CreateUserInvite(ctx context.Context, username string, role Role
 	}
 	u.Role = Role(roleStr)
 	return u, token, nil
+}
+
+func (s *Store) GetUserByInviteToken(ctx context.Context, token string) (User, error) {
+	var u User
+	var roleStr string
+	var expiresAt *time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT id, username, password_hash, role, created_at, activated, invite_expires_at
+		FROM users WHERE invite_token = $1`, token,
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt, &u.Activated, &expiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("get user by invite token: %w", err)
+	}
+	if expiresAt == nil || time.Now().After(*expiresAt) {
+		return User{}, ErrInviteExpired
+	}
+	u.Role = Role(roleStr)
+	return u, nil
 }
