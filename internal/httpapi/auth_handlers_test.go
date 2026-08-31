@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/kudes1/firenet/internal/auth"
@@ -126,7 +127,7 @@ func TestCreateAndListUsersAsAdmin(t *testing.T) {
 	srv, _ := newUnauthenticatedTestServer(t)
 	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
 
-	body, _ := json.Marshal(createUserRequest{Username: "ivan", Password: "hunter22222", Role: "user"})
+	body, _ := json.Marshal(createUserRequest{Username: "ivan", Role: "user"})
 	req := httptest.NewRequest(http.MethodPost, "/api/users", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(adminCookie)
@@ -159,7 +160,7 @@ func TestCreateUserAsNonAdminIsForbidden(t *testing.T) {
 	}
 	userCookie := loginAndGetCookie(t, srv, "plain", "hunter22222")
 
-	body, _ := json.Marshal(createUserRequest{Username: "someone", Password: "hunter22222", Role: "user"})
+	body, _ := json.Marshal(createUserRequest{Username: "someone", Role: "user"})
 	req := httptest.NewRequest(http.MethodPost, "/api/users", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(userCookie)
@@ -198,6 +199,32 @@ func TestDeleteLastAdminIsRejected(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("got status %d, want 400", rec.Code)
+	}
+}
+
+func TestCreateUserReturnsInviteLink(t *testing.T) {
+	srv, _ := newUnauthenticatedTestServer(t)
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+
+	body, _ := json.Marshal(createUserRequest{Username: "rosa", Role: "user"})
+	req := httptest.NewRequest(http.MethodPost, "/api/users", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got status %d, want 201; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp createUserResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.User.Activated {
+		t.Fatal("a freshly invited user should not be activated yet")
+	}
+	if !strings.Contains(resp.InviteURL, "/invite/") {
+		t.Fatalf("inviteUrl = %q, want it to contain /invite/", resp.InviteURL)
 	}
 }
 

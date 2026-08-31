@@ -11,8 +11,12 @@ import (
 
 type createUserRequest struct {
 	Username string `json:"username"`
-	Password string `json:"password"`
 	Role     string `json:"role"`
+}
+
+type createUserResponse struct {
+	User      userResponse `json:"user"`
+	InviteURL string       `json:"inviteUrl"`
 }
 
 func (h *handlers) listUsers(w http.ResponseWriter, r *http.Request) {
@@ -39,12 +43,12 @@ func (h *handlers) createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("role must be %q or %q", auth.RoleAdmin, auth.RoleUser))
 		return
 	}
-	if req.Username == "" || req.Password == "" {
-		writeError(w, http.StatusBadRequest, errors.New("username and password are required"))
+	if req.Username == "" {
+		writeError(w, http.StatusBadRequest, errors.New("username is required"))
 		return
 	}
 
-	user, err := h.users.CreateUser(r.Context(), req.Username, req.Password, role)
+	user, token, err := h.users.CreateUserInvite(r.Context(), req.Username, role)
 	if err != nil {
 		if errors.Is(err, auth.ErrUsernameTaken) {
 			writeError(w, http.StatusConflict, err)
@@ -53,7 +57,18 @@ func (h *handlers) createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toUserResponse(user))
+	writeJSON(w, http.StatusCreated, createUserResponse{User: toUserResponse(user), InviteURL: inviteURL(r, token)})
+}
+
+// inviteURL builds the public link an admin copies for an invited user.
+// No reverse-proxy header handling (X-Forwarded-Proto etc.) — nothing
+// else in this codebase does that either.
+func inviteURL(r *http.Request, token string) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host + "/invite/" + token
 }
 
 func (h *handlers) deleteUser(w http.ResponseWriter, r *http.Request) {

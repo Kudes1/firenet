@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/kudes1/firenet/internal/auth"
 )
@@ -15,13 +16,21 @@ type loginRequest struct {
 }
 
 type userResponse struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	ID        string `json:"id"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	Activated bool   `json:"activated"`
+	CreatedAt string `json:"createdAt"`
 }
 
 func toUserResponse(u auth.User) userResponse {
-	return userResponse{ID: u.ID, Username: u.Username, Role: string(u.Role)}
+	return userResponse{
+		ID:        u.ID,
+		Username:  u.Username,
+		Role:      string(u.Role),
+		Activated: u.Activated,
+		CreatedAt: u.CreatedAt.Format(time.RFC3339),
+	}
 }
 
 func (h *handlers) login(w http.ResponseWriter, r *http.Request) {
