@@ -30,9 +30,14 @@ export async function login(request, creds) {
 }
 
 export async function registerUser(request, { username, password, role }) {
-  await ensureOk(
-    await request.post(base() + "/api/users", { data: { username, password, role } }),
+  const res = await ensureOk(
+    await request.post(base() + "/api/users", { data: { username, role } }),
     "registerUser");
+  const { inviteUrl } = await res.json();
+  const token = new URL(inviteUrl).pathname.split("/").pop();
+  await ensureOk(
+    await request.post(`${base()}/api/invites/${token}`, { data: { password, confirmPassword: password } }),
+    "activateUser");
 }
 
 export async function createDraft(request, name) {

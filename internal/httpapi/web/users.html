@@ -15,7 +15,7 @@
 <body data-nav="users" data-no-draft-banner="true" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
 
 <main x-data="usersPage">
-  <div class="table-toolbar">
+  <div class="table-toolbar" x-show="!forbidden">
     <div class="toolbar-text">
       <h3>Пользователи</h3>
       <p class="hint">Учётные записи с доступом к firenet. Новый пользователь получает временную ссылку — по ней он сам задаёт себе пароль.</p>
@@ -25,6 +25,7 @@
       <button type="button" class="primary" @click="openCreate()">Добавить пользователя</button>
     </div>
   </div>
+  <p x-show="forbidden" class="banner error">Доступ только для администраторов.</p>
   <div class="table-wrap" x-show="loaded" x-cloak>
     <table class="data-table" x-ref="table">
       <colgroup>

@@ -12,6 +12,7 @@ document.addEventListener("alpine:init", () => {
     users: [], // {id, username, role, activated, createdAt}
     currentUserId: "",
     loaded: false,
+    forbidden: false,
     saving: false,
     filters: { username: "" },
     searchOpen: false,
@@ -28,6 +29,10 @@ document.addEventListener("alpine:init", () => {
         this.loaded = true;
         this.$nextTick(() => this.initTable(this.$refs.table));
       } catch (e) {
+        if (e.status === 403) {
+          this.forbidden = true;
+          return;
+        }
         showBanner("Не удалось загрузить пользователей: " + e.message);
       }
     },

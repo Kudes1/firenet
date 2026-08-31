@@ -5,14 +5,23 @@ import { loginViaUI } from "../helpers/ui.js";
 test("admin создаёт пользователя формой", async ({ page }) => {
   await loginViaUI(page);
   await page.goto(env().baseURL + "/ui/users");
-  await expect(page.locator("#users-table")).toBeVisible();
+  await page.getByRole("button", { name: "Добавить пользователя" }).click();
+  const createDialog = page.locator("dialog.modal", { hasText: "Новый пользователь" });
+  await expect(createDialog).toBeVisible();
   const username = `e2e-form-${uid()}`;
-  await page.locator("#create-user-form input[name=username]").fill(username);
-  await page.locator("#create-user-form input[name=password]").fill("e2e-form-pass-1");
-  await page.locator("#create-user-form select[name=role]").selectOption("user");
-  await page.locator("#create-user-form button[type=submit]").click();
-  await expect(page.locator("#users-table tbody tr", { hasText: username })).toBeVisible();
-  await expect(page.locator("#users-table tbody tr", { hasText: username })).toContainText("user");
+  await createDialog.locator('[placeholder="ivan"]').fill(username);
+  await createDialog.locator("select").selectOption("user");
+  await createDialog.getByRole("button", { name: "Создать" }).click();
+  await expect(createDialog).toBeHidden();
+
+  const inviteDialog = page.locator("dialog.modal", { hasText: "Ссылка для активации" });
+  await expect(inviteDialog).toBeVisible();
+  await inviteDialog.getByRole("button", { name: "Закрыть" }).click();
+
+  const row = page.locator("tbody tr", { hasText: username });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText("user");
+  await expect(row).toContainText("Ожидает");
 });
 
 test("admin удаляет пользователя", async ({ page, request }) => {
@@ -21,9 +30,10 @@ test("admin удаляет пользователя", async ({ page, request }) 
   await registerUser(request, creds);
   await loginViaUI(page);
   await page.goto(env().baseURL + "/ui/users");
-  const row = page.locator("#users-table tbody tr", { hasText: creds.username });
+  const row = page.locator("tbody tr", { hasText: creds.username });
   await expect(row).toBeVisible();
-  await row.getByRole("button", { name: "Удалить" }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await row.locator(".icon-btn.delete").click();
   await expect(row).toHaveCount(0);
 });
 
@@ -33,9 +43,8 @@ test("не-admin видит отказ доступа", async ({ page, request }
   await registerUser(request, creds);
   await loginViaUI(page, creds);
   await page.goto(env().baseURL + "/ui/users");
-  await expect(page.locator("#access-denied")).toBeVisible();
-  await expect(page.locator("#users-table")).toBeHidden();
-  await expect(page.locator("#create-user-form")).toBeHidden();
+  await expect(page.getByText("Доступ только для администраторов")).toBeVisible();
+  await expect(page.locator(".table-toolbar")).toBeHidden();
 });
 
 test("logout возвращает на страницу логина", async ({ page }) => {
