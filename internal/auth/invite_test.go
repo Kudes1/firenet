@@ -92,3 +92,44 @@ func TestGetUserByInviteTokenExpired(t *testing.T) {
 		t.Fatalf("got err %v, want ErrInviteExpired", err)
 	}
 }
+
+func TestActivateUser(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	ctx := context.Background()
+	_, token, err := store.CreateUserInvite(ctx, "noah", RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUserInvite: %v", err)
+	}
+
+	activated, err := store.ActivateUser(ctx, token, "brand-new-pw1")
+	if err != nil {
+		t.Fatalf("ActivateUser: %v", err)
+	}
+	if !activated.Activated {
+		t.Fatal("ActivateUser should flip activated to true")
+	}
+
+	if _, err := store.Authenticate(ctx, "noah", "brand-new-pw1"); err != nil {
+		t.Fatalf("Authenticate with the new password: %v", err)
+	}
+	if _, err := store.GetUserByInviteToken(ctx, token); err != ErrUserNotFound {
+		t.Fatalf("got err %v, want ErrUserNotFound — token should be cleared after activation", err)
+	}
+}
+
+func TestActivateUserExpiredToken(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	ctx := context.Background()
+	_, token, err := store.CreateUserInvite(ctx, "olivia", RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUserInvite: %v", err)
+	}
+	if _, err := store.db.Exec(ctx, `UPDATE users SET invite_expires_at = $1 WHERE invite_token = $2`,
+		time.Now().Add(-time.Hour), token); err != nil {
+		t.Fatalf("force-expire invite: %v", err)
+	}
+
+	if _, err := store.ActivateUser(ctx, token, "brand-new-pw1"); err != ErrInviteExpired {
+		t.Fatalf("got err %v, want ErrInviteExpired", err)
+	}
+}

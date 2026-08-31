@@ -70,3 +70,28 @@ func (s *Store) GetUserByInviteToken(ctx context.Context, token string) (User, e
 	u.Role = Role(roleStr)
 	return u, nil
 }
+
+func (s *Store) ActivateUser(ctx context.Context, token, password string) (User, error) {
+	user, err := s.GetUserByInviteToken(ctx, token)
+	if err != nil {
+		return User{}, err
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		return User{}, err
+	}
+
+	var roleStr string
+	err = s.db.QueryRow(ctx, `
+		UPDATE users
+		SET password_hash = $1, activated = TRUE, invite_token = NULL, invite_expires_at = NULL
+		WHERE id = $2
+		RETURNING id, username, password_hash, role, created_at, activated`,
+		hash, user.ID,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &roleStr, &user.CreatedAt, &user.Activated)
+	if err != nil {
+		return User{}, fmt.Errorf("activate user: %w", err)
+	}
+	user.Role = Role(roleStr)
+	return user, nil
+}
