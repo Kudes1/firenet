@@ -38,6 +38,28 @@ func TestCreateAndGetSession(t *testing.T) {
 	}
 }
 
+func TestGetSessionIncludesActivated(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	ctx := context.Background()
+
+	user, err := store.CreateUser(ctx, "ivan-session", "hunter22222", RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	sess, err := store.CreateSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	got, err := store.GetSession(ctx, sess.Token)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if !got.Activated {
+		t.Fatal("GetSession should report activated = true for a normally-created user")
+	}
+}
+
 func TestGetSessionUnknownToken(t *testing.T) {
 	store := NewStore(dbtest.Open(t))
 	if _, err := store.GetSession(context.Background(), "does-not-exist"); !errors.Is(err, ErrSessionNotFound) {

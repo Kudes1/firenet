@@ -417,3 +417,23 @@ func TestDeleteSelfIsRejected(t *testing.T) {
 		t.Fatalf("got status %d, want 400", rec.Code)
 	}
 }
+
+func TestMeReportsActivated(t *testing.T) {
+	srv, _ := newUnauthenticatedTestServer(t)
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var me userResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &me); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !me.Activated {
+		t.Fatal("GET /api/me should report activated = true for the bootstrap admin")
+	}
+}

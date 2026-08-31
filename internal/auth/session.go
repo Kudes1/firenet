@@ -37,10 +37,10 @@ func (s *Store) GetSession(ctx context.Context, token string) (User, error) {
 	var roleStr string
 	var expiresAt time.Time
 	err := s.db.QueryRow(ctx, `
-		SELECT u.id, u.username, u.password_hash, u.role, u.created_at, s.expires_at
+		SELECT u.id, u.username, u.password_hash, u.role, u.created_at, u.activated, s.expires_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token = $1`, token,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt, &expiresAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt, &u.Activated, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrSessionNotFound
 	}
