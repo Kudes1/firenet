@@ -1,1 +1,29 @@
-<!doctype html><html><body></body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>firenet — активация</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="login-page">
+<main class="login-card">
+  <h1>firenet</h1>
+  <p id="invite-loading">Проверяем ссылку…</p>
+  <p id="invite-invalid" hidden>Ссылка недействительна или истекла. Обратитесь к администратору за новой ссылкой.</p>
+  <form id="invite-form" hidden>
+    <p id="invite-greeting"></p>
+    <label>Новый пароль
+      <input type="password" name="password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <label>Подтверждение пароля
+      <input type="password" name="confirmPassword" autocomplete="new-password" minlength="8" required>
+    </label>
+    <button type="submit">Задать пароль</button>
+    <p id="invite-error" class="login-error" hidden></p>
+  </form>
+</main>
+<script type="module" src="/invite.js"></script>
+</body>
+</html>
