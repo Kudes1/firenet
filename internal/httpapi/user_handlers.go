@@ -23,6 +23,10 @@ type createUserResponse struct {
 	InviteURL string       `json:"inviteUrl"`
 }
 
+type inviteURLResponse struct {
+	InviteURL string `json:"inviteUrl"`
+}
+
 func (h *handlers) listUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.users.ListUsers(r.Context())
 	if err != nil {
@@ -115,6 +119,21 @@ func (h *handlers) updateUser(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, auth.ErrUserNotFound):
 		writeError(w, http.StatusNotFound, err)
 	case errors.Is(err, auth.ErrLastAdmin):
+		writeError(w, http.StatusBadRequest, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+func (h *handlers) regenerateInvite(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	token, err := h.users.RegenerateInvite(r.Context(), id)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, inviteURLResponse{InviteURL: inviteURL(r, token)})
+	case errors.Is(err, auth.ErrUserNotFound):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, auth.ErrAlreadyActivated):
 		writeError(w, http.StatusBadRequest, err)
 	default:
 		writeError(w, http.StatusInternalServerError, err)

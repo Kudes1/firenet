@@ -357,3 +357,44 @@ func TestGetDraft(t *testing.T) {
 		t.Fatalf("missing draft: status = %d, want 404, body = %s", rec.Code, rec.Body)
 	}
 }
+
+func TestRegenerateInviteAsAdmin(t *testing.T) {
+	srv, users := newUnauthenticatedTestServer(t)
+	pending, _, err := users.CreateUserInvite(context.Background(), "tara", auth.RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUserInvite: %v", err)
+	}
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/users/"+pending.ID+"/invite", nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var resp inviteURLResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(resp.InviteURL, "/invite/") {
+		t.Fatalf("inviteUrl = %q, want it to contain /invite/", resp.InviteURL)
+	}
+}
+
+func TestRegenerateInviteForActivatedUserIsRejected(t *testing.T) {
+	srv, users := newUnauthenticatedTestServer(t)
+	active, err := users.CreateUser(context.Background(), "uma", "hunter22222", auth.RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/users/"+active.ID+"/invite", nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want 400", rec.Code)
+	}
+}
