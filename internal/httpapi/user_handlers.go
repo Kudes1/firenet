@@ -14,6 +14,10 @@ type createUserRequest struct {
 	Role     string `json:"role"`
 }
 
+type updateUserRequest struct {
+	Role string `json:"role"`
+}
+
 type createUserResponse struct {
 	User      userResponse `json:"user"`
 	InviteURL string       `json:"inviteUrl"`
@@ -81,6 +85,37 @@ func (h *handlers) deleteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 	case errors.Is(err, auth.ErrUserNotFound):
 		writeError(w, http.StatusNotFound, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+func (h *handlers) updateUser(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if currentUser, ok := auth.UserFromContext(r.Context()); ok && id == currentUser.ID {
+		writeError(w, http.StatusBadRequest, errors.New("cannot change your own role"))
+		return
+	}
+
+	var req updateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
+		return
+	}
+	role := auth.Role(req.Role)
+	if role != auth.RoleAdmin && role != auth.RoleUser {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("role must be %q or %q", auth.RoleAdmin, auth.RoleUser))
+		return
+	}
+
+	user, err := h.users.UpdateUserRole(r.Context(), id, role)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, toUserResponse(user))
+	case errors.Is(err, auth.ErrUserNotFound):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, auth.ErrLastAdmin):
+		writeError(w, http.StatusBadRequest, err)
 	default:
 		writeError(w, http.StatusInternalServerError, err)
 	}

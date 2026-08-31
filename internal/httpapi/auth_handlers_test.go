@@ -228,6 +228,48 @@ func TestCreateUserReturnsInviteLink(t *testing.T) {
 	}
 }
 
+func TestUpdateUserRoleAsAdmin(t *testing.T) {
+	srv, users := newUnauthenticatedTestServer(t)
+	target, err := users.CreateUser(context.Background(), "sam", "hunter22222", auth.RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+
+	body, _ := json.Marshal(updateUserRequest{Role: "admin"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/users/"+target.ID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var updated userResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if updated.Role != "admin" {
+		t.Fatalf("got role %q, want admin", updated.Role)
+	}
+}
+
+func TestUpdateOwnRoleIsRejected(t *testing.T) {
+	srv, users := newUnauthenticatedTestServer(t)
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+	adminID := mustBootstrapAdminID(t, users)
+
+	body, _ := json.Marshal(updateUserRequest{Role: "user"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/users/"+adminID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want 400", rec.Code)
+	}
+}
+
 func TestGetDraft(t *testing.T) {
 	srv, users := newUnauthenticatedTestServer(t)
 	ctx := context.Background()
