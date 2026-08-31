@@ -171,6 +171,54 @@ func applyTopologyOperation(doc projectdoc.ProjectDoc, op topologyOperation) (pr
 		}
 		topo.Devices = append(topo.Devices, *op.Device)
 
+	case "update-device":
+		if op.DeviceName == "" || op.Device == nil || op.Device.Name == "" {
+			return doc, fmt.Errorf("update-device: missing deviceName or device")
+		}
+		i := deviceIndex(topo.Devices, op.DeviceName)
+		if i < 0 {
+			return doc, fmt.Errorf("update-device: unknown device %q", op.DeviceName)
+		}
+		if op.Device.Name != op.DeviceName && deviceIndex(topo.Devices, op.Device.Name) >= 0 {
+			return doc, fmt.Errorf("update-device: device %q already exists", op.Device.Name)
+		}
+
+		topo.Devices[i] = *op.Device
+		if op.Device.Name == op.DeviceName {
+			break
+		}
+		for li, l := range topo.Links {
+			renamed := l
+			if l.A.Device == op.DeviceName {
+				renamed.A.Device = op.Device.Name
+			}
+			if l.B.Device == op.DeviceName {
+				renamed.B.Device = op.Device.Name
+			}
+			if renamed == l {
+				continue
+			}
+			if wp, ok := layout.Links[layoutLinkKey(l.A.Device, l.B.Device)]; ok {
+				delete(layout.Links, layoutLinkKey(l.A.Device, l.B.Device))
+				layout.Links[layoutLinkKey(renamed.A.Device, renamed.B.Device)] = wp
+			}
+			topo.Links[li] = renamed
+		}
+		for ni, n := range topo.Networks {
+			for ei, e := range n.Attach {
+				if e.Device == op.DeviceName {
+					topo.Networks[ni].Attach[ei].Device = op.Device.Name
+				}
+			}
+		}
+		for ui := range topo.Unions {
+			renameStrings(topo.Unions[ui].Devices, op.DeviceName, op.Device.Name)
+		}
+		if pos, ok := layout.Devices[op.DeviceName]; ok {
+			delete(layout.Devices, op.DeviceName)
+			layout.Devices[op.Device.Name] = pos
+		}
+
 	case "delete-device":
 		if op.DeviceName == "" {
 			return doc, fmt.Errorf("delete-device: missing deviceName")

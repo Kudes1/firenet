@@ -231,6 +231,7 @@ async function bootTopology(responses, draftID = "d1", localStore = {}) {
   // exercising the server's canonical link order) still can — this only
   // fires when `responses` has no explicit entry for the operations path.
   const opsPath = `/api/drafts/${draftID}/topology/operations`;
+  const opsBatchPath = `${opsPath}/batch`;
   let opsStore = null;
   const seedOpsStore = () => {
     if (opsStore) return;
@@ -276,6 +277,11 @@ async function bootTopology(responses, draftID = "d1", localStore = {}) {
     if (p === opsPath && opts?.method === "POST" && !(opsPath in responses)) {
       seedOpsStore();
       applyOperationFake(opsStore, JSON.parse(opts.body));
+      return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(opsStore)) };
+    }
+    if (p === opsBatchPath && opts?.method === "POST" && !(opsBatchPath in responses)) {
+      seedOpsStore();
+      JSON.parse(opts.body).operations.forEach((op) => applyOperationFake(opsStore, op));
       return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(opsStore)) };
     }
     const response = typeof responses[p] === "function" ? responses[p](opts) : responses[p];
@@ -972,6 +978,29 @@ test("deleting a device cascades to its links and network attachments", async ()
   assert.equal(page.get("State.topology.networks[0].attach.length"), 0, "attach to r1 removed");
 });
 
+test("deleting a multi-object selection sends one batch request, not one per object", async () => {
+  const page = await bootTopology(responses);
+  global.confirm = () => true;
+  await tick();
+  clickNode(page, "r1");
+  clickNode(page, "net1", true);
+  fire(page.ids["topo-delete"], "click", {});
+  await tick();
+
+  const opsCalls = page.calls.filter((c) => c.method === "POST" && c.path === "/api/drafts/d1/topology/operations");
+  const batchCalls = page.calls.filter((c) => c.method === "POST" && c.path === "/api/drafts/d1/topology/operations/batch");
+  assert.equal(opsCalls.length, 0, "no per-op requests for a multi-select delete");
+  assert.equal(batchCalls.length, 1, "exactly one batch request");
+  const ops = JSON.parse(batchCalls[0].body).operations;
+  assert.deepEqual(ops.map((op) => op.kind), ["delete-device", "delete-network"]);
+
+  const names = texts(page.get);
+  assert.ok(!names.includes("r1 (router)"), "r1 removed");
+  assert.ok(names.includes("r2 (router)"), "r2 kept");
+  assert.equal(page.get("State.topology.networks.length"), 0, "net1 removed");
+  assert.equal(page.get("State.topology.links.length"), 0, "link to r1 removed with it");
+});
+
 test("declining confirm keeps the selected device", async () => {
   const page = await bootTopology(responses);
   await tick();
@@ -1198,6 +1227,55 @@ test("network nodes get union assignment in the context menu too", async () => {
   assert.ok(assign, "network can be assigned");
   fire(assign, "click", {});
   assert.equal(JSON.stringify(page.get("State.topology.unions[0].networks")), '["net1"]', "network member recorded");
+});
+
+test("context menu assigns every selected node to a union at once", async () => {
+  const page = await bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], unions: [{ name: "office", devices: [] }] },
+  });
+  await tick();
+  clickNode(page, "r1");
+  clickNode(page, "r2", true); // shift-click extends selection to both routers
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y }); // right-click one of the selected nodes
+  const assign = findBtn(ctxMenu(page), (b) => String(b.textContent).includes("office"));
+  assert.ok(assign, "assign item listed in the union submenu");
+  fire(assign, "click", {});
+  assert.equal(
+    JSON.stringify([...page.get("State.topology.unions[0].devices")].sort()),
+    '["r1","r2"]',
+    "both selected devices recorded",
+  );
+});
+
+test("context menu removes every selected node from its union at once", async () => {
+  const page = await bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], unions: [{ name: "office", devices: ["r1", "r2"] }] },
+  });
+  await tick();
+  clickNode(page, "r1");
+  clickNode(page, "r2", true);
+  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+  const unassign = findBtn(ctxMenu(page), (b) => String(b.textContent).includes("Убрать"));
+  assert.ok(unassign, "remove item listed for a member of the selection");
+  fire(unassign, "click", {});
+  assert.equal(JSON.stringify(page.get("State.topology.unions[0].devices")), "[]", "both selected devices cleared");
+});
+
+test("context menu on an unselected node still targets only that node", async () => {
+  const page = await bootTopology({
+    ...responses,
+    "/api/drafts/d1/topology": { ...responses["/api/drafts/d1/topology"], unions: [{ name: "office", devices: [] }] },
+  });
+  await tick();
+  clickNode(page, "r1");
+  clickNode(page, "r2", true); // r1 and r2 selected...
+  fire(page.canvas, "contextmenu", { clientX: AT.net1.x, clientY: AT.net1.y }); // ...but right-click hits net1, outside the selection
+  const assign = findBtn(ctxMenu(page), (b) => String(b.textContent).includes("office"));
+  fire(assign, "click", {});
+  assert.equal(JSON.stringify(page.get("State.topology.unions[0].devices")), "[]", "unrelated selected devices untouched");
+  assert.equal(JSON.stringify(page.get("State.topology.unions[0].networks")), '["net1"]', "only the right-clicked network joins");
 });
 
 test("deleting a node scrubs it from union membership", async () => {
@@ -1554,12 +1632,14 @@ test("read-only topology disables editing tools and keeps select mode", async ()
 
 // --- операции: точный состав отправленных команд ---
 
-// postedOps returns every operation body posted to the operations endpoint,
-// in send order — the queue drains strictly sequentially (topology_sync.js),
-// so this is also the wire order.
+// postedOps returns every operation posted to the operations endpoint, in
+// send order — whether sent individually or as part of an atomic batch
+// (topology/operations/batch, flattened here to its `operations` list) —
+// the queue drains strictly sequentially (topology_sync.js), so this is
+// also the wire order.
 const postedOps = (page) => page.calls
-  .filter((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST")
-  .map((c) => JSON.parse(c.body));
+  .filter((c) => c.method === "POST" && (c.path === "/api/drafts/d1/topology/operations" || c.path === "/api/drafts/d1/topology/operations/batch"))
+  .flatMap((c) => { const body = JSON.parse(c.body); return body.operations || [body]; });
 
 test("attaching a device to a network sends attach-network", async () => {
   const page = await bootTopology({

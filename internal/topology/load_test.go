@@ -216,6 +216,8 @@ subnets:
 
 func TestLoad_DescriptionFields(t *testing.T) {
 	in := `
+devices:
+  - {name: r1, kind: router, description: "граничный маршрутизатор"}
 networks:
   - {name: n1, subnets: [a], description: "офисная сеть"}
 sets:
@@ -224,6 +226,9 @@ sets:
 	topo, err := Load(strings.NewReader(in))
 	if err != nil {
 		t.Fatalf("load: %v", err)
+	}
+	if topo.Devices["r1"].Description != "граничный маршрутизатор" {
+		t.Fatalf("unexpected device description: %+v", topo.Devices["r1"])
 	}
 	if topo.Networks["n1"].Description != "офисная сеть" {
 		t.Fatalf("unexpected network description: %+v", topo.Networks["n1"])

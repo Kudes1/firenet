@@ -358,6 +358,7 @@ const NAV_GROUPS = [
     label: "Топология",
     links: [
       { id: "topology", href: "/ui/topology", label: "Схема" },
+      { id: "devices", href: "/ui/devices", label: "Устройства" },
       { id: "networks", href: "/ui/networks", label: "Сети" },
       { id: "unions", href: "/ui/unions", label: "Объединения" },
       { id: "links", href: "/ui/links", label: "Связи" },
@@ -385,6 +386,7 @@ const NAV_STANDALONE = [
 const svgOpen = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
 const NAV_ICONS = {
   topology: svgOpen + '<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M7 7l3.5 9M17 7l-3.5 9M7 6h10"/></svg>',
+  devices: svgOpen + '<rect x="4" y="4" width="16" height="10" rx="1"/><path d="M8 18h8M12 14v4"/></svg>',
   subnets: svgOpen + '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>',
   networks: svgOpen + '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9z"/></svg>',
   sets: svgOpen + '<path d="M4 6h16M4 12h16M4 18h10"/></svg>',

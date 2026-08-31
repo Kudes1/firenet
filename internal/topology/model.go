@@ -16,8 +16,9 @@ const (
 
 // Device is a network node.
 type Device struct {
-	Name string
-	Kind DeviceKind
+	Name        string
+	Kind        DeviceKind
+	Description string // optional note
 }
 
 // Endpoint is one side of a logical connection.

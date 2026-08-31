@@ -238,25 +238,60 @@ type editorSnapshot struct {
 // loadTopologyDoc) before it's persisted, so a partially-applied or
 // invalid draft is never written.
 func (h *handlers) postDraftTopologyOperation(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.resolveDraftForAccess(w, r); !ok {
-		return
-	}
 	var op topologyOperation
 	if err := json.NewDecoder(r.Body).Decode(&op); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
 		return
 	}
+	h.applyDraftTopologyOperations(w, r, []topologyOperation{op})
+}
 
+// postDraftTopologyOperationsBatch applies a list of topologyOperations to
+// the draft as one all-or-nothing step: every operation is applied in
+// order before the resulting document is validated once, against its
+// final state — not after each individual operation, the way
+// postDraftTopologyOperation validates a lone op. This matters for a
+// caller (the canvas editor's multi-select delete) whose operations are
+// only jointly valid: deleting a switch alone can make a network
+// unreachable from a router that still exports it via some untouched
+// filtered link, even though deleting the switch, the router and the
+// network together is perfectly valid.
+func (h *handlers) postDraftTopologyOperationsBatch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Operations []topologyOperation `json:"operations"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("decode request body: %w", err))
+		return
+	}
+	if len(body.Operations) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("missing operations"))
+		return
+	}
+	h.applyDraftTopologyOperations(w, r, body.Operations)
+}
+
+// applyDraftTopologyOperations is the shared write path behind both the
+// single-operation and batch endpoints: read, apply every op in order,
+// validate the resulting document once, CAS-write it, and respond with
+// the canonical post-write snapshot.
+func (h *handlers) applyDraftTopologyOperations(w http.ResponseWriter, r *http.Request, ops []topologyOperation) {
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
 	id := r.PathValue("id")
 	prev, revision, err := h.projects.ReadDraft(r.Context(), id)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	next, err := applyTopologyOperation(prev, op)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err)
-		return
+	next := prev
+	for _, op := range ops {
+		next, err = applyTopologyOperation(next, op)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err)
+			return
+		}
 	}
 	if errs := deletionErrorsFromDocs(prev, next); len(errs) > 0 {
 		writeError(w, http.StatusConflict, errors.New(strings.Join(errs, "; ")))

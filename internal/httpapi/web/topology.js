@@ -369,6 +369,21 @@ const Topology = (() => {
     sync.enqueue(op);
   }
 
+  // enqueueOpBatch sends several ops as one atomic write (see write()'s
+  // Array.isArray branch): the server applies all of them before
+  // validating the result once, against its final state. Use this instead
+  // of calling enqueueOp per op whenever the ops are only jointly valid -
+  // deleteSelection is the motivating case (topology.js:606-634).
+  function enqueueOpBatch(ops) {
+    if (!ops.length) return;
+    try {
+      assertEditable();
+    } catch {
+      return; // read-only tab: nothing to persist
+    }
+    sync.enqueue(ops);
+  }
+
   // setupCamera wires wheel zoom (anchored at the cursor) and pan by
   // middle/right-button drag via the shared CameraControls. Camera state
   // belongs to this browser and is stored locally; it is not a topology
@@ -505,12 +520,26 @@ const Topology = (() => {
     clearSelection();
   }
 
+  // nodeIdentity сводит объект выделения к паре {name, key} для операций
+  // объединения; связи и привязки (attach) в объединения не входят, для
+  // них возвращается null, и вызывающий код такие записи отбрасывает.
+  function nodeIdentity(s) {
+    if (State.topology.devices.includes(s)) return { name: s.name, key: "devices" };
+    if (State.topology.networks.includes(s)) return { name: s.name, key: "networks" };
+    return null;
+  }
+
   // menuItemsFor собирает пункты меню объекта: редактирование фильтра
   // (только у связей), членство в объединениях (только у узлов) и удаление
   // с подписью по типу; объединения — до danger. kind/identity фиксируются
   // здесь как строки (имя устройства/сети, пара {a,b} связи, {net,device}
   // привязки), а не как ссылки на obj/State.topology.unions[i] — те могут
   // устареть до клика (см. setUnion и deleteByIdentity выше).
+  // Если ПКМ пришлась на узел, входящий в текущее многовыборное выделение
+  // (как в startNodeDrag), членство в объединениях назначается/снимается
+  // сразу для ВСЕХ выбранных узлов, а не только для того, что под курсором
+  // — иначе массовое добавление в объединение работало бы только для
+  // одного из выбранных устройств, что и было исходным багом.
   function menuItemsFor(obj, nodeType, at) {
     const key = nodeType === "device" ? "devices" : nodeType === "network" ? "networks" : null;
     const isLink = !key && obj.type !== "attach";
@@ -528,13 +557,16 @@ const Topology = (() => {
     // требует сохранённой топологии.
     if (isLink) items.push(["Редактировать", isLinkCreatePending(obj.a.device, obj.b.device) ? null : () => openLinkPanel(obj, at)]);
     if (key) {
-      const inSet = (s) => (s[key] || []).includes(obj.name);
+      const nodes = State.selection.has(obj) && State.selection.size > 1
+        ? [...State.selection].map(nodeIdentity).filter(Boolean)
+        : [{ name: obj.name, key }];
+      const inSet = (s) => nodes.some((n) => (s[n.key] || []).includes(n.name));
       if ((State.topology.unions || []).some(inSet)) {
-        items.push(["Убрать из объединения", () => setUnion(obj.name, key, null)]);
+        items.push(["Убрать из объединения", () => nodes.forEach((n) => setUnion(n.name, n.key, null))]);
       }
       const candidates = (State.topology.unions || [])
-        .filter((s) => !inSet(s))
-        .map((s) => [`В объединение «${s.name}»`, () => setUnion(obj.name, key, s.name), null, true, s.name]);
+        .filter((s) => nodes.some((n) => !(s[n.key] || []).includes(n.name)))
+        .map((s) => [`В объединение «${s.name}»`, () => nodes.forEach((n) => setUnion(n.name, n.key, s.name)), null, true, s.name]);
       items.push({
         label: "Добавить в объединение",
         children: candidates.length ? candidates : [["(нет доступных объединений)", null]],
@@ -597,12 +629,16 @@ const Topology = (() => {
   // server-side, and sending the now-redundant op would 422 ("unknown
   // link"/"not attached"). Selection AND each entry's kind (device/network/
   // link/attach) are captured up front, from the State.topology in effect
-  // before any enqueue: enqueueOp can synchronously replace both
-  // State.selection (TopologySync.onState → reconcileSelection) and
-  // State.topology (new object identities even for untouched entries —
-  // cloneSnapshot always produces fresh network/union objects) partway
-  // through this function, so nothing below may re-derive a classification
-  // by re-checking the live State against a stale object reference.
+  // before this function's one enqueueOpBatch call.
+  //
+  // All of the resulting ops go out as a SINGLE atomic batch (not one
+  // enqueueOp per object): a switch, its router and their network can be
+  // mutually valid to delete together while deleting the switch alone
+  // would break reachability for a filtered link elsewhere that still
+  // (formally) exports the network through that router — the batch
+  // endpoint validates only the final state, once, instead of after each
+  // individual op (internal/httpapi/handlers.go's
+  // applyDraftTopologyOperations).
   function deleteSelection() {
     if (!State.selection.size) return;
     const selected = [...State.selection];
@@ -617,19 +653,21 @@ const Topology = (() => {
     const deletedDevices = new Set(selected.filter((s, i) => kinds[i] === "device").map((d) => d.name));
     const deletedNetworks = new Set(selected.filter((s, i) => kinds[i] === "network").map((n) => n.name));
 
-    selected.forEach((s, i) => { if (kinds[i] === "device") enqueueOp({ kind: "delete-device", deviceName: s.name }); });
-    selected.forEach((s, i) => { if (kinds[i] === "network") enqueueOp({ kind: "delete-network", networkName: s.name }); });
+    const ops = [];
+    selected.forEach((s, i) => { if (kinds[i] === "device") ops.push({ kind: "delete-device", deviceName: s.name }); });
+    selected.forEach((s, i) => { if (kinds[i] === "network") ops.push({ kind: "delete-network", networkName: s.name }); });
     selected.forEach((s, i) => {
       if (kinds[i] === "attach") {
         if (!deletedNetworks.has(s.net.name) && !deletedDevices.has(s.device)) {
-          enqueueOp({ kind: "detach-network", networkName: s.net.name, attach: { device: s.device } });
+          ops.push({ kind: "detach-network", networkName: s.net.name, attach: { device: s.device } });
         }
       } else if (kinds[i] === "link") {
         if (!deletedDevices.has(s.a.device) && !deletedDevices.has(s.b.device)) {
-          enqueueOp({ kind: "delete-link", link: { a: { device: s.a.device }, b: { device: s.b.device } } });
+          ops.push({ kind: "delete-link", link: { a: { device: s.a.device }, b: { device: s.b.device } } });
         }
       }
     });
+    enqueueOpBatch(ops);
     clearSelection();
   }
 
@@ -1356,8 +1394,14 @@ const Topology = (() => {
     // load, with the real starting snapshot — never before.
     sync = TopologySync.create({
       read: () => State,
-      write: (op) => Api.post(apiPath("topology/operations"), op)
-        .then((res) => ({ topology: normalizeTopology(res.topology), layout: normalizeLayout(res.layout) })),
+      // A batch (array of ops - e.g. deleteSelection's multi-object delete)
+      // goes to the /batch endpoint as one atomic write, validated once
+      // against its final result instead of once per op - see
+      // internal/httpapi/handlers.go's applyDraftTopologyOperations.
+      write: (opOrBatch) => Api.post(
+        apiPath(Array.isArray(opOrBatch) ? "topology/operations/batch" : "topology/operations"),
+        Array.isArray(opOrBatch) ? { operations: opOrBatch } : opOrBatch,
+      ).then((res) => ({ topology: normalizeTopology(res.topology), layout: normalizeLayout(res.layout) })),
       apply: applyTopologyOp,
       onState: (snapshot) => {
         State.topology = snapshot.topology;

@@ -87,6 +87,38 @@ const path = require("node:path");
     assert.deepEqual(sent.map((op) => op.position), [{ x: 1, y: 1 }, { x: 3, y: 3 }]);
   });
 
+  test("enqueue accepts a batch of ops as one atomic queue entry: one write() call, projection reduces over every sub-op, pending() flattens it", async () => {
+    const TopologySync = await loadTopologySync();
+    const writes = [];
+    let lastState = null;
+    const sync = TopologySync.create({
+      read: () => ({ value: 0 }),
+      apply: (s, op) => ({ value: s.value + op.delta }),
+      write: async (opOrBatch) => {
+        writes.push(opOrBatch);
+        const ops = Array.isArray(opOrBatch) ? opOrBatch : [opOrBatch];
+        return { value: ops.reduce((v, o) => v + o.delta, 0) };
+      },
+      onState: (s) => { lastState = s; },
+      onStatus() {},
+      reload: async () => ({ value: 0 }),
+    });
+    sync.seed({ value: 0 });
+    sync.enqueue([{ delta: 1 }, { delta: 2 }, { delta: 3 }]);
+    // Optimistic projection applies every sub-op in order, same result as
+    // if they'd been enqueued individually.
+    assert.deepEqual(lastState, { value: 6 });
+    // pending() reports the batch's individual ops, not the array wrapper -
+    // callers like isLinkCreatePending scan for a single op's `kind`.
+    // .length, not deepEqual against a literal - pending() builds its array
+    // inside the vm sandbox, a different realm than this test file's Array.
+    assert.equal(sync.pending().length, 3);
+    await sync.idle();
+    // The whole batch is exactly one write() call, not one per sub-op.
+    assert.deepEqual(writes, [[{ delta: 1 }, { delta: 2 }, { delta: 3 }]]);
+    assert.deepEqual(lastState, { value: 6 });
+  });
+
   test("does not coalesce move operations for different targets", async () => {
     const TopologySync = await loadTopologySync();
     const sent = [];

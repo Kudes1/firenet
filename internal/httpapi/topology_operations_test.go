@@ -200,6 +200,75 @@ func TestApplyTopologyOperation_UpdateNetworkRenamesEveryReference(t *testing.T)
 	}
 }
 
+// TestApplyTopologyOperation_UpdateDeviceRenamesEveryReference protects a
+// device rename from being treated as a delete/create pair: every
+// document field that names the device must keep pointing to its new
+// name, mirroring update-network's contract.
+func TestApplyTopologyOperation_UpdateDeviceRenamesEveryReference(t *testing.T) {
+	doc := fixtureProjectDoc()
+	doc.Topology.Links = []LinkDoc{{A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "r2"}}}
+	doc.Layout.Links = map[string][][]LayoutPoint{
+		layoutLinkKey("r1", "r2"): {{{X: 5, Y: 5}}},
+	}
+
+	next, err := applyTopologyOperation(doc, topologyOperation{
+		Kind: "update-device", DeviceName: "r1",
+		Device: &DeviceDoc{Name: "core-1", Kind: "router", Description: "граничный маршрутизатор"},
+	})
+	if err != nil {
+		t.Fatalf("update-device: %v", err)
+	}
+	d := next.Topology.Devices[deviceIndex(next.Topology.Devices, "core-1")]
+	if d.Description != "граничный маршрутизатор" || d.Kind != "router" {
+		t.Fatalf("updated device = %+v, want new description and kind preserved", d)
+	}
+	if deviceIndex(next.Topology.Devices, "r1") != -1 {
+		t.Fatal("old device name still present")
+	}
+	if got := next.Topology.Networks[networkIndex(next.Topology.Networks, "n-office")].Attach; len(got) != 1 || got[0].Device != "core-1" {
+		t.Fatalf("network attach = %+v, want core-1", got)
+	}
+	if got := next.Topology.Unions[0].Devices; len(got) != 1 || got[0] != "core-1" {
+		t.Fatalf("union devices = %v, want [core-1]", got)
+	}
+	if got := next.Topology.Links[0].A.Device; got != "core-1" {
+		t.Fatalf("link endpoint = %q, want core-1", got)
+	}
+	if _, ok := next.Layout.Links[layoutLinkKey("r1", "r2")]; ok {
+		t.Fatal("old link layout key survived")
+	}
+	if got, ok := next.Layout.Links[layoutLinkKey("core-1", "r2")]; !ok || len(got) != 1 {
+		t.Fatalf("layout waypoints not carried to new link key: %+v", next.Layout.Links)
+	}
+	if _, ok := next.Layout.Devices["r1"]; ok {
+		t.Fatal("old device layout position survived")
+	}
+	if got := next.Layout.Devices["core-1"]; got != (LayoutPoint{X: 1, Y: 1}) {
+		t.Fatalf("new device layout position = %+v, want {1 1}", got)
+	}
+	if doc.Topology.Devices[0].Name != "r1" || doc.Topology.Unions[0].Devices[0] != "r1" || doc.Topology.Links[0].A.Device != "r1" {
+		t.Fatal("input doc was mutated")
+	}
+}
+
+func TestApplyTopologyOperation_UpdateDeviceErrors(t *testing.T) {
+	doc := fixtureProjectDoc()
+
+	if _, err := applyTopologyOperation(doc, topologyOperation{Kind: "update-device"}); err == nil {
+		t.Fatal("expected error for missing deviceName/device")
+	}
+	if _, err := applyTopologyOperation(doc, topologyOperation{
+		Kind: "update-device", DeviceName: "unknown", Device: &DeviceDoc{Name: "x", Kind: "router"},
+	}); err == nil {
+		t.Fatal("expected error for unknown device")
+	}
+	if _, err := applyTopologyOperation(doc, topologyOperation{
+		Kind: "update-device", DeviceName: "r1", Device: &DeviceDoc{Name: "r2", Kind: "router"},
+	}); err == nil {
+		t.Fatal("expected error renaming onto an existing device")
+	}
+}
+
 func TestApplyTopologyOperation_AttachDetachNetwork(t *testing.T) {
 	doc := fixtureProjectDoc()
 

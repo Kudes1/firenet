@@ -927,6 +927,167 @@ func TestPostTopologyOperation_InvalidFilteredLinkIsUnprocessable(t *testing.T) 
 	}
 }
 
+// seedMarketUnion builds a "Магазин-А"-shaped union on top of the
+// fixture: a switch (mkt-core) is the only path from a router (mkt-gw)
+// to a network (MKT-NET) the router also exports to the fixture's r1 via
+// a filtered link outside the union. Deleting mkt-core before mkt-gw and
+// MKT-NET (as a name-sorted multi-select delete would) breaks
+// reachability for that filtered link — this is the shape both the bug
+// test and its batch-endpoint fix exercise.
+func seedMarketUnion(t *testing.T, h http.Handler, draftID string) {
+	t.Helper()
+	subnets := doJSON(t, h, http.MethodPut, draftPath(draftID, "subnets"), map[string]any{
+		"subnets": []map[string]string{
+			{"name": "office", "cidr": "10.0.0.0/24"},
+			{"name": "dmz", "cidr": "10.0.1.0/24"},
+			{"name": "mkt-a", "cidr": "10.90.0.0/24"},
+		},
+	})
+	if subnets.Code != http.StatusOK {
+		t.Fatalf("seed subnets: status = %d, body = %s", subnets.Code, subnets.Body)
+	}
+	for _, op := range []map[string]any{
+		{"kind": "create-device", "device": map[string]string{"name": "mkt-core", "kind": "switch"}},
+		{"kind": "create-device", "device": map[string]string{"name": "mkt-gw", "kind": "router"}},
+		{"kind": "create-network", "network": map[string]any{"name": "MKT-NET", "subnets": []string{"mkt-a"}, "attach": []map[string]string{{"device": "mkt-core"}}}},
+		{"kind": "create-link", "link": map[string]any{"a": map[string]string{"device": "mkt-core"}, "b": map[string]string{"device": "mkt-gw"}}},
+		{"kind": "create-link", "link": map[string]any{
+			"a": map[string]string{"device": "mkt-gw"}, "b": map[string]string{"device": "r1"},
+			"filter": map[string]any{"aExports": []string{"MKT-NET"}, "bExports": []string{}},
+		}},
+	} {
+		rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations"), op)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("seed %v: status = %d, body = %s", op["kind"], rec.Code, rec.Body)
+		}
+	}
+}
+
+// TestPostTopologyOperation_SequentialDeleteBreaksReachability documents
+// the bug batch delete exists to fix: deleting a switch that's the only
+// path from a router to a network the router still exports (via a
+// filtered link the delete doesn't touch) breaks reachability even
+// though the switch, router and network are all being removed together
+// by the caller — the single-op endpoint validates each step in
+// isolation and has no way to know that.
+func TestPostTopologyOperation_SequentialDeleteBreaksReachability(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+	seedMarketUnion(t, h, draftID)
+
+	rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations"), map[string]any{
+		"kind": "delete-device", "deviceName": "mkt-core",
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if msg := errorBody(t, rec); !strings.Contains(msg, "MKT-NET") || !strings.Contains(msg, "not reachable") {
+		t.Fatalf("unexpected error body: %s", msg)
+	}
+}
+
+// TestPostTopologyOperationsBatch_DeletesUnionAtomically is the fix for
+// the bug above: the whole multi-select deletion goes through one batch
+// request, applying every operation before validating the resulting
+// document once — so a switch, its router and their network can be
+// removed together even though the router still (formally) exports the
+// network via a filtered link outside the batch.
+func TestPostTopologyOperationsBatch_DeletesUnionAtomically(t *testing.T) {
+	h, projects, draftID := newTestServer(t)
+	seedMarketUnion(t, h, draftID)
+
+	rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations/batch"), map[string]any{
+		"operations": []map[string]any{
+			{"kind": "delete-device", "deviceName": "mkt-core"},
+			{"kind": "delete-device", "deviceName": "mkt-gw"},
+			{"kind": "delete-network", "networkName": "MKT-NET"},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch delete: status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	doc := readDraftDoc(t, projects, draftID)
+	for _, name := range []string{"mkt-core", "mkt-gw"} {
+		for _, d := range doc.Topology.Devices {
+			if d.Name == name {
+				t.Fatalf("device %q still present after batch delete", name)
+			}
+		}
+	}
+	for _, n := range doc.Topology.Networks {
+		if n.Name == "MKT-NET" {
+			t.Fatalf("network MKT-NET still present after batch delete")
+		}
+	}
+	for _, l := range doc.Topology.Links {
+		if l.A.Device == "mkt-gw" || l.B.Device == "mkt-gw" || l.A.Device == "mkt-core" || l.B.Device == "mkt-core" {
+			t.Fatalf("dangling link after batch delete: %+v", l)
+		}
+	}
+	if len(doc.Topology.Links) != 1 || doc.Topology.Links[0].A.Device != "r1" || doc.Topology.Links[0].B.Device != "r2" {
+		t.Fatalf("fixture link disturbed: %+v", doc.Topology.Links)
+	}
+}
+
+// TestPostTopologyOperationsBatch_RejectsInvalidFinalState ensures the
+// batch endpoint still guards the resulting document — atomicity means
+// nothing partial is written, not that validation is skipped.
+func TestPostTopologyOperationsBatch_RejectsInvalidFinalState(t *testing.T) {
+	h, projects, draftID := newTestServer(t)
+	before := marshalJSON(t, readDraftDoc(t, projects, draftID).Topology)
+
+	rec := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations/batch"), map[string]any{
+		"operations": []map[string]any{
+			{"kind": "create-device", "device": map[string]string{"name": "r3", "kind": "router"}},
+			{"kind": "create-link", "link": map[string]any{
+				"a": map[string]string{"device": "r3"}, "b": map[string]string{"device": "r1"},
+				"filter": map[string]any{"aExports": []string{"ghost"}, "bExports": []string{}},
+			}},
+		},
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	after := marshalJSON(t, readDraftDoc(t, projects, draftID).Topology)
+	if !bytes.Equal(before, after) {
+		t.Fatalf("rejected batch must not persist any of its operations")
+	}
+}
+
+// TestPostTopologyOperationsBatch_StaleRevisionReturnsConflict mirrors
+// TestPostTopologyOperation_StaleRevisionReturnsConflict for the batch
+// endpoint: CAS still applies to the whole batch as one write.
+func TestPostTopologyOperationsBatch_StaleRevisionReturnsConflict(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+
+	getRec := doJSON(t, h, http.MethodGet, draftPath(draftID, "topology"), nil)
+	staleRevision := getRec.Header().Get("X-Draft-Revision")
+	if staleRevision == "" {
+		t.Fatal("expected an initial X-Draft-Revision")
+	}
+
+	first := doJSON(t, h, http.MethodPost, draftPath(draftID, "topology/operations"), map[string]any{
+		"kind": "create-device", "device": map[string]string{"name": "sw1", "kind": "switch"},
+	})
+	if first.Code != http.StatusOK {
+		t.Fatalf("seed operation: status = %d, body = %s", first.Code, first.Body)
+	}
+
+	body := marshalJSON(t, map[string]any{
+		"operations": []map[string]any{
+			{"kind": "create-device", "device": map[string]string{"name": "sw2", "kind": "switch"}},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, draftPath(draftID, "topology/operations/batch"), bytes.NewReader(body))
+	req.Header.Set("X-Draft-Revision", staleRevision)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+}
+
 func TestPostTopologyOperation_SharesRevisionWithLayout(t *testing.T) {
 	h, _, draftID := newTestServer(t)
 

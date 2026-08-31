@@ -25,8 +25,9 @@ type yamlLink struct {
 }
 
 type yamlDevice struct {
-	Name string `yaml:"name"`
-	Kind string `yaml:"kind"`
+	Name        string `yaml:"name"`
+	Kind        string `yaml:"kind"`
+	Description string `yaml:"description,omitempty"`
 }
 
 type yamlNetwork struct {
@@ -93,7 +94,7 @@ func Load(r io.Reader) (*Topology, error) {
 		if _, exists := topo.Devices[d.Name]; exists {
 			return nil, fmt.Errorf("duplicate device name %q", d.Name)
 		}
-		topo.Devices[d.Name] = Device{Name: d.Name, Kind: kind}
+		topo.Devices[d.Name] = Device{Name: d.Name, Kind: kind, Description: d.Description}
 	}
 
 	for _, l := range raw.Links {

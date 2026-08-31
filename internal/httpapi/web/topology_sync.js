@@ -76,12 +76,22 @@ const TopologySync = (() => {
     let inFlight = false;
     let drainPromise = Promise.resolve();
 
+    // applyEntry applies one queue entry - a single op, or (for an atomic
+    // multi-op write, e.g. the canvas editor's multi-select delete) an
+    // array of ops reduced in order - so publish()/write() never have to
+    // special-case which shape they're holding.
+    function applyEntry(snapshot, entry) {
+      const ops = Array.isArray(entry) ? entry : [entry];
+      return ops.reduce((s, op) => apply(s, op), snapshot);
+    }
+
     // publish recomputes the visible projection: confirmed snapshot with the
-    // in-flight op (if any) and every still-queued op re-applied in order.
+    // in-flight entry (if any) and every still-queued entry re-applied in
+    // order.
     function publish() {
       let snapshot = confirmed;
-      if (sending) snapshot = apply(snapshot, sending);
-      for (const op of queue) snapshot = apply(snapshot, op);
+      if (sending) snapshot = applyEntry(snapshot, sending);
+      for (const entry of queue) snapshot = applyEntry(snapshot, entry);
       onState(snapshot);
     }
 
@@ -148,9 +158,12 @@ const TopologySync = (() => {
     // pending exposes every operation not yet confirmed by the server - the
     // in-flight one (if any) plus the still-queued ones - so a caller can
     // tell "still pending" from "confirmed" (e.g. to gate an action on a
-    // just-created link until its create op lands).
+    // just-created link until its create op lands). Batch entries are
+    // flattened to their individual ops: callers scan for a single op's
+    // `kind`, not the array wrapper.
     function pending() {
-      return sending ? [sending, ...queue] : [...queue];
+      const flatten = (entry) => (Array.isArray(entry) ? entry : [entry]);
+      return sending ? [...flatten(sending), ...queue.flatMap(flatten)] : queue.flatMap(flatten);
     }
 
     return { seed, enqueue, idle, pending };

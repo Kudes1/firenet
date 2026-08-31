@@ -26,8 +26,9 @@ type LinkDoc struct {
 
 // DeviceDoc is a network node.
 type DeviceDoc struct {
-	Name string `json:"name" yaml:"name"`
-	Kind string `json:"kind" yaml:"kind"`
+	Name        string `json:"name" yaml:"name"`
+	Kind        string `json:"kind" yaml:"kind"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // NetworkDoc is one L2 segment: an attachment to devices plus the named
