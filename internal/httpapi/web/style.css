@@ -1138,6 +1138,11 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   color: #dc2626;
   font-size: 0.85em;
 }
+.login-notice {
+  margin-top: 12px;
+  color: #16a34a;
+  font-size: 0.85em;
+}
 .data-table {
   border-collapse: collapse;
   margin-bottom: 24px;

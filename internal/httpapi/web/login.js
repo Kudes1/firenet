@@ -10,6 +10,10 @@ export function loginRedirectTarget(search) {
   return safe ? next : "/ui/topology";
 }
 
+export function activatedNoticeVisible(search) {
+  return new URLSearchParams(search).get("activated") === "1";
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   document.documentElement.dataset.theme =
     localStorage.getItem("firenet-theme") ||
@@ -17,6 +21,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const form = document.getElementById("login-form");
   const errorEl = document.getElementById("login-error");
+  const noticeEl = document.getElementById("login-notice");
+  if (activatedNoticeVisible(window.location.search)) {
+    noticeEl.hidden = false;
+  }
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
