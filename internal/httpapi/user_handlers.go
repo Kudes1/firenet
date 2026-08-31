@@ -81,6 +81,10 @@ func inviteURL(r *http.Request, token string) string {
 
 func (h *handlers) deleteUser(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if currentUser, ok := auth.UserFromContext(r.Context()); ok && id == currentUser.ID {
+		writeError(w, http.StatusBadRequest, errors.New("cannot delete your own account"))
+		return
+	}
 	err := h.users.DeleteUser(r.Context(), id)
 	switch {
 	case err == nil:

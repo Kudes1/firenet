@@ -398,3 +398,22 @@ func TestRegenerateInviteForActivatedUserIsRejected(t *testing.T) {
 		t.Fatalf("got status %d, want 400", rec.Code)
 	}
 }
+
+func TestDeleteSelfIsRejected(t *testing.T) {
+	srv, users := newUnauthenticatedTestServer(t)
+	// A second admin exists so this isn't blocked by ErrLastAdmin instead —
+	// we want to isolate the self-delete guard.
+	if _, err := users.CreateUser(context.Background(), "admin2", "hunter22222", auth.RoleAdmin); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	adminCookie := loginAndGetCookie(t, srv, "admin", "test-password-1")
+	adminID := mustBootstrapAdminID(t, users)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/users/"+adminID, nil)
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want 400", rec.Code)
+	}
+}
