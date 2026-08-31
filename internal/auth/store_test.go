@@ -143,3 +143,32 @@ func TestAuthenticate(t *testing.T) {
 		t.Fatalf("got err %v, want ErrInvalidCredentials for unknown user", err)
 	}
 }
+
+func TestCreateUserDefaultsToActivated(t *testing.T) {
+	store := NewStore(dbtest.Open(t))
+	ctx := context.Background()
+
+	created, err := store.CreateUser(ctx, "ivy", "hunter22222", RoleUser)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if !created.Activated {
+		t.Fatal("CreateUser should default new users to activated")
+	}
+
+	got, err := store.GetUserByUsername(ctx, "ivy")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	if !got.Activated {
+		t.Fatal("GetUserByUsername should report activated = true")
+	}
+
+	users, err := store.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(users) != 1 || !users[0].Activated {
+		t.Fatalf("ListUsers = %+v, want one activated user", users)
+	}
+}

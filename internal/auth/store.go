@@ -37,9 +37,9 @@ func (s *Store) CreateUser(ctx context.Context, username, password string, role 
 	err = s.db.QueryRow(ctx, `
 		INSERT INTO users (username, password_hash, role)
 		VALUES ($1, $2, $3)
-		RETURNING id, username, password_hash, role, created_at`,
+		RETURNING id, username, password_hash, role, created_at, activated`,
 		username, hash, string(role),
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt, &u.Activated)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return User{}, ErrUsernameTaken
@@ -54,9 +54,9 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, e
 	var u User
 	var roleStr string
 	err := s.db.QueryRow(ctx, `
-		SELECT id, username, password_hash, role, created_at FROM users WHERE username = $1`,
+		SELECT id, username, password_hash, role, created_at, activated FROM users WHERE username = $1`,
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt, &u.Activated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
@@ -68,7 +68,7 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, e
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, username, password_hash, role, created_at FROM users ORDER BY username`)
+	rows, err := s.db.Query(ctx, `SELECT id, username, password_hash, role, created_at, activated FROM users ORDER BY username`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -78,7 +78,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	for rows.Next() {
 		var u User
 		var roleStr string
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &roleStr, &u.CreatedAt, &u.Activated); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		u.Role = Role(roleStr)

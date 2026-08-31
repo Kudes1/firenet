@@ -21,6 +21,7 @@ type User struct {
 	PasswordHash string
 	Role         Role
 	CreatedAt    time.Time
+	Activated    bool
 }
 
 // Session is an active login, identified by an opaque bearer token stored
