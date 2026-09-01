@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"html/template"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -81,15 +82,11 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("GET /login", servePage("login.html"))
 	mux.HandleFunc("GET /invite/{token}", servePage("invite.html"))
 	mux.HandleFunc("GET /ui/topology", servePage("topology.html"))
-	mux.HandleFunc("GET /ui/subnets", serveTemplatedPage(pages["subnets"], pageData{
-		Title: "firenet — подсети", Nav: "subnets", Script: "subnets.js",
-	}))
+	mux.HandleFunc("GET /ui/subnets", serveTemplatedPage(mustPageTemplate(pages, "subnets"), templatedPages["subnets"].data))
 	mux.HandleFunc("GET /ui/networks", servePage("networks.html"))
 	mux.HandleFunc("GET /ui/devices", servePage("devices.html"))
 	mux.HandleFunc("GET /ui/sets", servePage("sets.html"))
-	mux.HandleFunc("GET /ui/unions", serveTemplatedPage(pages["unions"], pageData{
-		Title: "firenet — объединения", Nav: "unions", Script: "unions.js",
-	}))
+	mux.HandleFunc("GET /ui/unions", serveTemplatedPage(mustPageTemplate(pages, "unions"), templatedPages["unions"].data))
 	mux.HandleFunc("GET /ui/links", servePage("links.html"))
 	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
 	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
@@ -144,15 +141,26 @@ func servePage(name string) http.HandlerFunc {
 	}
 }
 
-var pageTemplateFiles = map[string]string{
-	"subnets": "templates/subnets.html",
-	"unions":  "templates/unions.html",
-}
-
 type pageData struct {
 	Title  string
 	Nav    string
 	Script string
+}
+
+type templatedPage struct {
+	file string
+	data pageData
+}
+
+// templatedPages lists every page migrated onto the shared layout: its
+// content-template file and the per-page data rendered into it, keyed by
+// the same name parsePageTemplates uses. One table instead of two (a file
+// map plus separate pageData literals at each route registration) so a
+// page's file and its Title/Nav/Script can't drift apart as more pages
+// migrate.
+var templatedPages = map[string]templatedPage{
+	"subnets": {file: "templates/subnets.html", data: pageData{Title: "firenet — подсети", Nav: "subnets", Script: "subnets.js"}},
+	"unions":  {file: "templates/unions.html", data: pageData{Title: "firenet — объединения", Nav: "unions", Script: "unions.js"}},
 }
 
 // parsePageTemplates parses layout.html once and Clone()s it per page before
@@ -161,14 +169,38 @@ type pageData struct {
 // every file's {{define "content"}} lands in the same namespace (Go
 // template blocks aren't scoped per source file), so the last one parsed
 // would silently win for every page's {{template "content" .}} call.
+//
+// html/template's contextual-escaping errors surface at Execute, not at
+// Parse: template.Must alone only catches a broken template at boot if
+// something happens to execute it before the first live request does. The
+// warm-up ExecuteTemplate below makes that guarantee unconditional instead
+// of depending on test coverage.
 func parsePageTemplates() map[string]*template.Template {
 	base := template.Must(template.ParseFS(templateFiles, "templates/layout.html"))
-	pages := make(map[string]*template.Template, len(pageTemplateFiles))
-	for name, file := range pageTemplateFiles {
+	pages := make(map[string]*template.Template, len(templatedPages))
+	for name, page := range templatedPages {
 		clone := template.Must(base.Clone())
-		pages[name] = template.Must(clone.ParseFS(templateFiles, file))
+		tmpl := template.Must(clone.ParseFS(templateFiles, page.file))
+		if err := tmpl.ExecuteTemplate(io.Discard, "layout", page.data); err != nil {
+			panic(err)
+		}
+		pages[name] = tmpl
 	}
 	return pages
+}
+
+// mustPageTemplate looks up a page parsed by parsePageTemplates, panicking
+// at server construction if name doesn't match a parsed page. Without this,
+// a typo'd route registration (pages["subnet"] instead of pages["subnets"])
+// would return a nil *template.Template that only nil-derefs the first time
+// someone requests that route, instead of failing at boot like every other
+// broken-template case parsePageTemplates already guards against.
+func mustPageTemplate(pages map[string]*template.Template, name string) *template.Template {
+	tmpl, ok := pages[name]
+	if !ok {
+		panic("httpapi: no parsed template for page " + name)
+	}
+	return tmpl
 }
 
 // serveTemplatedPage renders a page parsed by parsePageTemplates. It

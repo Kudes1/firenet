@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -121,5 +122,36 @@ func TestTemplatedPages(t *testing.T) {
 		if !strings.Contains(body, c.xDataMark) {
 			t.Errorf("GET %s: body missing %s", c.path, c.xDataMark)
 		}
+		assertLayoutInvariants(t, c.path, body)
 	}
+}
+
+// assertLayoutInvariants checks markers from the shared layout shell itself
+// (as opposed to a page's own varying title/nav/content) — the part
+// TestTemplatedPages' per-page checks don't otherwise cover, so a marker
+// accidentally dropped from templates/layout.html still fails a test
+// instead of silently breaking every templated page at once.
+func assertLayoutInvariants(t *testing.T, path, body string) {
+	t.Helper()
+	for _, marker := range []string{
+		"<!doctype html>",
+		`href="/favicon.svg"`,
+		`href="/style.css"`,
+		`src="/common.js"`,
+		`src="/alpine.min.js"`,
+		`x-data="appData()"`,
+	} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("GET %s: body missing shared layout marker %q", path, marker)
+		}
+	}
+}
+
+func TestMustPageTemplatePanicsOnUnknownPage(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("mustPageTemplate: expected panic for unknown page name, got none")
+		}
+	}()
+	mustPageTemplate(map[string]*template.Template{}, "does-not-exist")
 }
