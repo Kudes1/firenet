@@ -88,7 +88,7 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("GET /ui/sets", serveTemplatedPage(mustPageTemplate(pages, "sets"), templatedPages["sets"].data))
 	mux.HandleFunc("GET /ui/unions", serveTemplatedPage(mustPageTemplate(pages, "unions"), templatedPages["unions"].data))
 	mux.HandleFunc("GET /ui/links", serveTemplatedPage(mustPageTemplate(pages, "links"), templatedPages["links"].data))
-	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
+	mux.HandleFunc("GET /ui/rules", serveTemplatedPage(mustPageTemplate(pages, "rules"), templatedPages["rules"].data))
 	mux.HandleFunc("GET /ui/compile", serveTemplatedPage(mustPageTemplate(pages, "compile"), templatedPages["compile"].data))
 	mux.HandleFunc("GET /ui/diagnose", serveTemplatedPage(mustPageTemplate(pages, "diagnose"), templatedPages["diagnose"].data))
 	mux.HandleFunc("GET /ui/users", serveTemplatedPage(mustPageTemplate(pages, "users"), templatedPages["users"].data))
@@ -169,6 +169,7 @@ var templatedPages = map[string]templatedPage{
 	"users":    {file: "templates/users.html", data: pageData{Title: "firenet — пользователи", Nav: "users", Script: "users.js"}},
 	"networks": {file: "templates/networks.html", data: pageData{Title: "firenet — сети", Nav: "networks", Script: "networks.js"}},
 	"links":    {file: "templates/links.html", data: pageData{Title: "firenet — связи", Nav: "links", Script: "links.js"}},
+	"rules":    {file: "templates/rules.html", data: pageData{Title: "firenet — правила", Nav: "rules", Script: "rules.js"}},
 	"sets":     {file: "templates/sets.html", data: pageData{Title: "firenet — наборы", Nav: "sets", Script: "sets.js"}},
 	"topology": {file: "templates/topology.html", data: pageData{Title: "firenet — топология", Nav: "topology", Script: "topology.js"}},
 }

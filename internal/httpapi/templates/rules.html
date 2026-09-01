@@ -1,20 +1,4 @@
-<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>firenet — правила</title>
-<script>
-  try {
-    var saved = localStorage.getItem("firenet-theme");
-    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
-  } catch (e) {}
-</script>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="stylesheet" href="/style.css">
-</head>
-<body data-nav="rules" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
-
-<main x-data="rulesPage">
+{{define "content"}}<main x-data="rulesPage">
   <form id="rules-form" @submit.prevent>
     <div class="chain-tabs">
       <template x-for="(c, i) in doc.chains" :key="i">
@@ -278,10 +262,4 @@
       <button type="button" class="primary" :disabled="!!draftHint || saving" @click="saveDraft()">Сохранить</button>
     </div>
   </dialog>
-</main>
-
-<script type="module" src="/common.js"></script>
-<script type="module" src="/rules.js"></script>
-<script src="/alpine.min.js" defer></script>
-</body>
-</html>
+</main>{{end}}
