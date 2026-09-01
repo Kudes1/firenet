@@ -1185,30 +1185,18 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   text-align: left;
 }
 
-/* The banner is prepended to <body>, which is a horizontal flex row
-   (sidebar + main); without position:fixed it would become a third
-   column instead of a page-wide header. Pinning it to the top takes it
-   out of that row, so .sidebar/main need a compensating padding-top
-   (below) — but only on pages where the banner actually renders, i.e.
-   not [data-no-draft-banner] (see common.js's DOMContentLoaded guard). */
+/* Prepended to <main> by common.js's renderDraftBanner(), so it's the
+   first item in main's flex column — normal flow, no fixed positioning
+   or compensating padding needed. */
 .draft-banner {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 30;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 8px 16px;
+  margin-bottom: var(--space-3);
   font-size: 0.85em;
-  border-bottom: 1px solid var(--border);
-}
-/* ~44px covers the banner's own rendered height (padding 8px top+bottom
-   plus its text/button content, ~28px) without leaving a visible gap. */
-body:not([data-no-draft-banner]) .sidebar,
-body:not([data-no-draft-banner]) main {
-  padding-top: calc(var(--space-3) + 44px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 .draft-banner-readonly {
   background: var(--bg);
