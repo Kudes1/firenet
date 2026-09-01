@@ -1,0 +1,78 @@
+{{define "content"}}<main x-data="unionsPage">
+  <div class="table-toolbar">
+    <div class="toolbar-text">
+      <h3>Объединения</h3>
+      <p class="hint">Объединение — визуальная группировка устройств и сетей на холсте топологии: рамка с подписью вокруг членов группы. Здесь создаются, переименовываются и удаляются сами объединения; назначить объекты в объединение или исключить их можно в контекстном меню на холсте топологии.</p>
+    </div>
+    <div class="toolbar-actions">
+      <button type="button" class="secondary btn-search" @click="searchOpen = !searchOpen" title="Поиск по объединениям"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.25"/><path d="m13.2 13.2-4.3-4.3"/></svg></button>
+      <button type="button" class="primary" @click="openAdd()">+ объединение</button>
+    </div>
+  </div>
+  <div class="table-wrap" x-show="loaded" x-cloak>
+    <table class="data-table" x-ref="table">
+      <colgroup>
+        <col data-default-width="200" data-min-width="120">
+        <col data-default-width="320" data-min-width="140">
+        <col data-default-width="320" data-min-width="140">
+        <col data-default-width="320" data-min-width="140">
+        <col data-default-width="100" data-min-width="80">
+      </colgroup>
+      <thead>
+        <tr><th>Имя</th><th>Устройства</th><th>Сети</th><th>Описание</th><th></th></tr>
+        <tr class="search-row" x-show="searchOpen" x-cloak>
+          <th><input x-model.trim="filters.name" placeholder="поиск..."></th>
+          <th><input x-model.trim="filters.devices" placeholder="имя устройства"></th>
+          <th><input x-model.trim="filters.networks" placeholder="имя сети или IP/CIDR" title="Имя сети, IP, CIDR или частичный адрес (10.0.) внутри её подсетей"></th>
+          <th><input x-model.trim="filters.description" placeholder="поиск..."></th>
+          <th><button type="button" class="icon-btn reset-search" title="Сбросить фильтры" @click="resetFilters()">&#10005;</button></th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="row in filteredUnions" :key="row.union.name">
+          <tr>
+            <td x-text="row.union.name"></td>
+            <td>
+              <template x-for="d in row.union.devices" :key="d">
+                <span class="owner-badge" x-text="d"></span>
+              </template>
+              <span class="hint" x-show="!row.union.devices.length">нет устройств</span>
+            </td>
+            <td>
+              <template x-for="n in row.union.networks" :key="n">
+                <span class="owner-badge" x-text="n"></span>
+              </template>
+              <span class="hint" x-show="!row.union.networks.length">нет сетей</span>
+            </td>
+            <td>
+              <span x-show="row.union.description" x-text="row.union.description"></span>
+              <span class="hint" x-show="!row.union.description">—</span>
+            </td>
+            <td>
+              <button type="button" class="icon-btn edit" title="Изменить" @click="openEdit(row.index)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.3 2.1a1.6 1.6 0 0 1 2.3 2.3L5.4 12.6l-3.1.8.8-3.1z"/></svg></button>
+              <button type="button" class="icon-btn delete" title="Удалить" @click="removeUnion(row.index)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11"/><path d="M5.5 4V2.7c0-.4.3-.7.7-.7h3.6c.4 0 .7.3.7.7V4"/><path d="M3.5 4l.6 9.3c0 .4.4.7.8.7h6.2c.4 0 .8-.3.8-.7L12.5 4"/><path d="M6.5 6.8v4.4"/><path d="M9.5 6.8v4.4"/></svg></button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="loaded && !unions.length"><td colspan="5" class="empty-cell">Объединений нет — добавьте первое</td></tr>
+        <tr x-show="loaded && unions.length && !filteredUnions.length"><td colspan="5" class="empty-cell">Ничего не найдено</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <dialog x-ref="dialog" class="modal">
+    <h3 x-text="draft.index >= 0 ? 'Изменить объединение' : 'Новое объединение'"></h3>
+    <label>Имя
+      <input x-model.trim="draft.name" placeholder="office">
+    </label>
+    <label>Описание
+      <textarea x-model.trim="draft.description" rows="3" placeholder="Заметка об объединении"></textarea>
+    </label>
+    <p class="cell-hint">Состав устройств и сетей назначается на холсте топологии через контекстное меню.</p>
+    <p class="cell-hint" x-show="draftHint" x-text="draftHint"></p>
+    <div class="modal-actions">
+      <button type="button" @click="closeModal()">Отмена</button>
+      <button type="button" class="primary" :disabled="!!draftHint || saving" @click="saveDraft()">Сохранить</button>
+    </div>
+  </dialog>
+</main>{{end}}

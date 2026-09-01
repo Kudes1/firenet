@@ -3,6 +3,7 @@ package httpapi
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"html/template"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -134,6 +135,45 @@ func servePage(name string) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(b)
+	}
+}
+
+var pageTemplateFiles = map[string]string{
+	"subnets": "templates/subnets.html",
+	"unions":  "templates/unions.html",
+}
+
+type pageData struct {
+	Title  string
+	Nav    string
+	Script string
+}
+
+// parsePageTemplates parses layout.html once and Clone()s it per page before
+// parsing that page's own content file into the clone. Parsing layout.html
+// and every content file into one shared *template.Template would collide:
+// every file's {{define "content"}} lands in the same namespace (Go
+// template blocks aren't scoped per source file), so the last one parsed
+// would silently win for every page's {{template "content" .}} call.
+func parsePageTemplates() map[string]*template.Template {
+	base := template.Must(template.ParseFS(templateFiles, "templates/layout.html"))
+	pages := make(map[string]*template.Template, len(pageTemplateFiles))
+	for name, file := range pageTemplateFiles {
+		clone := template.Must(base.Clone())
+		pages[name] = template.Must(clone.ParseFS(templateFiles, file))
+	}
+	return pages
+}
+
+// serveTemplatedPage renders a page parsed by parsePageTemplates. It
+// replaces servePage only for routes migrated onto the shared layout;
+// every other page keeps using servePage unchanged.
+func serveTemplatedPage(tmpl *template.Template, data pageData) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			http.Error(w, "render error", http.StatusInternalServerError)
+		}
 	}
 }
 

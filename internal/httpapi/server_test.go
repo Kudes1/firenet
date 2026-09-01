@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -32,5 +34,58 @@ func TestStaticAssetsNoCache(t *testing.T) {
 		if rec.Code != http.StatusNotModified {
 			t.Errorf("GET %s with If-None-Match: status %d, want 304", path, rec.Code)
 		}
+	}
+}
+
+func TestParsePageTemplatesRenderDistinctContent(t *testing.T) {
+	pages := parsePageTemplates()
+	if _, ok := pages["subnets"]; !ok {
+		t.Fatal(`parsePageTemplates()["subnets"] missing`)
+	}
+	if _, ok := pages["unions"]; !ok {
+		t.Fatal(`parsePageTemplates()["unions"] missing`)
+	}
+
+	var subnetsOut, unionsOut bytes.Buffer
+	if err := pages["subnets"].ExecuteTemplate(&subnetsOut, "layout", pageData{
+		Title: "firenet — подсети", Nav: "subnets", Script: "subnets.js",
+	}); err != nil {
+		t.Fatalf("execute subnets template: %v", err)
+	}
+	if err := pages["unions"].ExecuteTemplate(&unionsOut, "layout", pageData{
+		Title: "firenet — объединения", Nav: "unions", Script: "unions.js",
+	}); err != nil {
+		t.Fatalf("execute unions template: %v", err)
+	}
+
+	subnets, unions := subnetsOut.String(), unionsOut.String()
+
+	// Regression guard for the shared-namespace pitfall: if layout.html and
+	// both content files were parsed into one shared *template.Template,
+	// the last-parsed "content" block would silently win for every page.
+	if !strings.Contains(subnets, `x-data="subnetsPage"`) {
+		t.Error("subnets render missing x-data=\"subnetsPage\"")
+	}
+	if strings.Contains(subnets, `x-data="unionsPage"`) {
+		t.Error("subnets render leaked unions content block")
+	}
+	if !strings.Contains(unions, `x-data="unionsPage"`) {
+		t.Error("unions render missing x-data=\"unionsPage\"")
+	}
+	if strings.Contains(unions, `x-data="subnetsPage"`) {
+		t.Error("unions render leaked subnets content block")
+	}
+
+	if !strings.Contains(subnets, "<title>firenet — подсети</title>") {
+		t.Error("subnets render missing expected <title>")
+	}
+	if !strings.Contains(subnets, `data-nav="subnets"`) {
+		t.Error("subnets render missing data-nav=\"subnets\"")
+	}
+	if !strings.Contains(unions, "<title>firenet — объединения</title>") {
+		t.Error("unions render missing expected <title>")
+	}
+	if !strings.Contains(unions, `data-nav="unions"`) {
+		t.Error("unions render missing data-nav=\"unions\"")
 	}
 }
