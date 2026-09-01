@@ -1470,15 +1470,6 @@ test("dragging a waypoint handle updates its position and rebuilds the display l
 
 // --- link panel: ПКМ по связи → «Редактировать» открывает плавающую панель ---
 
-function domTexts(node) {
-  const out = [];
-  (function walk(n) {
-    if (n._text) out.push(String(n._text));
-    (n.children || []).forEach(walk);
-  })(node);
-  return out;
-}
-
 test("right-click on a link offers Редактировать and opens the link panel at the click point", async () => {
   const page = await bootTopology(responses);
   await tick();
@@ -1488,22 +1479,18 @@ test("right-click on a link offers Редактировать and opens the link
   fire(edit, "click", {});
   const panel = page.ids["link-panel"];
   assert.ok(panel && !panel.hidden, "panel opened");
-  assert.match(domTexts(panel).join("|"), /r1.*↔.*r2/, "title names both link devices");
+  assert.match(String(page.ids["link-panel-title"].textContent), /r1.*↔.*r2/, "title names both link devices");
   assert.equal(panel.style.left, "224px", "anchored near the click point");
 });
 
-test("link panel uses the diagnostic header and close action", async () => {
+test("link panel uses the shared floating-panel header and close action", async () => {
   const page = await bootTopology(responses);
   await tick();
   fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
   fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
-  const panel = page.ids["link-panel"];
-  const header = panel.children.find((el) => el.tag === "header" && el.attrs.class === "diag-panel-header");
-  assert.ok(header, "panel has the diagnostic-style header");
-  const close = header.children.find((el) => el.attrs.class === "diag-panel-close");
-  assert.ok(close, "header has a close button");
-  fire(close, "click", {});
-  assert.ok(panel.hidden, "close button hides the panel");
+  assert.match(String(page.ids["link-panel-title"].textContent), /r1.*↔.*r2/);
+  fire(page.ids["link-panel-close"], "click", {});
+  assert.ok(page.ids["link-panel"].hidden, "close button hides the panel");
 });
 
 test("applying a filter from the link panel persists it via set-link-filter, addressed by endpoint pair", async () => {
@@ -1515,7 +1502,7 @@ test("applying a filter from the link panel persists it via set-link-filter, add
   await tick();
   fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
   fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
-  const panel = page.ids["link-panel"];
+  const panel = page.ids["link-panel-body"];
   fire(findBtn(panel, (b) => String(b.textContent).trim() === "Сделать фильтрованной"), "click", {});
   await tick();
   assert.ok(page.calls.some((c) => /link-exports\?a=r1&b=r2&side=a/.test(c.path)), "candidates fetched by endpoint pair");
@@ -1529,7 +1516,7 @@ test("applying a filter from the link panel persists it via set-link-filter, add
     { aExports: ["office"], bExports: [] },
     "filter applied to the projected topology",
   );
-  assert.ok(panel.hidden, "panel closes after apply");
+  assert.ok(page.ids["link-panel"].hidden, "panel closes after apply");
   await tick();
   const posted = page.calls.filter((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST");
   assert.equal(posted.length, 1, "one set-link-filter operation sent");
@@ -1553,7 +1540,7 @@ test("clearing a filter from the link panel sends clear-link-filter", async () =
   await tick();
   fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
   fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
-  const panel = page.ids["link-panel"];
+  const panel = page.ids["link-panel-body"];
   fire(findBtn(panel, (b) => String(b.textContent).trim() === "Вернуть обычную"), "click", {});
   fire(findBtn(panel, (b) => String(b.textContent).trim() === "Применить"), "click", {});
   assert.equal(page.get("State.topology.links[0].filter"), undefined, "filter cleared in the projection");
@@ -1567,9 +1554,9 @@ test("cancel closes the link panel without touching the topology", async () => {
   await tick();
   fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
   fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
-  const panel = page.ids["link-panel"];
+  const panel = page.ids["link-panel-body"];
   fire(findBtn(panel, (b) => String(b.textContent).trim() === "Отмена"), "click", {});
-  assert.ok(panel.hidden, "panel closed");
+  assert.ok(page.ids["link-panel"].hidden, "panel closed");
   assert.equal(page.get("State.topology.links[0].filter"), undefined, "no changes recorded");
 });
 

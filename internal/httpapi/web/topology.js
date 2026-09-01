@@ -306,6 +306,7 @@ const Topology = (() => {
     minimap.update();
     netEditPanel?.position();
     deviceEditPanel?.position();
+    LinkPanel.position();
   }
 
   function setCamera(camera) {
@@ -354,7 +355,6 @@ const Topology = (() => {
   // sync.enqueue, не общей кнопкой «Сохранить».
   function openLinkPanel(link, at) {
     if (isLinkCreatePending(link.a.device, link.b.device)) return;
-    const r = canvas().getBoundingClientRect();
     LinkPanel.show(link, {
       subnets: State.subnets,
       fetchExports: (side) => Api.get(apiPath(`link-exports?a=${link.a.device}&b=${link.b.device}&side=${side}`)).then((res) => res.entities || []),
@@ -365,7 +365,7 @@ const Topology = (() => {
           ...(filter ? { filter } : {}),
         });
       },
-    }, at, { w: r.width, h: r.height });
+    }, at);
   }
 
   // isNetworkCreatePending — true пока create-network для этой сети ещё не
@@ -1529,7 +1529,7 @@ const Topology = (() => {
     setupPopover();
     setupSearch();
     NetInfo.attach(canvas());
-    LinkPanel.attach(canvas());
+    LinkPanel.attach(canvas(), () => State.camera);
     netEditPanel = createFloatingPanel({
       panelId: "net-edit", headerId: "net-edit-header", closeId: "net-edit-close",
       viewportEl: canvas, getCamera: () => State.camera,

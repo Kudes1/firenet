@@ -1,6 +1,7 @@
 "use strict";
 
 import { showBanner } from "./common.js";
+import { createFloatingPanel } from "./floating_panel.js";
 
 // LinkPanel — плавающая панель редактирования фильтра одной связи, открываемая
 // с холста топологии (ПКМ по связи → «Редактировать», недоступно пока
@@ -8,13 +9,19 @@ import { showBanner } from "./common.js";
 // Дублирует часть /ui/links (переключение обычная/фильтрованная,
 // экспорт/импорт по сторонам); правки применяет onApply(filter|null), которое
 // ставит set-link-filter/clear-link-filter в очередь операций немедленно —
-// не общей кнопкой «Сохранить».
+// не общей кнопкой «Сохранить». Хром (открытие/закрытие/drag/мировая
+// привязка/клэмп) — floating_panel.js; render() наполняет только
+// #link-panel-title/#link-panel-body.
 const LinkPanel = (() => {
-  const PLACE = { w: 380, h: 320, margin: 8 };
+  // OFFSET сдвигает панель от точки ПКМ, чтобы курсор не оказывался ровно
+  // на её углу — как и раньше.
+  const OFFSET = { x: 14, y: 10 };
 
-  let s = null; // {link, filter: {aExports,bExports}|null, subnets, candidates, deps, at, bounds}
+  let s = null; // {link, filter: {aExports,bExports}|null, subnets, candidates, deps}
+  let panel = null;
 
-  const box = () => document.getElementById("link-panel");
+  const titleEl = () => document.getElementById("link-panel-title");
+  const bodyEl = () => document.getElementById("link-panel-body");
 
   function cidrOf(name) {
     const sn = (s.subnets || []).find((x) => x.name === name);
@@ -112,7 +119,7 @@ const LinkPanel = (() => {
     const cancel = document.createElement("button");
     cancel.setAttribute("type", "button");
     cancel.textContent = "Отмена";
-    cancel.addEventListener("click", hide);
+    cancel.addEventListener("click", () => panel.close());
     const apply = document.createElement("button");
     apply.setAttribute("type", "button");
     apply.setAttribute("class", "primary");
@@ -120,82 +127,21 @@ const LinkPanel = (() => {
     apply.addEventListener("click", () => {
       const filter = s.filter ? { aExports: [...s.filter.aExports], bExports: [...s.filter.bExports] } : null;
       s.deps.onApply(filter);
-      hide();
+      panel.close();
     });
     el.append(cancel, apply);
     return el;
   }
 
-  // place пересчитывает позицию панели по её фактическому размеру (высота
-  // растёт при переключении в фильтрованную связь), не выпуская её за
-  // границы канваса bounds. Вызывается после каждого render — фиксированной
-  // высоты панели не существует, а измерять её надо уже с новым содержимым.
-  function place() {
-    const b = box();
-    if (!b || !s) return;
-    const w = b.offsetWidth || PLACE.w;
-    const h = b.offsetHeight || PLACE.h;
-    b.style.left = Math.min(Math.max(s.at.x + 14, PLACE.margin), Math.max(PLACE.margin, s.bounds.w - w)) + "px";
-    b.style.top = Math.min(Math.max(s.at.y + 10, PLACE.margin), Math.max(PLACE.margin, s.bounds.h - h)) + "px";
-  }
-
-  // drag тащит панель за заголовок: держит смещение курсора от исходной
-  // s.at, чтобы дальнейшие render() (переключение фильтра и т.п.) двигали
-  // панель через тот же place(), а не сбрасывали её к точке открытия.
-  let drag = null; // {x, y, atX, atY}
-
-  function onDragMove(e) {
-    if (!drag || !s) return;
-    s.at = { x: drag.atX + (e.clientX - drag.x), y: drag.atY + (e.clientY - drag.y) };
-    place();
-  }
-
-  function onDragEnd() {
-    drag = null;
-    document.removeEventListener("mousemove", onDragMove);
-    document.removeEventListener("mouseup", onDragEnd);
-  }
-
-  // onDragStart привязывает драг к фактически отрисованной позиции панели
-  // (b.style.left/top), а не к сырому s.at: если панель открылась прижатой
-  // к краю канваса place()'ом, s.at.x при этом остаётся некламплен-ным
-  // значением, из-за которого начало перетаскивания «съедало» бы несколько
-  // пикселей курсора вхолостую, прежде чем панель трогалась с места.
-  function onDragStart(e) {
-    if (!s || e.button !== 0) return;
-    e.preventDefault();
-    const b = box();
-    const left = parseFloat(b.style.left);
-    const top = parseFloat(b.style.top);
-    drag = {
-      x: e.clientX, y: e.clientY,
-      atX: Number.isFinite(left) ? left - 14 : s.at.x,
-      atY: Number.isFinite(top) ? top - 10 : s.at.y,
-    };
-    document.addEventListener("mousemove", onDragMove);
-    document.addEventListener("mouseup", onDragEnd);
-  }
-
+  // render наполняет заголовок и тело панели содержимым текущего состояния
+  // s; вызывается после каждого изменения (переключение фильтра, добавление/
+  // удаление экспорта) — reflow() в конце переклэмпивает панель под новый
+  // размер (высота растёт при переключении в фильтрованную связь).
   function render() {
-    const b = box();
+    const b = bodyEl();
     if (!b || !s) return;
+    titleEl().textContent = `Связь ${s.link.a.device} ↔ ${s.link.b.device}`;
     b.innerHTML = "";
-    const header = document.createElement("header");
-    header.setAttribute("class", "diag-panel-header");
-    const title = document.createElement("strong");
-    title.textContent = `Связь ${s.link.a.device} ↔ ${s.link.b.device}`;
-    const close = document.createElement("button");
-    close.setAttribute("type", "button");
-    close.setAttribute("class", "diag-panel-close");
-    close.setAttribute("title", "Закрыть");
-    close.setAttribute("aria-label", "Закрыть");
-    close.textContent = "×";
-    close.addEventListener("mousedown", (e) => e.stopPropagation());
-    close.addEventListener("click", hide);
-    header.append(title, close);
-    header.addEventListener("mousedown", onDragStart);
-    const body = document.createElement("div");
-    body.setAttribute("class", "diag-panel-body");
     const toggle = document.createElement("button");
     toggle.setAttribute("type", "button");
     toggle.setAttribute("class", "secondary btn-sm");
@@ -208,21 +154,20 @@ const LinkPanel = (() => {
       }
       render();
     });
-    body.append(toggle);
+    b.append(toggle);
     if (s.filter) {
       const grid = document.createElement("div");
       grid.setAttribute("class", "link-panel-grid");
       grid.append(sideColumn("a"), sideColumn("b"));
-      body.append(grid);
+      b.append(grid);
     } else {
       const hint = document.createElement("p");
       hint.setAttribute("class", "hint");
       hint.textContent = "Обычная связь даёт полную связность между устройствами.";
-      body.append(hint);
+      b.append(hint);
     }
-    body.append(actions());
-    b.append(header, body);
-    place();
+    b.append(actions());
+    panel.reflow();
   }
 
   // loadCandidates fetches export candidates for both sides of the link
@@ -246,40 +191,48 @@ const LinkPanel = (() => {
 
   // show открывает панель для связи link (deps.fetchExports(side) уже
   // замкнут на конкретную пару link.a/link.b — см. Topology.openLinkPanel)
-  // в экранной точке at, не выпуская окно за границы канваса bounds = {w, h}.
-  function show(link, deps, at, bounds) {
-    const b = box();
-    if (!b) return;
+  // рядом с экранной точкой at (правый клик), со сдвигом OFFSET.
+  function show(link, deps, at) {
     s = {
-      link, deps, at, bounds,
+      link, deps,
       filter: link.filter ? { aExports: [...link.filter.aExports], bExports: [...link.filter.bExports] } : null,
       subnets: deps.subnets || [],
       candidates: { a: [], b: [] },
     };
-    b.hidden = false;
+    panel.open({ x: at.x + OFFSET.x, y: at.y + OFFSET.y });
     render();
     if (s.filter) loadCandidates();
   }
 
   function hide() {
-    const b = box();
-    if (b) b.hidden = true;
-    if (drag) onDragEnd();
-    s = null;
+    panel.close();
   }
 
-  // attach закрывает панель при зуме/панораме (колесо и средняя кнопка),
-  // клике по фону канваса и Escape — как NetInfo.
-  function attach(canvas) {
-    canvas.addEventListener("wheel", hide);
-    canvas.addEventListener("mousedown", (e) => {
-      if (e.button !== 0 || e.target === canvas) hide();
+  // attach создаёт панель поверх канваса: getCamera — геттер камеры холста
+  // (topology.js's State.camera), нужен для мировой привязки — та же логика,
+  // что и у net-edit/device-edit (см. Topology.applyCamera). onClose чистит
+  // s, чтобы дальнейший render() (например от уже летящего loadCandidates)
+  // не писал в закрытую панель.
+  function attach(canvasEl, getCamera) {
+    panel = createFloatingPanel({
+      panelId: "link-panel",
+      headerId: "link-panel-header",
+      closeId: "link-panel-close",
+      viewportEl: () => canvasEl,
+      getCamera,
+      fallbackW: 380,
+      fallbackH: 320,
+      closeOnEscape: true,
+      closeOnCanvasClick: () => canvasEl,
+      onClose: () => { s = null; },
     });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
   }
 
-  return Object.freeze({ show, hide, attach });
-})();
+  function position() {
+    if (panel) panel.position();
+  }
 
+  return Object.freeze({ show, hide, attach, position });
+})();
 
 export { LinkPanel };

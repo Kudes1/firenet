@@ -15,6 +15,9 @@ function makeEl(tag) {
     listeners: {},
     style: {},
     value: "",
+    hidden: false,
+    offsetWidth: 0,
+    offsetHeight: 0,
     setAttribute(k, v) { this.attrs[k] = v; },
     append(...cs) { this.children.push(...cs); },
     remove() {},
@@ -67,26 +70,41 @@ function findBtn(node, text) {
   global.document = { addEventListener() {} };
   const { LinkPanel } = await import(path.join(__dirname, "link_panel.js"));
 
+  // boot строит #link-panel/-header/-title/-close/-body (та же статичная
+  // разметка, что и topology.html) плюс канвас с getBoundingClientRect для
+  // createFloatingPanel'а (viewportEl), и сразу вызывает LinkPanel.attach —
+  // с новой сигнатурой show()/reflow() опираются на уже привязанный панельный
+  // инстанс. Хром (drag/clamp/Escape/клик по фону/мировая привязка) отсюда
+  // не тестируется — он общий для всех floating_panel.js-панелей и покрыт
+  // floating_panel.test.js; здесь только собственная логика LinkPanel
+  // (наполнение title/body, переключение фильтра, экспорт/импорт, apply/
+  // cancel, подгрузка кандидатов).
   function boot() {
+    const els = {};
     const canvas = makeEl("canvas");
-    const box = makeEl("div");
-    box.hidden = true;
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1200, height: 800 });
     const doc = {
       readyState: "complete",
       listeners: {},
       createElement: (tag) => makeEl(tag),
-      getElementById: (id) => (id === "link-panel" ? box : null),
+      getElementById: (id) => (els[id] ||= makeEl("div")),
       addEventListener(t, fn) { (doc.listeners[t] ||= []).push(fn); },
       removeEventListener(t, fn) {
         const list = doc.listeners[t];
         if (list) doc.listeners[t] = list.filter((f) => f !== fn);
       },
     };
+    const box = (els["link-panel"] = makeEl("div"));
+    els["link-panel-header"] = makeEl("header");
+    const title = (els["link-panel-title"] = makeEl("strong"));
+    els["link-panel-close"] = makeEl("button");
+    const body = (els["link-panel-body"] = makeEl("div"));
     const banners = [];
     global.document = doc;
     // showBanner приходит из common.js и шлёт событие notify через window
     global.window = { dispatchEvent: (e) => { if (e.type === "notify") banners.push(e.detail); } };
-    return { canvas, doc, box, banners };
+    LinkPanel.attach(canvas, () => ({ x: 0, y: 0, z: 1 }));
+    return { canvas, doc, box, title, body, banners };
   }
 
   const subnets = [
@@ -107,34 +125,36 @@ function findBtn(node, text) {
         return Promise.resolve((opts.candidates ?? { a: [{ name: "guests", cidr: "10.0.1.0/24" }], b: [] })[side]);
       },
       onApply: (filter) => applied.push(filter),
-    }, { x: 100, y: 50 }, { w: 1200, h: 800 });
+    }, { x: 100, y: 50 });
     return { applied: () => applied, fetched: () => fetched };
   }
 
-  test("show opens a plain link with a toggle to make it filtered", () => {
+  test("show opens a plain link with a toggle to make it filtered, anchored at at+offset", () => {
     const page = boot();
     showPanel(page, plainLink);
     assert.ok(!page.box.hidden, "panel opened");
-    assert.match(texts(page.box).join("|"), /r1.*↔.*r2/, "title names both devices");
-    assert.ok(findBtn(page.box, "Сделать фильтрованной"), "offers to make the link filtered");
-    assert.ok(!findBtn(page.box, "Вернуть обычную"), "no revert button for a plain link");
+    assert.equal(page.box.style.left, "114px", "anchored 14px right of the click point");
+    assert.equal(page.box.style.top, "60px", "anchored 10px below the click point");
+    assert.match(String(page.title.textContent), /r1.*↔.*r2/, "title names both devices");
+    assert.ok(findBtn(page.body, "Сделать фильтрованной"), "offers to make the link filtered");
+    assert.ok(!findBtn(page.body, "Вернуть обычную"), "no revert button for a plain link");
   });
 
   test("show opens an already-filtered link with export/import columns and fetches candidates", async () => {
     const page = boot();
     const { fetched } = showPanel(page, filteredLink);
     await Promise.resolve();
-    assert.ok(findBtn(page.box, "Вернуть обычную"), "offers to revert to a plain link");
+    assert.ok(findBtn(page.body, "Вернуть обычную"), "offers to revert to a plain link");
     assert.deepEqual(fetched().sort(), ["a", "b"], "loads candidates for both sides");
-    assert.ok(texts(page.box).includes("office"), "existing export shown");
+    assert.ok(texts(page.body).includes("office"), "existing export shown");
   });
 
   test("toggling to filtered starts with empty exports and loads candidates", async () => {
     const page = boot();
     const { fetched } = showPanel(page, plainLink);
-    fire(findBtn(page.box, "Сделать фильтрованной"), "click");
+    fire(findBtn(page.body, "Сделать фильтрованной"), "click");
     await Promise.resolve();
-    assert.ok(findBtn(page.box, "Вернуть обычную"), "now shows the revert button");
+    assert.ok(findBtn(page.body, "Вернуть обычную"), "now shows the revert button");
     assert.deepEqual(fetched().sort(), ["a", "b"], "candidates fetched on toggle");
   });
 
@@ -142,43 +162,43 @@ function findBtn(node, text) {
     const page = boot();
     showPanel(page, filteredLink);
     await Promise.resolve();
-    fire(findBtn(page.box, "Вернуть обычную"), "click");
-    assert.ok(findBtn(page.box, "Сделать фильтрованной"), "back to the plain-link view");
-    assert.ok(!texts(page.box).includes("office"), "export list is gone");
+    fire(findBtn(page.body, "Вернуть обычную"), "click");
+    assert.ok(findBtn(page.body, "Сделать фильтрованной"), "back to the plain-link view");
+    assert.ok(!texts(page.body).includes("office"), "export list is gone");
   });
 
   test("picking a candidate from the select adds it to that side's export", async () => {
     const page = boot();
     showPanel(page, filteredLink);
     await Promise.resolve();
-    const select = findAll(page.box, (n) => n.tag === "select")[0];
+    const select = findAll(page.body, (n) => n.tag === "select")[0];
     select.value = "guests";
     fire(select, "change");
-    assert.ok(texts(page.box).includes("guests"), "new export listed");
+    assert.ok(texts(page.body).includes("guests"), "new export listed");
   });
 
   test("removing an export drops it from the list", async () => {
     const page = boot();
     showPanel(page, filteredLink);
     await Promise.resolve();
-    const del = findAll(page.box, (n) => n.tag === "button" && n.attrs.class === "icon-btn delete")[0];
+    const del = findAll(page.body, (n) => n.tag === "button" && n.attrs.class === "icon-btn delete")[0];
     assert.ok(del, "remove button present for the existing export");
     fire(del, "click");
-    assert.ok(!texts(page.box).includes("office"), "export removed");
+    assert.ok(!texts(page.body).includes("office"), "export removed");
   });
 
   test("adding an export on side a mirrors it as an import on side b", async () => {
     const page = boot();
     showPanel(page, filteredLink);
     await Promise.resolve();
-    assert.match(texts(page.box).join("|"), /Импорт \(из r1\).*office/s, "b's import column mirrors a's export");
+    assert.match(texts(page.body).join("|"), /Импорт \(из r1\).*office/s, "b's import column mirrors a's export");
   });
 
   test("apply hands the current filter to onApply and closes the panel", async () => {
     const page = boot();
     const { applied } = showPanel(page, filteredLink);
     await Promise.resolve();
-    fire(findBtn(page.box, "Применить"), "click");
+    fire(findBtn(page.body, "Применить"), "click");
     assert.deepEqual(applied(), [{ aExports: ["office"], bExports: [] }]);
     assert.ok(page.box.hidden, "panel closes after apply");
   });
@@ -187,8 +207,8 @@ function findBtn(node, text) {
     const page = boot();
     const { applied } = showPanel(page, filteredLink);
     await Promise.resolve();
-    fire(findBtn(page.box, "Вернуть обычную"), "click");
-    fire(findBtn(page.box, "Применить"), "click");
+    fire(findBtn(page.body, "Вернуть обычную"), "click");
+    fire(findBtn(page.body, "Применить"), "click");
     assert.deepEqual(applied(), [null]);
   });
 
@@ -196,80 +216,16 @@ function findBtn(node, text) {
     const page = boot();
     const { applied } = showPanel(page, filteredLink);
     await Promise.resolve();
-    fire(findBtn(page.box, "Отмена"), "click");
+    fire(findBtn(page.body, "Отмена"), "click");
     assert.ok(page.box.hidden, "panel closed");
     assert.deepEqual(applied(), []);
-  });
-
-  test("show clamps the panel inside the canvas bounds", () => {
-    const page = boot();
-    LinkPanel.show(plainLink,
-      { subnets: [], fetchExports: () => Promise.resolve([]), onApply: () => {} },
-      { x: 5000, y: -50 }, { w: 1200, h: 800 });
-    assert.ok(parseInt(page.box.style.left, 10) < 1200, "left stays inside the canvas");
-    assert.equal(page.box.style.top, "8px", "top clamps to the margin");
-  });
-
-  test("dragging the header moves the panel and further renders keep the new position", () => {
-    const page = boot();
-    showPanel(page, plainLink);
-    assert.equal(page.box.style.left, "114px");
-    assert.equal(page.box.style.top, "60px");
-    const header = findAll(page.box, (n) => n.attrs.class === "diag-panel-header")[0];
-    fire(header, "mousedown", { button: 0, clientX: 114, clientY: 60 });
-    fire(page.doc, "mousemove", { clientX: 164, clientY: 90 });
-    assert.equal(page.box.style.left, "164px", "panel follows the pointer horizontally");
-    assert.equal(page.box.style.top, "90px", "panel follows the pointer vertically");
-    fire(page.doc, "mouseup", {});
-    fire(findBtn(page.box, "Сделать фильтрованной"), "click");
-    assert.equal(page.box.style.left, "164px", "toggling the filter keeps the dragged position");
-    assert.equal(page.box.style.top, "90px", "toggling the filter keeps the dragged position");
-    fire(page.doc, "mousemove", { clientX: 999, clientY: 999 });
-    assert.equal(page.box.style.left, "164px", "movement after mouseup no longer drags the panel");
-  });
-
-  test("dragging a panel clamped to the canvas edge tracks the pointer immediately, no dead zone", () => {
-    const page = boot();
-    LinkPanel.show(plainLink,
-      { subnets: [], fetchExports: () => Promise.resolve([]), onApply: () => {} },
-      { x: 1000, y: 50 }, { w: 1200, h: 800 });
-    assert.equal(page.box.style.left, "820px", "opens clamped to the right edge (1200 - 380 width)");
-    const header = findAll(page.box, (n) => n.attrs.class === "diag-panel-header")[0];
-    fire(header, "mousedown", { button: 0, clientX: 820, clientY: 60 });
-    fire(page.doc, "mousemove", { clientX: 810, clientY: 60 });
-    assert.equal(page.box.style.left, "810px", "panel follows a 10px drag away from the edge immediately");
-  });
-
-  test("hide closes the window; Escape hides it too", () => {
-    const page = boot();
-    LinkPanel.attach(page.canvas);
-    showPanel(page, plainLink);
-    LinkPanel.hide();
-    assert.ok(page.box.hidden, "hidden after hide()");
-    showPanel(page, plainLink);
-    fire(page.doc, "keydown", { key: "Escape" });
-    assert.ok(page.box.hidden, "Escape hides the open panel");
-  });
-
-  test("attach hides on wheel and background mousedown but not on node mousedown", () => {
-    const page = boot();
-    LinkPanel.attach(page.canvas);
-    showPanel(page, plainLink);
-    fire(page.canvas, "wheel", { deltaY: -120 });
-    assert.ok(page.box.hidden, "wheel zoom hides the panel");
-    const node = makeEl("path");
-    showPanel(page, plainLink);
-    fire(page.canvas, "mousedown", { button: 0, target: node });
-    assert.ok(!page.box.hidden, "node mousedown keeps the panel");
-    fire(page.canvas, "mousedown", { button: 0, target: page.canvas });
-    assert.ok(page.box.hidden, "background mousedown hides the panel");
   });
 
   test("failed candidate fetch clears candidates and reports via showBanner", async () => {
     const page = boot();
     LinkPanel.show(filteredLink,
       { subnets, fetchExports: () => Promise.reject(new Error("boom")), onApply: () => {} },
-      { x: 0, y: 0 }, { w: 1200, h: 800 });
+      { x: 0, y: 0 });
     await Promise.resolve();
     await Promise.resolve();
     assert.ok(page.banners.some((m) => m.message.includes("boom")), "error surfaced via showBanner");

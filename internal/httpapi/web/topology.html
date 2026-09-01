@@ -84,7 +84,13 @@
       </div>
       <div id="topo-context-menu" class="context-menu" hidden></div>
       <div id="net-info" class="net-info" hidden></div>
-      <div id="link-panel" class="link-panel" hidden></div>
+      <div id="link-panel" class="floating-panel link-panel" hidden>
+        <header id="link-panel-header" class="floating-panel-header">
+          <strong id="link-panel-title" class="floating-panel-title"></strong>
+          <button type="button" id="link-panel-close" class="floating-panel-close" title="Закрыть" aria-label="Закрыть">×</button>
+        </header>
+        <div id="link-panel-body" class="floating-panel-body"></div>
+      </div>
       <div id="device-edit" class="floating-panel net-edit" x-data="devicesPage" x-ref="deviceEdit" hidden>
         <header id="device-edit-header" class="floating-panel-header">
           <h3 class="floating-panel-title">Изменить устройство</h3>
