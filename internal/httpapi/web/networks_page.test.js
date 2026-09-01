@@ -13,6 +13,7 @@ async function bootPage() {
   const banners = [];
   const store = { "firenet-draft-id": "d1" };
   const docListeners = {};
+  const els = {};
   const notify = (event) => {
     if (event.type === "notify") banners.push(event.detail);
   };
@@ -24,7 +25,11 @@ async function bootPage() {
       { name: "dmz", subnets: ["b"], attach: [] },
     ],
   };
-  global.document = { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) };
+  global.document = {
+    addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn),
+    getElementById: (id) =>
+      (els[id] ||= { style: {}, hidden: true, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1200, height: 800 }) }),
+  };
   global.window = { dispatchEvent: notify };
   global.localStorage = { getItem: () => null, setItem() {} };
   global.sessionStorage = {
@@ -33,7 +38,7 @@ async function bootPage() {
     removeItem: (k) => { delete store[k]; },
   };
   global.matchMedia = () => ({ matches: false });
-  global.CustomEvent = class {};
+  global.CustomEvent = class { constructor(type, init = {}) { this.type = type; this.detail = init.detail; } };
   global.confirm = () => true;
   global.fetch = async (path_, opts) => {
     calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
@@ -60,8 +65,11 @@ async function bootPage() {
   (docListeners["alpine:init"] || []).forEach((fn) => fn());
   const page = factories.networksPage();
   page.$nextTick = (fn) => fn();
-  page.$refs = { dialog: { close: () => calls.push({ path: "dialog.close" }) } };
-  return { page, calls, banners, store };
+  page.$refs = {
+    dialog: { close: () => calls.push({ path: "dialog.close" }) },
+    netEdit: { offsetWidth: 420, offsetHeight: 560, style: {}, hidden: true },
+  };
+  return { page, calls, banners, store, topoFixture };
 }
 
 async function bootLoadedPage() {
@@ -215,4 +223,65 @@ test("saveDraft is blocked while read-only (no active draft)", async () => {
   page.draft = { index: 0, name: "office", subnets: ["a"], description: "офисная" };
   await page.saveDraft();
   assert.equal(calls.filter((c) => c.method === "PUT").length, 0);
+});
+
+// --- плавающее окно на холсте топологии (ПКМ по сети → «Редактировать») ---
+
+test("openNetworkEdit fills the draft and positions the floating window", async () => {
+  const { page } = await bootLoadedPage();
+
+  page.openNetworkEdit("dmz", { x: 150, y: 200 });
+
+  assert.deepEqual(page.draft, { index: 1, name: "dmz", subnets: ["b"], description: "" });
+  assert.equal(page.$refs.netEdit.hidden, false, "window opened");
+  assert.equal(page.$refs.netEdit.style.left, "150px", "anchored at the click point");
+  assert.equal(page.$refs.netEdit.style.top, "200px");
+});
+
+test("openNetworkEdit clamps the window inside the canvas", async () => {
+  const { page } = await bootLoadedPage();
+
+  page.openNetworkEdit("dmz", { x: 2000, y: -50 });
+
+  assert.equal(page.$refs.netEdit.style.left, "780px", "clamped to the canvas right edge");
+  assert.equal(page.$refs.netEdit.style.top, "8px", "clamped to the canvas top edge");
+});
+
+test("saveDraft delegates to the injected save port and closes the canvas window", async () => {
+  const { page, calls, topoFixture } = await bootLoadedPage();
+  const portOps = [];
+  page.$refs = { netEdit: page.$refs.netEdit };
+  page._savePort = async (op) => {
+    portOps.push(op);
+    return { topology: { ...topoFixture, networks: [{ name: "office", subnets: ["a", "c"], description: "новое" }] } };
+  };
+  page.draft = { index: 0, name: "office", subnets: ["a", "c"], description: "офисная" };
+
+  await page.saveDraft();
+
+  assert.deepEqual(portOps, [{
+    kind: "update-network",
+    networkName: "office",
+    network: { name: "office", subnets: ["a", "c"], description: "офисная" },
+  }]);
+  assert.equal(
+    calls.filter((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST").length,
+    0,
+    "no direct POST when a port is injected",
+  );
+  assert.deepEqual(page.networks, [{ name: "office", subnets: ["a", "c"], description: "новое" }]);
+  assert.equal(page.$refs.netEdit.hidden, true, "canvas window closed after save");
+});
+
+test("saveDraft keeps the canvas window open when the port fails", async () => {
+  const { page, banners } = await bootLoadedPage();
+  page.$refs = { netEdit: page.$refs.netEdit };
+  page._savePort = async () => { throw new Error("boom"); };
+  page.openNetworkEdit("office", { x: 100, y: 100 });
+  page.draft.subnets = ["a"];
+
+  await page.saveDraft();
+
+  assert.match(banners.at(-1)?.message, /Ошибка сохранения/);
+  assert.equal(page.$refs.netEdit.hidden, false, "window stays open with the draft intact");
 });

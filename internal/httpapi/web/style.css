@@ -28,6 +28,8 @@
   --space-4: 1.5rem;
   --radius-sm: 4px;
   --radius-md: 8px;
+
+  --net-edit-w: 520px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -155,7 +157,8 @@ nav.side-nav .icon svg { width: 100%; height: 100%; }
 
 .sidebar-toggle {
   margin-top: auto;
-  justify-content: flex-start;
+  justify-content: center;
+  align-items: center;
   height: 2.1rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -163,8 +166,6 @@ nav.side-nav .icon svg { width: 100%; height: 100%; }
   color: var(--fg);
 }
 .sidebar-toggle:hover { background: var(--panel-bg-hover); }
-.sidebar-toggle svg { width: var(--icon); height: var(--icon); transition: transform .15s ease; }
-.sidebar.collapsed .sidebar-toggle svg { transform: rotate(180deg); }
 
 /* 56px: ось иконок левая и от ширины не зависит; запас справа нужен,
    чтобы иконка (18.4px) помещалась в кнопки с их паддингом 8px */
@@ -394,6 +395,48 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .net-info li { display: flex; justify-content: space-between; gap: var(--space-2); }
 .net-info-cidr { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .net-info-empty { color: var(--muted); font-size: 0.82rem; }
+
+/* floating object editor (canvas: ПКМ по сети/устройству → «Редактировать»),
+   shared by #net-edit and #device-edit. Дублирует модальное окно страницы
+   «Сети»/«Устройства» как плавающее окно, прижатое к точке ПКМ и не
+   выходящее за границы канваса. */
+.net-edit {
+  position: absolute;
+  z-index: 20;
+  width: min(var(--net-edit-w), calc(100% - 2 * var(--space-3)));
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  max-height: calc(100% - 2 * var(--space-3));
+  /* overflow: visible — не auto: .member-suggestions (position: absolute)
+     всплывает над окном, но по DOM-дереву остаётся его потомком, и auto
+     считал бы её высоту в скролл-области .net-edit, пряча список за
+     скроллбаром самого окна вместо того, чтобы дать ему просто открыться
+     поверх содержимого. Высота окна всё равно ограничена max-height —
+     ограничивает именно рамку/фон, а не клипует контент. */
+  overflow: visible;
+}
+.net-edit[hidden] { display: none; }
+.net-edit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  user-select: none;
+}
+.net-edit-title { margin: 0; font-size: 1rem; }
+.net-edit-close { border: none; background: none; color: var(--fg); font-size: 1.2rem; line-height: 1; cursor: pointer; padding: 0; }
+.net-edit-close:hover { color: var(--accent); }
+.net-edit-body { padding: var(--space-3); }
+.net-edit-body label,
+.net-edit-body .modal-field { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); font-size: 0.9rem; }
+.net-edit-body .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: auto; }
 
 /* floating link filter editor (canvas: ПКМ по связи → «Редактировать») */
 .link-panel {
@@ -1075,12 +1118,23 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .sidebar.collapsed .user-name {
   display: none;
 }
+.sidebar.collapsed .user-box {
+  flex-direction: column;
+  padding: 8px 0;
+}
+.sidebar.collapsed .logout-btn {
+  display: none;
+}
 .logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.1rem;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
   border-radius: 4px;
-  padding: 4px 8px;
+  padding: 0 8px;
   font-size: 0.8em;
   cursor: pointer;
 }

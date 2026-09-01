@@ -13,6 +13,11 @@ import { TopoScene } from "./topo_scene.js";
 import { Tween } from "./tween.js";
 import { TopologySync } from "./topology_sync.js";
 import { Api, showBanner, apiPath, assertEditable, DirtyGuard, currentDraftID, isReadOnly, containsFold } from "./common.js";
+// сети/устройства: Alpine-компоненты networksPage/devicesPage нужны на
+// странице топологии для плавающих окон редактирования (#net-edit/
+// #device-edit, ПКМ → «Редактировать»)
+import "./networks.js";
+import "./devices.js";
 
 export const State = {
   topology: { devices: [], links: [], networks: [], unions: [] },
@@ -268,6 +273,7 @@ const Topology = (() => {
   let view = null; // CanvasView поверх #topo-canvas
   let pending = null; // {device|network} — узел, ожидающий пару в режиме connect
   let sync = null; // TopologySync — очередь операций поверх подтверждённого снимка черновика
+  let syncStatus = "saved"; // последний статус из onStatus (для портов сохранения #net-edit/#device-edit)
   let previewWire = null; // item оверлея: связь в процессе connect
   let marqueeRect = null; // рамка выделения в мировых координатах
   let popoverCreate = null; // callback awaiting a name from the popover
@@ -355,6 +361,95 @@ const Topology = (() => {
         });
       },
     }, at, { w: r.width, h: r.height });
+  }
+
+  // isNetworkCreatePending — true пока create-network для этой сети ещё не
+  // подтверждён сервером. Редактирование только что созданной сети требует
+  // сохранённой топологии, поэтому пункт «Редактировать» в её меню
+  // недоступен до подтверждения (см. networks.js's draftHint).
+  function isNetworkCreatePending(name) {
+    return sync.pending().some((op) => op.kind === "create-network" && op.network.name === name);
+  }
+
+  // getNetEditInstance возвращает Alpine-инстанс сети-редактора, привязанного
+  // к плавающему окну #net-edit на холсте. В read-only табе (нет активного
+  // черновика) или без Alpine-окружения инстанса нет — вызывающий код
+  // откатывается без правки.
+  function getNetEditInstance() {
+    const Alpine = globalThis.Alpine;
+    const el = document.getElementById("net-edit");
+    return Alpine && el ? Alpine.$data(el) : null;
+  }
+
+  // openNetworkEditWindow открывает плавающее окно редактирования сети
+  // (networks.js's networksPage, тот же редактор, что и на странице «Сети»)
+  // в точке at правого клика. Состояние и порт сохранения инстанс получает
+  // от канвы: сети/подсети — из текущего State (окно живёт своей Alpine-
+  // жизнью и могло бы отстать от только что созданных на канве объектов),
+  // сохранение — через очередь TopologySync (update-network попадает в общий
+  // поток операций, канва перерисовывается штатно), а не отдельным POST.
+  // Читай-только таб не правит — assertEditable откатывается до enqueueOp-
+  // порта, как и везде, где пишется проект.
+  function openNetworkEditWindow(name, at) {
+    try {
+      assertEditable();
+    } catch {
+      return; // read-only tab: nothing to persist
+    }
+    const instance = getNetEditInstance();
+    if (!instance) return;
+    instance.networks = (State.topology.networks || []).map((n) => ({ name: n.name, subnets: [...(n.subnets || [])], description: n.description }));
+    instance.subnets = State.subnets;
+    instance._savePort = async (op) => {
+      enqueueOp(op);
+      await sync.idle();
+      if (syncStatus === "error") throw new Error("не удалось применить операцию к черновику");
+      return { topology: State.topology };
+    };
+    instance.openNetworkEdit(name, at);
+  }
+
+  // isDeviceCreatePending — зеркалит isNetworkCreatePending для устройств:
+  // true пока create-device этого устройства ещё не подтверждён сервером.
+  function isDeviceCreatePending(name) {
+    return sync.pending().some((op) => op.kind === "create-device" && op.device.name === name);
+  }
+
+  // getDeviceEditInstance — зеркалит getNetEditInstance для плавающего окна
+  // #device-edit устройства.
+  function getDeviceEditInstance() {
+    const Alpine = globalThis.Alpine;
+    const el = document.getElementById("device-edit");
+    return Alpine && el ? Alpine.$data(el) : null;
+  }
+
+  // openDeviceEditWindow — зеркалит openNetworkEditWindow для устройств.
+  // Отличие: devicesPage.saveDraft отправляет батч операций (update-device +
+  // union-add/remove-device), поэтому порт сохранения уводит их одним
+  // enqueueOpBatch, а не enqueueOp по одной.
+  function openDeviceEditWindow(name, at) {
+    try {
+      assertEditable();
+    } catch {
+      return; // read-only tab: nothing to persist
+    }
+    const instance = getDeviceEditInstance();
+    if (!instance) return;
+    const unions = State.topology.unions || [];
+    instance.unions = unions;
+    instance.devices = (State.topology.devices || []).map((d) => ({
+      name: d.name,
+      kind: d.kind,
+      description: d.description || "",
+      union: (unions.find((u) => (u.devices || []).includes(d.name)) || {}).name || "",
+    }));
+    instance._savePort = async (ops) => {
+      enqueueOpBatch(ops);
+      await sync.idle();
+      if (syncStatus === "error") throw new Error("не удалось применить операцию к черновику");
+      return { topology: State.topology };
+    };
+    instance.openDeviceEdit(name, at);
   }
 
   // enqueueOp is the one gate every canvas edit passes through: a read-only
@@ -556,6 +651,8 @@ const Topology = (() => {
     // подтверждён сервером (см. isLinkCreatePending) — настройка фильтра
     // требует сохранённой топологии.
     if (isLink) items.push(["Редактировать", isLinkCreatePending(obj.a.device, obj.b.device) ? null : () => openLinkPanel(obj, at)]);
+    if (key === "devices") items.push(["Редактировать", isDeviceCreatePending(obj.name) ? null : () => openDeviceEditWindow(obj.name, at)]);
+    if (key === "networks") items.push(["Редактировать", isNetworkCreatePending(obj.name) ? null : () => openNetworkEditWindow(obj.name, at)]);
     if (key) {
       const nodes = State.selection.has(obj) && State.selection.size > 1
         ? [...State.selection].map(nodeIdentity).filter(Boolean)
@@ -669,6 +766,60 @@ const Topology = (() => {
     });
     enqueueOpBatch(ops);
     clearSelection();
+  }
+
+  // setupFloatingEditClose закрывает плавающее окно редактирования (net-edit/
+  // device-edit, за id которого зовут) при Escape и нажатии ЛКМ на канве
+  // (жест ухода от окна: выбор узла/рамки и панорама ПКМ окно не теряют).
+  // Кнопка «Отмена» в самом окне закрывает его своим методом напрямую.
+  function setupFloatingEditClose(boxId) {
+    const hide = () => { const b = document.getElementById(boxId); if (b) b.hidden = true; };
+    canvas().addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      hide();
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+  }
+
+  // setupFloatingEditDrag тащит плавающее окно (boxId) за его заголовок
+  // (headerId) — тот же приём, что и у .link-panel
+  // (LinkPanel.onDragStart/onDragMove/onDragEnd): держим смещение курсора от
+  // исходного left/top окна, кламп в границах канваса тем же margin, что и у
+  // showNetworkEdit/showDeviceEdit при открытии окна (networks.js's/
+  // devices.js's NET_EDIT_MARGIN/DEVICE_EDIT_MARGIN — независимые копии тех
+  // же чисел, как и у LinkPanel.PLACE). Клик по кнопке закрытия (closeId) не
+  // должен запускать драг — как и у link-panel.
+  function setupFloatingEditDrag(boxId, headerId, closeId) {
+    const MARGIN = 8, FALLBACK_W = 520, FALLBACK_H = 560; // FALLBACK_W держим в паре с --net-edit-w в style.css
+    const box = () => document.getElementById(boxId);
+    const header = document.getElementById(headerId);
+    const close = document.getElementById(closeId);
+    if (close) close.addEventListener("mousedown", (e) => e.stopPropagation());
+    let drag = null; // {x, y, boxX, boxY}
+    function onMove(e) {
+      if (!drag) return;
+      const b = box();
+      const r = canvas().getBoundingClientRect();
+      const w = b.offsetWidth || FALLBACK_W;
+      const h = b.offsetHeight || FALLBACK_H;
+      const x = drag.boxX + (e.clientX - drag.x);
+      const y = drag.boxY + (e.clientY - drag.y);
+      b.style.left = Math.min(Math.max(x, MARGIN), Math.max(MARGIN, r.width - w)) + "px";
+      b.style.top = Math.min(Math.max(y, MARGIN), Math.max(MARGIN, r.height - h)) + "px";
+    }
+    function onUp() {
+      drag = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    }
+    header.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const b = box();
+      drag = { x: e.clientX, y: e.clientY, boxX: parseFloat(b.style.left) || 0, boxY: parseFloat(b.style.top) || 0 };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
   }
 
   // --- выбор, рамка и перетаскивание: единый mousedown на канвасе ---
@@ -1296,6 +1447,7 @@ const Topology = (() => {
   // surfaces a banner: a silent label is easy to miss when a queued edit
   // just got dropped after a 409/422/network failure.
   function renderSyncStatus(status) {
+    syncStatus = status;
     const el = document.getElementById("topo-sync-status");
     if (!el) return;
     const states = {
@@ -1425,6 +1577,10 @@ const Topology = (() => {
     setupSearch();
     NetInfo.attach(canvas());
     LinkPanel.attach(canvas());
+    setupFloatingEditClose("net-edit");
+    setupFloatingEditClose("device-edit");
+    setupFloatingEditDrag("net-edit", "net-edit-header", "net-edit-close");
+    setupFloatingEditDrag("device-edit", "device-edit-header", "device-edit-close");
     setTool("select");
     Topology.render();
   }

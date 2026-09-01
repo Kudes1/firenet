@@ -12,6 +12,12 @@ import { makeColumnsResizable, initializeColumns } from "./columns.js";
 const NETWORKS_COL_WIDTHS_KEY = "firenet-networks-col-widths-v1";
 const NETWORKS_COL_WIDTHS_VERSION = 1;
 
+// Размер плавающего окна редактирования сети на холсте топологии; NET_EDIT_MARGIN —
+// отступ от края канваса, к которому прижимается окно.
+const NET_EDIT_W = 520; // держим в паре с --net-edit-w в style.css
+const NET_EDIT_H = 560;
+const NET_EDIT_MARGIN = 8;
+
 document.addEventListener("alpine:init", () => {
   Alpine.data("networksPage", () => ({
     networks: [], // {name, subnets: [], description}
@@ -84,8 +90,42 @@ document.addEventListener("alpine:init", () => {
       this.$refs.dialog.showModal();
     },
 
+    // openNetworkEdit открывает плавающее окно редактирования сети на холсте
+    // топологии (ПКМ по сети → «Редактировать»). Поведение дублирует openEdit
+    // страницы «Сети»: тот же draft, те же подсети и saveDraft. Отличие —
+    // окно позиционируется в точке at, а не центрируется как native <dialog>.
+    // На холсте topology.js обновляет this.networks/this.subnets из текущего
+    // State перед вызовом, так что черновик всегда строится по свежим данным.
+    openNetworkEdit(name, at) {
+      const i = this.networks.findIndex((n) => n.name === name);
+      if (i < 0) return;
+      this.draft = { index: i, name: this.networks[i].name, subnets: [...this.networks[i].subnets], description: this.networks[i].description };
+      this.resetMemberSearch();
+      this.showNetworkEdit(at.x, at.y);
+    },
+
     closeModal() {
       this.$refs.dialog.close();
+    },
+
+    // showNetworkEdit позиционирует плавающее окно редактирования сети в
+    // экранной точке (x, y), не выпуская его за границы канваса. Размер
+    // берётся из фактического окна (как у link-panel: после unhide), с
+    // fallback на фиксированный размер.
+    showNetworkEdit(x, y) {
+      const box = this.$refs.netEdit;
+      const r = document.getElementById("topo-canvas").getBoundingClientRect();
+      const w = box.offsetWidth || NET_EDIT_W;
+      const h = box.offsetHeight || NET_EDIT_H;
+      box.style.left = Math.min(Math.max(x, NET_EDIT_MARGIN), Math.max(NET_EDIT_MARGIN, r.width - w)) + "px";
+      box.style.top = Math.min(Math.max(y, NET_EDIT_MARGIN), Math.max(NET_EDIT_MARGIN, r.height - h)) + "px";
+      box.hidden = false;
+    },
+
+    // closeNetworkEdit скрывает плавающее окно редактирования сети на холсте.
+    closeNetworkEdit() {
+      const box = this.$refs.netEdit;
+      if (box) box.hidden = true;
     },
 
     get draftHint() {
@@ -136,6 +176,13 @@ document.addEventListener("alpine:init", () => {
       this.draft.subnets = this.draft.subnets.filter((s) => s !== subnetName);
     },
 
+    // closeEditor закрывает открытый редактор: модальный диалог страницы
+    // «Сети» или плавающее окно на холсте топологии — что из них примонтировано.
+    closeEditor() {
+      if (this.$refs.dialog) this.closeModal();
+      else this.closeNetworkEdit();
+    },
+
     async saveDraft() {
       if (this.draftHint || this.saving) return;
       const previous = this.networks[this.draft.index];
@@ -143,13 +190,16 @@ document.addEventListener("alpine:init", () => {
       this.saving = true;
       try {
         assertEditable();
-        const snapshot = await Api.post(apiPath("topology/operations"), {
-          kind: "update-network", networkName: previous.name, network,
-        });
+        // Порт сохранения (холст топологии) уводит операцию в общую очередь
+        // TopologySync канвы вместо отдельного POST — иначе канва не узнала бы
+        // о переименовании до перезагрузки. Без порта (страница «Сети») —
+        // прямой POST, как и раньше.
+        const op = { kind: "update-network", networkName: previous.name, network };
+        const snapshot = this._savePort ? await this._savePort(op) : await Api.post(apiPath("topology/operations"), op);
         this._topo = snapshot.topology;
         this.networks = (snapshot.topology.networks || []).map((n) => ({ name: n.name, subnets: [...(n.subnets || [])], description: n.description || "" }));
         showBanner("Сети сохранены", "ok");
-        this.closeModal();
+        this.closeEditor();
       } catch (e) {
         showBanner("Ошибка сохранения: " + e.message);
       } finally {

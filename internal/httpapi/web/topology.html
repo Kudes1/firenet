@@ -85,6 +85,75 @@
       <div id="topo-context-menu" class="context-menu" hidden></div>
       <div id="net-info" class="net-info" hidden></div>
       <div id="link-panel" class="link-panel" hidden></div>
+      <div id="device-edit" class="net-edit" x-data="devicesPage" x-ref="deviceEdit" hidden>
+        <header id="device-edit-header" class="net-edit-header">
+          <h3 class="net-edit-title">Изменить устройство</h3>
+          <button type="button" id="device-edit-close" class="net-edit-close" title="Закрыть" aria-label="Закрыть">×</button>
+        </header>
+        <div class="net-edit-body">
+          <label>Имя
+            <input x-model.trim="draft.name" placeholder="r1">
+          </label>
+          <label>Объединение
+            <select x-model="draft.union">
+              <option value="">— без объединения —</option>
+              <template x-for="u in unions" :key="u.name">
+                <option :value="u.name" x-text="u.name"></option>
+              </template>
+            </select>
+          </label>
+          <label>Описание
+            <textarea x-model.trim="draft.description" rows="3" placeholder="Заметка об устройстве"></textarea>
+          </label>
+          <p class="cell-hint" x-show="draftHint" x-text="draftHint"></p>
+          <div class="modal-actions">
+            <button type="button" @click="closeDeviceEdit()">Отмена</button>
+            <button type="button" class="primary" :disabled="!!draftHint || saving" @click="saveDraft()">Сохранить</button>
+          </div>
+        </div>
+      </div>
+      <div id="net-edit" class="net-edit" x-data="networksPage" x-ref="netEdit" hidden>
+        <header id="net-edit-header" class="net-edit-header">
+          <h3 class="net-edit-title">Изменить сеть</h3>
+          <button type="button" id="net-edit-close" class="net-edit-close" title="Закрыть" aria-label="Закрыть">×</button>
+        </header>
+        <div class="net-edit-body">
+          <label>Имя
+            <input x-model.trim="draft.name" placeholder="office">
+          </label>
+          <label>Описание
+            <textarea x-model.trim="draft.description" rows="3" placeholder="Заметка о сети"></textarea>
+          </label>
+          <label>Подсети</label>
+          <div class="member-list">
+            <template x-for="s in draft.subnets" :key="s">
+              <div class="member-row">
+                <span class="owner-badge" x-text="s"></span>
+                <span class="hint" x-text="cidrOf(s)"></span>
+                <button type="button" class="icon-btn delete" title="Убрать подсеть из сети" @click="removeMember(s)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11"/><path d="M5.5 4V2.7c0-.4.3-.7.7-.7h3.6c.4 0 .7.3.7.7V4"/><path d="M3.5 4l.6 9.3c0 .4.4.7.8.7h6.2c.4 0 .8-.3.8-.7L12.5 4"/><path d="M6.5 6.8v4.4"/><path d="M9.5 6.8v4.4"/></svg></button>
+              </div>
+            </template>
+            <p class="hint member-empty" x-show="!draft.subnets.length">Подсети не добавлены</p>
+          </div>
+          <div class="member-add">
+            <div class="member-combo" @click.outside="memberOpen = false">
+              <input x-model.trim="memberSearch" placeholder="все подсети — начните вводить для поиска" title="Список всех доступных подсетей; ввод фильтрует его по имени или CIDR" @focus="memberOpen = true" @click="memberOpen = true" @input="memberOpen = true; memberCursor = 0" @keydown.arrow-down.prevent="moveCursor(1)" @keydown.arrow-up.prevent="moveCursor(-1)" @keydown.enter.prevent="pickCursor()" @keydown.escape="memberOpen = false">
+              <button type="button" class="member-combo-toggle" :class="{ open: memberOpen }" @click="memberOpen = !memberOpen" title="Показать или скрыть список"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></button>
+              <div class="member-suggestions" x-show="memberOpen" x-cloak>
+                <template x-for="(s, i) in availableSubnets" :key="s.name">
+                  <button type="button" class="member-suggestion" :class="{ active: i === memberCursor }" @mousedown.prevent="addMember(s.name)" @mouseenter="memberCursor = i" x-text="s.name + ' (' + s.cidr + ')'"></button>
+                </template>
+                <p class="hint member-empty" x-show="!availableSubnets.length">Ничего не найдено</p>
+              </div>
+            </div>
+          </div>
+          <p class="cell-hint" x-show="draftHint" x-text="draftHint"></p>
+          <div class="modal-actions">
+            <button type="button" @click="closeNetworkEdit()">Отмена</button>
+            <button type="button" class="primary" :disabled="!!draftHint || saving" @click="saveDraft()">Сохранить</button>
+          </div>
+        </div>
+      </div>
       <div id="topo-tooltip" class="topo-tooltip" hidden></div>
       <canvas id="topo-minimap" class="topo-minimap" hidden></canvas>
     </div>

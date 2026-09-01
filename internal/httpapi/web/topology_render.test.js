@@ -118,7 +118,19 @@ function applyOperationFake(store, op) {
       delete layout.devices[op.deviceName];
       break;
     }
+    case "update-device": {
+      const i = topo.devices.findIndex((d) => d.name === op.deviceName);
+      if (i < 0) break; // unknown device: server 422s, fake mirrors the no-op
+      topo.devices[i] = { ...op.device };
+      break;
+    }
     case "create-network": topo.networks.push(op.network); break;
+    case "update-network": {
+      const i = topo.networks.findIndex((n) => n.name === op.networkName);
+      if (i < 0) break; // unknown network: server 422s, fake mirrors the no-op
+      topo.networks[i] = { ...op.network, attach: topo.networks[i].attach || [] };
+      break;
+    }
     case "delete-network":
       topo.networks = topo.networks.filter((n) => n.name !== op.networkName);
       topo.links.forEach((l) => {
@@ -1208,12 +1220,14 @@ test("context menu keeps union items above the danger delete item", async () => 
   fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
   const menu = ctxMenu(page);
   const buttons = menu.children.map((c) => (c.tag === "div" ? c.children[0] : c));
-  assert.ok(String(buttons[0].textContent).includes("Добавить в объединение"), "union submenu first");
-  assert.ok(!buttons[0].disabled, "submenu button is enabled");
+  assert.ok(String(buttons[0].textContent) === "Редактировать", "edit item first");
+  const sub = buttons[1];
+  assert.ok(String(sub.textContent).includes("Добавить в объединение"), "union submenu after edit");
+  assert.ok(!sub.disabled, "submenu button is enabled");
   const del = buttons[buttons.length - 1];
   assert.ok(String(del.textContent).startsWith("Удалить"), "delete item last");
   assert.ok(String(del.attrs.class || "").includes("danger"), "delete styled as danger");
-  assert.ok(!String(buttons[0].attrs.class || "").includes("danger"), "union item is not danger-colored");
+  assert.ok(!String(sub.attrs.class || "").includes("danger"), "union item is not danger-colored");
 });
 
 test("network nodes get union assignment in the context menu too", async () => {
@@ -1492,13 +1506,6 @@ test("link panel uses the diagnostic header and close action", async () => {
   assert.ok(panel.hidden, "close button hides the panel");
 });
 
-test("device context menu has no Редактировать item", async () => {
-  const page = await bootTopology(responses);
-  await tick();
-  fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
-  assert.ok(!findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "no edit item for a device");
-});
-
 test("applying a filter from the link panel persists it via set-link-filter, addressed by endpoint pair", async () => {
   const page = await bootTopology({
     ...responses,
@@ -1593,6 +1600,290 @@ test("editing a just-created link is unavailable until its create-link operation
   fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
   const edit2 = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
   assert.ok(!edit2.disabled, "edit becomes available once the create confirms");
+});
+
+// --- net-edit: ПКМ по сети → «Редактировать» открывает плавающее окно сети ---
+
+// installNetEditAlpine подменяет globalThis.Alpine двойником: канал между
+// topology.js и Alpine-компонентом networksPage (окно #net-edit) — обычные
+// вызовы методов инстанса, двойник их записывает и раздаёт стаб-состояние.
+function installNetEditAlpine(page) {
+  const calls = [];
+  const instance = {
+    networks: [],
+    subnets: [],
+    openNetworkEdit(name, at) { calls.push(["openNetworkEdit", name, at]); },
+  };
+  globalThis.Alpine = { $data: (el) => (el === page.ids["net-edit"] ? instance : null) };
+  return { instance, calls, done: () => { delete globalThis.Alpine; } };
+}
+
+test("right-click on a network offers Редактировать and opens the floating net-edit window with canvas data", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const alpine = installNetEditAlpine(page);
+  try {
+    fire(page.canvas, "contextmenu", { clientX: AT.net1.x, clientY: AT.net1.y });
+    const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+    assert.ok(edit, "edit item present on a network");
+    fire(edit, "click", {});
+    assert.deepEqual(alpine.calls[0]?.slice(0, 2), ["openNetworkEdit", "net1"], "editor opened for the clicked network");
+    assert.deepEqual(alpine.calls[0][2], { x: AT.net1.x, y: AT.net1.y }, "window anchored at the click point");
+    assert.deepEqual(alpine.instance.networks, [{ name: "net1", subnets: ["a"], description: undefined }], "canvas networks injected");
+    assert.deepEqual(alpine.instance.subnets, [{ name: "a", cidr: "10.0.0.0/24" }], "canvas subnets injected");
+    assert.equal(typeof alpine.instance._savePort, "function", "save routed through the canvas sync queue");
+  } finally {
+    alpine.done();
+  }
+});
+
+// «Редактировать» на только что созданной сети недоступно, пока create-network
+// не подтверждён сервером — как и для связи (design spec, "Клиентский поток").
+test("editing a just-created network is unavailable until its create-network operation confirms", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.ids["tool-network"], "click", {});
+  fire(page.canvas, "click", { clientX: 500, clientY: 400 });
+  page.ids["node-name-input"].value = "lan2";
+  fire(page.ids["node-name-form"], "submit", {});
+  fire(page.ids["tool-select"], "click", {});
+  // синхронно, до оседания fetch-микротаска: create-network ещё в полёте
+  fire(page.canvas, "contextmenu", { clientX: 500, clientY: 400 });
+  const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+  assert.ok(edit, "menu item still present");
+  assert.ok(edit.disabled, "disabled while the create is still pending");
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 500, clientY: 400 });
+  const edit2 = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+  assert.ok(!edit2.disabled, "edit becomes available once the create confirms");
+});
+
+test("read-only tab: Редактировать on a network does not open the net-edit window", async () => {
+  const roResponses = {
+    "/api/versions/current/topology": { devices: [], links: [], networks: [{ name: "net1", subnets: [], attach: [] }], sets: [], unions: [] },
+    "/api/versions/current/subnets": { subnets: [] },
+    "/api/versions/current/layout": {},
+  };
+  const page = await bootTopology(roResponses, null);
+  await tick();
+  const alpine = installNetEditAlpine(page);
+  try {
+    fire(page.canvas, "contextmenu", { clientX: AT.net1.x, clientY: AT.net1.y });
+    const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+    assert.ok(edit, "menu item present");
+    fire(edit, "click", {});
+    assert.equal(alpine.calls.length, 0, "read-only tab never opens the editor");
+  } finally {
+    alpine.done();
+  }
+});
+
+test("net-edit window closes on Escape and on canvas mousedown", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const box = page.doc.getElementById("net-edit");
+  box.hidden = false;
+  fire(page.doc, "keydown", { key: "Escape" });
+  assert.ok(box.hidden, "Escape hides the window");
+  box.hidden = false;
+  fire(page.canvas, "mousedown", { button: 0, clientX: 400, clientY: 300 });
+  assert.ok(box.hidden, "canvas press hides the window");
+  box.hidden = false;
+  fire(page.canvas, "mousedown", { button: 2, clientX: 400, clientY: 300 });
+  assert.ok(!box.hidden, "right-button pan does not hide the window");
+});
+
+test("net-edit window can be dragged by its header, clamped to the canvas bounds", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const box = page.doc.getElementById("net-edit");
+  box.hidden = false;
+  box.style.left = "100px";
+  box.style.top = "50px";
+  fire(page.doc.getElementById("net-edit-header"), "mousedown", { button: 0, clientX: 100, clientY: 100 });
+  fire(page.doc, "mousemove", { clientX: 140, clientY: 130 });
+  assert.equal(box.style.left, "140px", "window follows the cursor horizontally");
+  assert.equal(box.style.top, "80px", "window follows the cursor vertically");
+  // canvas is 1200x800 (see makeEl's default getBoundingClientRect); with no
+  // real offsetWidth/offsetHeight in this DOM stub the drag falls back to
+  // net-edit's fixed 520x560 size (networks.js's NET_EDIT_W/H), clamping the
+  // window well short of the far edge.
+  fire(page.doc, "mousemove", { clientX: 5000, clientY: 5000 });
+  assert.equal(box.style.left, "680px", "left clamped so the window stays on the canvas");
+  assert.equal(box.style.top, "240px", "top clamped so the window stays on the canvas");
+  fire(page.doc, "mouseup", {});
+  fire(page.doc, "mousemove", { clientX: 999, clientY: 999 });
+  assert.equal(box.style.left, "680px", "drag stops listening for mousemove after mouseup");
+});
+
+test("net-edit header mousedown on the close button does not start a drag", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const box = page.doc.getElementById("net-edit");
+  box.hidden = false;
+  box.style.left = "100px";
+  box.style.top = "50px";
+  fire(page.doc.getElementById("net-edit-close"), "mousedown", { button: 0, clientX: 100, clientY: 100 });
+  fire(page.doc, "mousemove", { clientX: 300, clientY: 300 });
+  assert.equal(box.style.left, "100px", "close button press does not move the window");
+  assert.equal(box.style.top, "50px", "close button press does not move the window");
+});
+
+test("net-edit save port applies update-network through the canvas sync queue", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const alpine = installNetEditAlpine(page);
+  try {
+    fire(page.canvas, "contextmenu", { clientX: AT.net1.x, clientY: AT.net1.y });
+    fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+    const snapshot = await alpine.instance._savePort({ kind: "update-network", networkName: "net1", network: { name: "hq", subnets: ["a"] } });
+    await tick();
+    assert.ok(page.calls.some((c) => c.path === "/api/drafts/d1/topology/operations" && c.method === "POST"), "op posted by the canvas queue");
+    assert.equal(page.get("State.topology.networks[0].name"), "hq", "canvas state updated");
+    assert.equal(snapshot.topology.networks[0].name, "hq", "port resolves with the confirmed snapshot");
+  } finally {
+    alpine.done();
+  }
+});
+
+// --- device-edit: ПКМ по устройству → «Редактировать» открывает плавающее окно устройства ---
+
+// installDeviceEditAlpine зеркалит installNetEditAlpine для окна #device-edit
+// и devicesPage.
+function installDeviceEditAlpine(page) {
+  const calls = [];
+  const instance = {
+    devices: [],
+    unions: [],
+    openDeviceEdit(name, at) { calls.push(["openDeviceEdit", name, at]); },
+  };
+  globalThis.Alpine = { $data: (el) => (el === page.ids["device-edit"] ? instance : null) };
+  return { instance, calls, done: () => { delete globalThis.Alpine; } };
+}
+
+test("right-click on a device offers Редактировать and opens the floating device-edit window with canvas data", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const alpine = installDeviceEditAlpine(page);
+  try {
+    fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+    const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+    assert.ok(edit, "edit item present on a device");
+    fire(edit, "click", {});
+    assert.deepEqual(alpine.calls[0]?.slice(0, 2), ["openDeviceEdit", "r1"], "editor opened for the clicked device");
+    assert.deepEqual(alpine.calls[0][2], { x: AT.r1.x, y: AT.r1.y }, "window anchored at the click point");
+    assert.deepEqual(alpine.instance.devices, [
+      { name: "r1", kind: "router", description: "", union: "" },
+      { name: "r2", kind: "router", description: "", union: "" },
+    ], "canvas devices injected");
+    assert.deepEqual(alpine.instance.unions, [], "canvas unions injected");
+    assert.equal(typeof alpine.instance._savePort, "function", "save routed through the canvas sync queue");
+  } finally {
+    alpine.done();
+  }
+});
+
+test("editing a just-created device is unavailable until its create-device operation confirms", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.ids["tool-device"], "click", {});
+  fire(page.canvas, "click", { clientX: 500, clientY: 400 });
+  page.ids["node-name-input"].value = "r3";
+  fire(page.ids["node-name-form"], "submit", {});
+  fire(page.ids["tool-select"], "click", {});
+  // синхронно, до оседания fetch-микротаска: create-device ещё в полёте
+  fire(page.canvas, "contextmenu", { clientX: 500, clientY: 400 });
+  const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+  assert.ok(edit, "menu item still present");
+  assert.ok(edit.disabled, "disabled while the create is still pending");
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 500, clientY: 400 });
+  const edit2 = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+  assert.ok(!edit2.disabled, "edit becomes available once the create confirms");
+});
+
+test("read-only tab: Редактировать on a device does not open the device-edit window", async () => {
+  const roResponses = {
+    "/api/versions/current/topology": { devices: [{ name: "r1", kind: "router" }], links: [], networks: [], sets: [], unions: [] },
+    "/api/versions/current/subnets": { subnets: [] },
+    "/api/versions/current/layout": {},
+  };
+  const page = await bootTopology(roResponses, null);
+  await tick();
+  const alpine = installDeviceEditAlpine(page);
+  try {
+    fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+    const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+    assert.ok(edit, "menu item present");
+    fire(edit, "click", {});
+    assert.equal(alpine.calls.length, 0, "read-only tab never opens the editor");
+  } finally {
+    alpine.done();
+  }
+});
+
+test("device-edit window closes on Escape and on canvas mousedown", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const box = page.doc.getElementById("device-edit");
+  box.hidden = false;
+  fire(page.doc, "keydown", { key: "Escape" });
+  assert.ok(box.hidden, "Escape hides the window");
+  box.hidden = false;
+  fire(page.canvas, "mousedown", { button: 0, clientX: 400, clientY: 300 });
+  assert.ok(box.hidden, "canvas press hides the window");
+  box.hidden = false;
+  fire(page.canvas, "mousedown", { button: 2, clientX: 400, clientY: 300 });
+  assert.ok(!box.hidden, "right-button pan does not hide the window");
+});
+
+test("device-edit window can be dragged by its header, clamped to the canvas bounds", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const box = page.doc.getElementById("device-edit");
+  box.hidden = false;
+  box.style.left = "100px";
+  box.style.top = "50px";
+  fire(page.doc.getElementById("device-edit-header"), "mousedown", { button: 0, clientX: 100, clientY: 100 });
+  fire(page.doc, "mousemove", { clientX: 140, clientY: 130 });
+  assert.equal(box.style.left, "140px", "window follows the cursor horizontally");
+  assert.equal(box.style.top, "80px", "window follows the cursor vertically");
+  fire(page.doc, "mousemove", { clientX: 5000, clientY: 5000 });
+  assert.equal(box.style.left, "680px", "left clamped so the window stays on the canvas");
+  assert.equal(box.style.top, "240px", "top clamped so the window stays on the canvas");
+  fire(page.doc, "mouseup", {});
+  fire(page.doc, "mousemove", { clientX: 999, clientY: 999 });
+  assert.equal(box.style.left, "680px", "drag stops listening for mousemove after mouseup");
+});
+
+test("device-edit header mousedown on the close button does not start a drag", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const box = page.doc.getElementById("device-edit");
+  box.hidden = false;
+  box.style.left = "100px";
+  box.style.top = "50px";
+  fire(page.doc.getElementById("device-edit-close"), "mousedown", { button: 0, clientX: 100, clientY: 100 });
+  fire(page.doc, "mousemove", { clientX: 300, clientY: 300 });
+  assert.equal(box.style.left, "100px", "close button press does not move the window");
+  assert.equal(box.style.top, "50px", "close button press does not move the window");
+});
+
+test("device-edit save port applies update-device through the canvas sync queue", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const alpine = installDeviceEditAlpine(page);
+  try {
+    fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+    fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+    const snapshot = await alpine.instance._savePort([{ kind: "update-device", deviceName: "r1", device: { name: "core-1", kind: "router" } }]);
+    await tick();
+    assert.ok(page.calls.some((c) => c.path === "/api/drafts/d1/topology/operations/batch" && c.method === "POST"), "batch posted by the canvas queue");
+    assert.equal(page.get("State.topology.devices[0].name"), "core-1", "canvas state updated");
+    assert.equal(snapshot.topology.devices[0].name, "core-1", "port resolves with the confirmed snapshot");
+  } finally {
+    alpine.done();
+  }
 });
 
 test("read-only (no active draft) never persists edits: no operations POST, no local projection change", async () => {

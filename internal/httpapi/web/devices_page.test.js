@@ -50,7 +50,11 @@ async function bootPage() {
     sets: [],
     unions: [{ name: "hq", devices: ["r1"], networks: [], description: "главный" }],
   };
-  global.document = { addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn) };
+  global.document = {
+    addEventListener: (t, fn) => (docListeners[t] ||= []).push(fn),
+    getElementById: (id) =>
+      id === "topo-canvas" ? { getBoundingClientRect: () => ({ left: 0, top: 0, width: 1200, height: 800 }) } : null,
+  };
   global.window = { dispatchEvent: notify };
   global.localStorage = { getItem: () => null, setItem() {} };
   global.sessionStorage = {
@@ -59,7 +63,7 @@ async function bootPage() {
     removeItem: (k) => { delete store[k]; },
   };
   global.matchMedia = () => ({ matches: false });
-  global.CustomEvent = class {};
+  global.CustomEvent = class { constructor(type, init = {}) { this.type = type; this.detail = init.detail; } };
   global.confirm = () => true;
   global.fetch = async (path_, opts) => {
     calls.push({ path: path_, method: opts?.method, body: opts?.body ? JSON.parse(opts.body) : null });
@@ -84,7 +88,10 @@ async function bootPage() {
   (docListeners["alpine:init"] || []).forEach((fn) => fn());
   const page = factories.devicesPage();
   page.$nextTick = (fn) => fn();
-  page.$refs = { dialog: { close: () => calls.push({ path: "dialog.close" }) } };
+  page.$refs = {
+    dialog: { close: () => calls.push({ path: "dialog.close" }) },
+    deviceEdit: { offsetWidth: 420, offsetHeight: 380, style: {}, hidden: true },
+  };
   return { page, calls, banners, store, getFixture: () => topoFixture };
 }
 
@@ -189,4 +196,62 @@ test("saveDraft is blocked while read-only (no active draft)", async () => {
   page.draft = { index: 0, name: "r1", description: "", union: "" };
   await page.saveDraft();
   assert.equal(calls.filter((c) => c.path.includes("operations")).length, 0);
+});
+
+// --- плавающее окно на холсте топологии (ПКМ по устройству → «Редактировать») ---
+
+test("openDeviceEdit fills the draft and positions the floating window", async () => {
+  const { page } = await bootLoadedPage();
+
+  page.openDeviceEdit("sw1", { x: 150, y: 200 });
+
+  assert.deepEqual(page.draft, { index: 1, name: "sw1", description: "", union: "" });
+  assert.equal(page.$refs.deviceEdit.hidden, false, "window opened");
+  assert.equal(page.$refs.deviceEdit.style.left, "150px", "anchored at the click point");
+  assert.equal(page.$refs.deviceEdit.style.top, "200px");
+});
+
+test("openDeviceEdit clamps the window inside the canvas", async () => {
+  const { page } = await bootLoadedPage();
+
+  page.openDeviceEdit("sw1", { x: 2000, y: -50 });
+
+  assert.equal(page.$refs.deviceEdit.style.left, "780px", "clamped to the canvas right edge");
+  assert.equal(page.$refs.deviceEdit.style.top, "8px", "clamped to the canvas top edge");
+});
+
+test("saveDraft delegates to the injected save port and closes the canvas window", async () => {
+  const { page, calls, getFixture } = await bootLoadedPage();
+  const portOps = [];
+  page.$refs = { deviceEdit: page.$refs.deviceEdit };
+  page._savePort = async (ops) => {
+    portOps.push(ops);
+    return { topology: { ...getFixture(), devices: [{ name: "core-1", kind: "router", description: "новый узел" }, { name: "sw1", kind: "switch" }] } };
+  };
+  page.draft = { index: 0, name: "core-1", description: "новый узел", union: "hq" };
+
+  await page.saveDraft();
+
+  assert.deepEqual(portOps, [[
+    { kind: "update-device", deviceName: "r1", device: { name: "core-1", kind: "router", description: "новый узел" } },
+  ]]);
+  assert.equal(
+    calls.filter((c) => c.path === "/api/drafts/d1/topology/operations/batch" && c.method === "POST").length,
+    0,
+    "no direct POST when a port is injected",
+  );
+  assert.equal(page.devices[0].name, "core-1");
+  assert.equal(page.$refs.deviceEdit.hidden, true, "canvas window closed after save");
+});
+
+test("saveDraft keeps the canvas window open when the port fails", async () => {
+  const { page, banners } = await bootLoadedPage();
+  page.$refs = { deviceEdit: page.$refs.deviceEdit };
+  page._savePort = async () => { throw new Error("boom"); };
+  page.openDeviceEdit("r1", { x: 100, y: 100 });
+
+  await page.saveDraft();
+
+  assert.match(banners.at(-1)?.message, /Ошибка сохранения/);
+  assert.equal(page.$refs.deviceEdit.hidden, false, "window stays open with the draft intact");
 });
