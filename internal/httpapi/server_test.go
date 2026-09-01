@@ -110,6 +110,8 @@ func TestTemplatedPages(t *testing.T) {
 		{"/ui/users", "firenet — пользователи", "users", `x-data="usersPage"`},
 		{"/ui/networks", "firenet — сети", "networks", `x-data="networksPage"`},
 		{"/ui/links", "firenet — связи", "links", `x-data="linksPage"`},
+		{"/ui/sets", "firenet — наборы", "sets", `x-data="setsPage"`},
+		{"/ui/topology", "firenet — топология", "topology", `id="topo-canvas"`},
 	}
 
 	for _, c := range cases {

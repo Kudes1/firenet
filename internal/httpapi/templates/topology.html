@@ -1,20 +1,4 @@
-<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>firenet — топология</title>
-<script>
-  try {
-    var saved = localStorage.getItem("firenet-theme");
-    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
-  } catch (e) {}
-</script>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="stylesheet" href="/style.css">
-</head>
-<body data-nav="topology" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
-
-<main>
+{{define "content"}}<main>
   <div class="topology-layout">
     <div class="canvas-wrap">
       <canvas id="topo-canvas"></canvas>
@@ -164,10 +148,4 @@
       <canvas id="topo-minimap" class="topo-minimap" hidden></canvas>
     </div>
   </div>
-</main>
-
-<script type="module" src="/common.js"></script>
-<script type="module" src="/topology.js"></script>
-<script src="/alpine.min.js" defer></script>
-</body>
-</html>
+</main>{{end}}
