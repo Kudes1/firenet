@@ -1,20 +1,4 @@
-<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>firenet — связи</title>
-<script>
-  try {
-    var saved = localStorage.getItem("firenet-theme");
-    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
-  } catch (e) {}
-</script>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="stylesheet" href="/style.css">
-</head>
-<body data-nav="links" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
-
-<main x-data="linksPage">
+{{define "content"}}<main x-data="linksPage">
   <div class="table-toolbar">
     <div class="toolbar-text">
       <h3>Связи</h3>
@@ -134,10 +118,4 @@
       <button type="button" class="primary" :disabled="saving" @click="saveDraft()">Сохранить</button>
     </div>
   </dialog>
-</main>
-
-<script type="module" src="/common.js"></script>
-<script type="module" src="/links.js"></script>
-<script src="/alpine.min.js" defer></script>
-</body>
-</html>
+</main>{{end}}
