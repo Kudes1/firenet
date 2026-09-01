@@ -47,12 +47,12 @@
           </svg>
         </button>
       </div>
-      <div id="diag-panel" class="diag-panel">
-        <header id="diag-panel-header" class="diag-panel-header">
-          <strong>Диагностика пути</strong>
-          <button type="button" id="diag-panel-close" class="diag-panel-close" title="Закрыть" aria-label="Закрыть">&times;</button>
+      <div id="diag-panel" class="floating-panel diag-panel">
+        <header id="diag-panel-header" class="floating-panel-header">
+          <strong class="floating-panel-title">Диагностика пути</strong>
+          <button type="button" id="diag-panel-close" class="floating-panel-close" title="Закрыть" aria-label="Закрыть">&times;</button>
         </header>
-        <div class="diag-panel-body">
+        <div class="floating-panel-body diag-panel-body">
           <form id="diag-form">
             <label>Источник (IP)
               <input id="diag-src" placeholder="10.0.0.5" autocomplete="off" spellcheck="false" required>
@@ -77,12 +77,12 @@
           <section id="diag-paths"></section>
         </div>
       </div>
-      <div id="spread-panel" class="diag-panel" hidden>
-        <header id="spread-panel-header" class="diag-panel-header">
-          <strong>Распространение сети</strong>
-          <button type="button" id="spread-panel-close" class="diag-panel-close" title="Закрыть" aria-label="Закрыть">&times;</button>
+      <div id="spread-panel" class="floating-panel diag-panel" hidden>
+        <header id="spread-panel-header" class="floating-panel-header">
+          <strong class="floating-panel-title">Распространение сети</strong>
+          <button type="button" id="spread-panel-close" class="floating-panel-close" title="Закрыть" aria-label="Закрыть">&times;</button>
         </header>
-        <div class="diag-panel-body">
+        <div class="floating-panel-body diag-panel-body">
           <form id="spread-form">
             <label>Источник (сеть, подсеть или IP)
               <div class="member-combo diag-combo" id="spread-combo">

@@ -2,6 +2,7 @@
 
 import { NetMap } from "./netmap.js";
 import { Camera } from "./camera.js";
+import { createFloatingPanel } from "./floating_panel.js";
 import { CameraControls } from "./camera_input.js";
 import { CanvasTheme } from "./canvas_theme.js";
 import { CanvasView } from "./canvas_view.js";
@@ -340,94 +341,34 @@ const Diagnose = (() => {
 
   // — плавающие окна параметров: тумблер тулбара, перетаскивание, позиция —
   // Каждое окно привязано не к экрану, а к точке мировых координат холста
-  // (anchor): при панорамировании/зуме камеры оно остаётся на том же месте
-  // карты. createFloatingPanel — общая фабрика для обоих инструментов
-  // диагностики (путь и распространение), каждый со своими id и ключами.
+  // (anchor, floating_panel.js): при панорамировании/зуме камеры оно
+  // остаётся на том же месте карты. Тулбар-кнопка сама решает, открывать или
+  // закрывать — createFloatingPanel только хранит состояние и красит кнопку
+  // через onOpenChange.
   const panels = [];
 
-  function createFloatingPanel({ panelId, toolId, closeId, headerId, posKey, openKey, defaultOpen }) {
-    let anchor = null;
-    const panelEl = () => document.getElementById(panelId);
-
-    function setOpen(open, persist = true) {
-      panelEl().hidden = !open;
-      document.getElementById(toolId).classList.toggle("active", open);
-      if (persist) localStorage.setItem(openKey, open ? "1" : "0");
-    }
-    // position переносит окно на экран по его якорю в мировых координатах;
-    // вызывается при каждой смене камеры (setCam), чтобы окно ехало вместе с картой.
-    function position() {
-      if (!anchor) return;
-      const p = Camera.worldToScreen(state.camera, anchor.x, anchor.y);
-      panelEl().style.left = `${p.x}px`;
-      panelEl().style.top = `${p.y}px`;
-    }
-    // clampToViewport подтягивает окно внутрь видимой области холста при
-    // открытии: панорамирование камеры, пока окно было закрыто (или просто
-    // далеко унесено), могло увести его якорь за пределы экрана — окно не
-    // должно теряться, его всегда должно быть видно сразу после открытия.
-    function clampToViewport() {
-      const wrap = wrapEl().getBoundingClientRect();
-      const rect = panelEl().getBoundingClientRect();
-      const margin = 8;
-      const maxLeft = Math.max(margin, wrap.width - rect.width - margin);
-      const maxTop = Math.max(margin, wrap.height - rect.height - margin);
-      const left = Math.min(Math.max(parseFloat(panelEl().style.left) || 0, margin), maxLeft);
-      const top = Math.min(Math.max(parseFloat(panelEl().style.top) || 0, margin), maxTop);
-      panelEl().style.left = `${left}px`;
-      panelEl().style.top = `${top}px`;
-      anchor = Camera.screenToWorld(state.camera, left, top);
-      localStorage.setItem(posKey, JSON.stringify(anchor));
-    }
-
-    document.getElementById(toolId).addEventListener("click", () => {
-      const opening = panelEl().hidden;
-      setOpen(opening);
-      if (opening) clampToViewport();
-    });
-    document.getElementById(closeId).addEventListener("click", () => setOpen(false));
-    document.getElementById(headerId).addEventListener("mousedown", (ev) => {
-      ev.preventDefault();
-      const wrap = wrapEl().getBoundingClientRect();
-      const rect = panelEl().getBoundingClientRect();
-      const startX = ev.clientX, startY = ev.clientY;
-      const startLeft = rect.left - wrap.left, startTop = rect.top - wrap.top;
-      const move = (left, top) => { panelEl().style.left = `${left}px`; panelEl().style.top = `${top}px`; };
-      const onMove = (e) => move(startLeft + e.clientX - startX, startTop + e.clientY - startY);
-      const onUp = () => {
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-        anchor = Camera.screenToWorld(state.camera, parseFloat(panelEl().style.left), parseFloat(panelEl().style.top));
-        localStorage.setItem(posKey, JSON.stringify(anchor));
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    });
-    const storedOpen = localStorage.getItem(openKey);
-    setOpen(storedOpen === null ? defaultOpen : storedOpen === "1", false);
-    try {
-      const saved = JSON.parse(localStorage.getItem(posKey));
-      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) anchor = saved;
-    } catch {}
-    if (!anchor) {
-      const wrap = wrapEl().getBoundingClientRect();
-      const rect = panelEl().getBoundingClientRect();
-      anchor = Camera.screenToWorld(state.camera, rect.left - wrap.left, rect.top - wrap.top);
-    }
-    position();
-    if (!panelEl().hidden) clampToViewport();
-    return { position };
-  }
-
   function wirePanels() {
-    panels.push(createFloatingPanel({
-      panelId: "diag-panel", toolId: "diag-tool-path", closeId: "diag-panel-close", headerId: "diag-panel-header",
+    const diagPanel = createFloatingPanel({
+      panelId: "diag-panel", headerId: "diag-panel-header", closeId: "diag-panel-close",
+      viewportEl: wrapEl, getCamera: () => state.camera,
       posKey: "firenet-diag-panel-pos-v2", openKey: "firenet-diag-panel-open-v1", defaultOpen: true,
-    }));
-    panels.push(createFloatingPanel({
-      panelId: "spread-panel", toolId: "diag-tool-spread", closeId: "spread-panel-close", headerId: "spread-panel-header",
+      onOpenChange: (open) => document.getElementById("diag-tool-path").classList.toggle("active", open),
+    });
+    document.getElementById("diag-tool-path").addEventListener("click", () => {
+      if (diagPanel.isOpen()) diagPanel.close(); else diagPanel.open();
+    });
+    panels.push(diagPanel);
+
+    const spreadPanel = createFloatingPanel({
+      panelId: "spread-panel", headerId: "spread-panel-header", closeId: "spread-panel-close",
+      viewportEl: wrapEl, getCamera: () => state.camera,
       posKey: "firenet-spread-panel-pos-v1", openKey: "firenet-spread-panel-open-v1", defaultOpen: false,
-    }));
+      onOpenChange: (open) => document.getElementById("diag-tool-spread").classList.toggle("active", open),
+    });
+    document.getElementById("diag-tool-spread").addEventListener("click", () => {
+      if (spreadPanel.isOpen()) spreadPanel.close(); else spreadPanel.open();
+    });
+    panels.push(spreadPanel);
   }
 
   // — запоминание введённых параметров формы —

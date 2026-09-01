@@ -825,40 +825,51 @@ test("close button hides the panel and deactivates the toggle", async () => {
 });
 
 test("opening the panel snaps it back into the viewport if it drifted off-screen", async () => {
-  const { ids } = await bootDiagnose(responses);
+  // floating_panel.js is world-anchored: position() follows the anchor on every
+  // camera move without clamping (the panel is allowed to drift off-screen
+  // while open/closed — see floating_panel.js's own "position() re-projects...
+  // without re-clamping" test). Only open()/reflow() clamp. So a real drift is
+  // reproduced by panning the camera far away, not by poking .style directly.
+  const { ids, canvas, doc, frames } = await bootDiagnose(responses);
   await tick();
+  await frames(1);
   const panel = ids["diag-panel"];
-  panel.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
-  panel.style.left = "5000px";
-  panel.style.top = "5000px";
+  panel.offsetWidth = 300;
+  panel.offsetHeight = 200;
   fire(ids["diag-tool-path"], "click", {}); // закрыли
+  fire(canvas, "mousedown", { button: 1, clientX: 100, clientY: 100 });
+  fire(doc, "mousemove", { clientX: 5100, clientY: 5100 }); // камера уносит якорь панели далеко за экран
+  await frames(1);
+  fire(doc, "mouseup", {});
   fire(ids["diag-tool-path"], "click", {}); // открыли снова — окно должно подтянуться в видимую область
-  assert.equal(panel.style.left, "892px");
-  assert.equal(panel.style.top, "592px");
+  assert.equal(panel.style.left, "892px", "clamped short of the right edge: max(8, 1200-300-8)");
+  assert.equal(panel.style.top, "592px", "clamped short of the bottom edge: max(8, 800-200-8)");
 });
 
 test("opening the panel leaves it in place when it's already within the viewport", async () => {
   const { ids } = await bootDiagnose(responses);
   await tick();
   const panel = ids["diag-panel"];
-  panel.getBoundingClientRect = () => ({ left: 0, top: 0, width: 300, height: 200 });
-  panel.style.left = "100px";
-  panel.style.top = "50px";
+  panel.offsetWidth = 300;
+  panel.offsetHeight = 200;
+  const left0 = panel.style.left, top0 = panel.style.top; // starting position is well within the 1200x800 viewport
   fire(ids["diag-tool-path"], "click", {});
   fire(ids["diag-tool-path"], "click", {});
-  assert.equal(panel.style.left, "100px");
-  assert.equal(panel.style.top, "50px");
+  assert.equal(panel.style.left, left0);
+  assert.equal(panel.style.top, top0);
 });
 
 test("dragging the header moves the panel and persists its position", async () => {
   const { ids, doc, store } = await bootDiagnose(responses);
   await tick();
+  const panel = ids["diag-panel"];
+  const left0 = parseFloat(panel.style.left), top0 = parseFloat(panel.style.top);
   fire(ids["diag-panel-header"], "mousedown", { button: 0, clientX: 100, clientY: 100 });
-  fire(doc, "mousemove", { clientX: 160, clientY: 130 });
+  fire(doc, "mousemove", { clientX: 160, clientY: 130 }); // delta (60, 30) from the drag start
   fire(doc, "mouseup", {});
-  assert.equal(ids["diag-panel"].style.left, "60px");
-  assert.equal(ids["diag-panel"].style.top, "30px");
-  assert.deepEqual(JSON.parse(store["firenet-diag-panel-pos-v2"]), { x: 60, y: 30 });
+  assert.equal(panel.style.left, `${left0 + 60}px`);
+  assert.equal(panel.style.top, `${top0 + 30}px`);
+  assert.deepEqual(JSON.parse(store["firenet-diag-panel-pos-v2"]), { x: left0 + 60, y: top0 + 30 });
 });
 
 test("saved panel position is restored on boot", async () => {
