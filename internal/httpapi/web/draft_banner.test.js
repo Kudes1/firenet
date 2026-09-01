@@ -23,6 +23,8 @@ async function loadCommon(store, opts = {}) {
   const doc = makeEl("#document");
   doc.body = makeEl("body");
   doc.body.dataset = {};
+  doc.main = makeEl("main");
+  doc.querySelector = (sel) => (sel === "main" ? doc.main : null);
   doc.createElement = (tag) => makeEl(tag);
   doc.addEventListener = () => {};
   const posted = [];
@@ -63,7 +65,7 @@ async function loadCommon(store, opts = {}) {
 test("shows a read-only banner with the current version and an 'open draft' action", async () => {
   const { renderDraftBanner, doc } = await loadCommon({}, { versionID: 7 });
   await renderDraftBanner();
-  const banner = doc.body.children[0];
+  const banner = doc.main.children[0];
   assert.equal(banner.className, "draft-banner draft-banner-readonly");
   assert.equal(banner.children[0].textContent, "Только чтение — версия 7.");
 });
@@ -71,7 +73,7 @@ test("shows a read-only banner with the current version and an 'open draft' acti
 test("the open-draft button creates a draft and stores its id", async () => {
   const { renderDraftBanner, doc, posted } = await loadCommon({}, { versionID: 7, promptResult: "my-changes" });
   await renderDraftBanner();
-  const openBtn = doc.body.children[0].children[1];
+  const openBtn = doc.main.children[0].children[1];
   await openBtn.listeners.click[0]();
   assert.equal(posted[0].url, "/api/drafts");
   assert.equal(posted[0].body.name, "my-changes");
@@ -81,7 +83,7 @@ test("the open-draft button creates a draft and stores its id", async () => {
 test("shows an editing banner with the draft's name and status, and a 'return to current' action", async () => {
   const { renderDraftBanner, doc } = await loadCommon({ "firenet-draft-id": "draft-1" }, { draftName: "office", draftStatus: "open" });
   await renderDraftBanner();
-  const banner = doc.body.children[0];
+  const banner = doc.main.children[0];
   assert.equal(banner.className, "draft-banner draft-banner-editing");
   assert.equal(banner.children[0].textContent, "Черновик «office» (open).");
   banner.children[1].listeners.click[0]();

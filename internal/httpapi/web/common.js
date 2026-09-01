@@ -150,7 +150,7 @@ export async function renderDraftBanner() {
     banner.append(text, openBtn);
   }
 
-  document.body.prepend(banner);
+  document.querySelector("main").prepend(banner);
 }
 
 // apiPath builds the URL for one project-data resource (e.g. "topology",
