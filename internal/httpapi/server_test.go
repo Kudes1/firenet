@@ -89,3 +89,37 @@ func TestParsePageTemplatesRenderDistinctContent(t *testing.T) {
 		t.Error("unions render missing data-nav=\"unions\"")
 	}
 }
+
+func TestTemplatedPages(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	cases := []struct {
+		path      string
+		title     string
+		nav       string
+		xDataMark string
+	}{
+		{"/ui/subnets", "firenet — подсети", "subnets", `x-data="subnetsPage"`},
+		{"/ui/unions", "firenet — объединения", "unions", `x-data="unionsPage"`},
+	}
+
+	for _, c := range cases {
+		rec := doJSON(t, srv, http.MethodGet, c.path, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status %d", c.path, rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+			t.Errorf("GET %s: Content-Type = %q, want \"text/html; charset=utf-8\"", c.path, ct)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "<title>"+c.title+"</title>") {
+			t.Errorf("GET %s: body missing <title>%s</title>", c.path, c.title)
+		}
+		if !strings.Contains(body, `data-nav="`+c.nav+`"`) {
+			t.Errorf("GET %s: body missing data-nav=%q", c.path, c.nav)
+		}
+		if !strings.Contains(body, c.xDataMark) {
+			t.Errorf("GET %s: body missing %s", c.path, c.xDataMark)
+		}
+	}
+}

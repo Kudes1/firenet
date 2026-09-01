@@ -72,6 +72,8 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("POST /api/invites/{token}", h.acceptInvite)
 	mux.Handle("/api/", auth.RequireAuth(users)(apiMux))
 
+	pages := parsePageTemplates()
+
 	// Standalone UI pages.
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/topology", http.StatusFound)
@@ -79,11 +81,15 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("GET /login", servePage("login.html"))
 	mux.HandleFunc("GET /invite/{token}", servePage("invite.html"))
 	mux.HandleFunc("GET /ui/topology", servePage("topology.html"))
-	mux.HandleFunc("GET /ui/subnets", servePage("subnets.html"))
+	mux.HandleFunc("GET /ui/subnets", serveTemplatedPage(pages["subnets"], pageData{
+		Title: "firenet — подсети", Nav: "subnets", Script: "subnets.js",
+	}))
 	mux.HandleFunc("GET /ui/networks", servePage("networks.html"))
 	mux.HandleFunc("GET /ui/devices", servePage("devices.html"))
 	mux.HandleFunc("GET /ui/sets", servePage("sets.html"))
-	mux.HandleFunc("GET /ui/unions", servePage("unions.html"))
+	mux.HandleFunc("GET /ui/unions", serveTemplatedPage(pages["unions"], pageData{
+		Title: "firenet — объединения", Nav: "unions", Script: "unions.js",
+	}))
 	mux.HandleFunc("GET /ui/links", servePage("links.html"))
 	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
 	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
