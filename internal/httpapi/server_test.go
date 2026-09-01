@@ -95,10 +95,10 @@ func TestTemplatedPages(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
 	cases := []struct {
-		path      string
-		title     string
-		nav       string
-		xDataMark string
+		path   string
+		title  string
+		nav    string
+		marker string
 	}{
 		{"/ui/subnets", "firenet — подсети", "subnets", `x-data="subnetsPage"`},
 		{"/ui/unions", "firenet — объединения", "unions", `x-data="unionsPage"`},
@@ -119,8 +119,8 @@ func TestTemplatedPages(t *testing.T) {
 		if !strings.Contains(body, `data-nav="`+c.nav+`"`) {
 			t.Errorf("GET %s: body missing data-nav=%q", c.path, c.nav)
 		}
-		if !strings.Contains(body, c.xDataMark) {
-			t.Errorf("GET %s: body missing %s", c.path, c.xDataMark)
+		if !strings.Contains(body, c.marker) {
+			t.Errorf("GET %s: body missing %s", c.path, c.marker)
 		}
 		assertLayoutInvariants(t, c.path, body)
 	}
@@ -135,6 +135,7 @@ func assertLayoutInvariants(t *testing.T, path, body string) {
 	t.Helper()
 	for _, marker := range []string{
 		"<!doctype html>",
+		`name="viewport" content="width=device-width, initial-scale=1"`,
 		`href="/favicon.svg"`,
 		`href="/style.css"`,
 		`src="/common.js"`,
