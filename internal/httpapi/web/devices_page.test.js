@@ -90,7 +90,6 @@ async function bootPage() {
   page.$nextTick = (fn) => fn();
   page.$refs = {
     dialog: { close: () => calls.push({ path: "dialog.close" }) },
-    deviceEdit: { offsetWidth: 420, offsetHeight: 380, style: {}, hidden: true },
   };
   return { page, calls, banners, store, getFixture: () => topoFixture };
 }
@@ -199,31 +198,29 @@ test("saveDraft is blocked while read-only (no active draft)", async () => {
 });
 
 // --- плавающее окно на холсте топологии (ПКМ по устройству → «Редактировать») ---
+// Позиционирование/клэмп/drag/мировая привязка теперь общий floating_panel.js
+// (см. floating_panel.test.js) — здесь проверяется только то, что
+// devicesPage заполняет draft и делегирует открытие/закрытие своему _panel
+// (инстанс, который topology.js создаёт и кладёт на this._panel — см.
+// Topology.openDeviceEditWindow).
 
-test("openDeviceEdit fills the draft and positions the floating window", async () => {
+test("openDeviceEdit fills the draft and opens the canvas window via _panel", async () => {
   const { page } = await bootLoadedPage();
+  const opens = [];
+  page._panel = { open: (at) => opens.push(at), close: () => {} };
 
   page.openDeviceEdit("sw1", { x: 150, y: 200 });
 
   assert.deepEqual(page.draft, { index: 1, name: "sw1", description: "", union: "" });
-  assert.equal(page.$refs.deviceEdit.hidden, false, "window opened");
-  assert.equal(page.$refs.deviceEdit.style.left, "150px", "anchored at the click point");
-  assert.equal(page.$refs.deviceEdit.style.top, "200px");
-});
-
-test("openDeviceEdit clamps the window inside the canvas", async () => {
-  const { page } = await bootLoadedPage();
-
-  page.openDeviceEdit("sw1", { x: 2000, y: -50 });
-
-  assert.equal(page.$refs.deviceEdit.style.left, "780px", "clamped to the canvas right edge");
-  assert.equal(page.$refs.deviceEdit.style.top, "8px", "clamped to the canvas top edge");
+  assert.deepEqual(opens, [{ x: 150, y: 200 }], "canvas window opened at the click point");
 });
 
 test("saveDraft delegates to the injected save port and closes the canvas window", async () => {
   const { page, calls, getFixture } = await bootLoadedPage();
   const portOps = [];
-  page.$refs = { deviceEdit: page.$refs.deviceEdit };
+  let closed = false;
+  page.$refs = {};
+  page._panel = { open() {}, close: () => { closed = true; } };
   page._savePort = async (ops) => {
     portOps.push(ops);
     return { topology: { ...getFixture(), devices: [{ name: "core-1", kind: "router", description: "новый узел" }, { name: "sw1", kind: "switch" }] } };
@@ -241,17 +238,19 @@ test("saveDraft delegates to the injected save port and closes the canvas window
     "no direct POST when a port is injected",
   );
   assert.equal(page.devices[0].name, "core-1");
-  assert.equal(page.$refs.deviceEdit.hidden, true, "canvas window closed after save");
+  assert.ok(closed, "canvas window closed after save");
 });
 
 test("saveDraft keeps the canvas window open when the port fails", async () => {
   const { page, banners } = await bootLoadedPage();
-  page.$refs = { deviceEdit: page.$refs.deviceEdit };
+  let closed = false;
+  page.$refs = {};
+  page._panel = { open() {}, close: () => { closed = true; } };
   page._savePort = async () => { throw new Error("boom"); };
   page.openDeviceEdit("r1", { x: 100, y: 100 });
 
   await page.saveDraft();
 
   assert.match(banners.at(-1)?.message, /Ошибка сохранения/);
-  assert.equal(page.$refs.deviceEdit.hidden, false, "window stays open with the draft intact");
+  assert.ok(!closed, "window stays open with the draft intact");
 });

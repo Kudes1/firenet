@@ -9,6 +9,7 @@ import { HitTest } from "./hit_test.js";
 import { Minimap } from "./minimap.js";
 import { NetInfo } from "./net_info.js";
 import { LinkPanel } from "./link_panel.js";
+import { createFloatingPanel } from "./floating_panel.js";
 import { TopoScene } from "./topo_scene.js";
 import { Tween } from "./tween.js";
 import { TopologySync } from "./topology_sync.js";
@@ -281,6 +282,8 @@ const Topology = (() => {
   let ctxPending = null; // {items, at}: node menu awaiting a clean right-release
   let camControls = null; // CameraControls handle (isRightDown)
   let minimap = null; // Minimap над #topo-minimap
+  let netEditPanel = null; // floating_panel.js-инстанс окна #net-edit
+  let deviceEditPanel = null; // floating_panel.js-инстанс окна #device-edit
   // поиск по канвасу: подсветка совпавших узлов, приглушение остальных,
   // камера центрируется на активном совпадении
   let searchQ = "";
@@ -301,6 +304,8 @@ const Topology = (() => {
     view.invalidate();
     movePopover();
     minimap.update();
+    netEditPanel?.position();
+    deviceEditPanel?.position();
   }
 
   function setCamera(camera) {
@@ -406,6 +411,7 @@ const Topology = (() => {
       if (syncStatus === "error") throw new Error("не удалось применить операцию к черновику");
       return { topology: State.topology };
     };
+    instance._panel = netEditPanel;
     instance.openNetworkEdit(name, at);
   }
 
@@ -449,6 +455,7 @@ const Topology = (() => {
       if (syncStatus === "error") throw new Error("не удалось применить операцию к черновику");
       return { topology: State.topology };
     };
+    instance._panel = deviceEditPanel;
     instance.openDeviceEdit(name, at);
   }
 
@@ -766,60 +773,6 @@ const Topology = (() => {
     });
     enqueueOpBatch(ops);
     clearSelection();
-  }
-
-  // setupFloatingEditClose закрывает плавающее окно редактирования (net-edit/
-  // device-edit, за id которого зовут) при Escape и нажатии ЛКМ на канве
-  // (жест ухода от окна: выбор узла/рамки и панорама ПКМ окно не теряют).
-  // Кнопка «Отмена» в самом окне закрывает его своим методом напрямую.
-  function setupFloatingEditClose(boxId) {
-    const hide = () => { const b = document.getElementById(boxId); if (b) b.hidden = true; };
-    canvas().addEventListener("mousedown", (e) => {
-      if (e.button !== 0) return;
-      hide();
-    });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
-  }
-
-  // setupFloatingEditDrag тащит плавающее окно (boxId) за его заголовок
-  // (headerId) — тот же приём, что и у .link-panel
-  // (LinkPanel.onDragStart/onDragMove/onDragEnd): держим смещение курсора от
-  // исходного left/top окна, кламп в границах канваса тем же margin, что и у
-  // showNetworkEdit/showDeviceEdit при открытии окна (networks.js's/
-  // devices.js's NET_EDIT_MARGIN/DEVICE_EDIT_MARGIN — независимые копии тех
-  // же чисел, как и у LinkPanel.PLACE). Клик по кнопке закрытия (closeId) не
-  // должен запускать драг — как и у link-panel.
-  function setupFloatingEditDrag(boxId, headerId, closeId) {
-    const MARGIN = 8, FALLBACK_W = 520, FALLBACK_H = 560; // FALLBACK_W держим в паре с --net-edit-w в style.css
-    const box = () => document.getElementById(boxId);
-    const header = document.getElementById(headerId);
-    const close = document.getElementById(closeId);
-    if (close) close.addEventListener("mousedown", (e) => e.stopPropagation());
-    let drag = null; // {x, y, boxX, boxY}
-    function onMove(e) {
-      if (!drag) return;
-      const b = box();
-      const r = canvas().getBoundingClientRect();
-      const w = b.offsetWidth || FALLBACK_W;
-      const h = b.offsetHeight || FALLBACK_H;
-      const x = drag.boxX + (e.clientX - drag.x);
-      const y = drag.boxY + (e.clientY - drag.y);
-      b.style.left = Math.min(Math.max(x, MARGIN), Math.max(MARGIN, r.width - w)) + "px";
-      b.style.top = Math.min(Math.max(y, MARGIN), Math.max(MARGIN, r.height - h)) + "px";
-    }
-    function onUp() {
-      drag = null;
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    }
-    header.addEventListener("mousedown", (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      const b = box();
-      drag = { x: e.clientX, y: e.clientY, boxX: parseFloat(b.style.left) || 0, boxY: parseFloat(b.style.top) || 0 };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
-    });
   }
 
   // --- выбор, рамка и перетаскивание: единый mousedown на канвасе ---
@@ -1577,10 +1530,20 @@ const Topology = (() => {
     setupSearch();
     NetInfo.attach(canvas());
     LinkPanel.attach(canvas());
-    setupFloatingEditClose("net-edit");
-    setupFloatingEditClose("device-edit");
-    setupFloatingEditDrag("net-edit", "net-edit-header", "net-edit-close");
-    setupFloatingEditDrag("device-edit", "device-edit-header", "device-edit-close");
+    netEditPanel = createFloatingPanel({
+      panelId: "net-edit", headerId: "net-edit-header", closeId: "net-edit-close",
+      viewportEl: canvas, getCamera: () => State.camera,
+      posKey: "firenet-net-edit-pos-v1",
+      fallbackW: 520, fallbackH: 560,
+      closeOnEscape: true, closeOnCanvasClick: canvas,
+    });
+    deviceEditPanel = createFloatingPanel({
+      panelId: "device-edit", headerId: "device-edit-header", closeId: "device-edit-close",
+      viewportEl: canvas, getCamera: () => State.camera,
+      posKey: "firenet-device-edit-pos-v1",
+      fallbackW: 520, fallbackH: 380,
+      closeOnEscape: true, closeOnCanvasClick: canvas,
+    });
     setTool("select");
     Topology.render();
   }

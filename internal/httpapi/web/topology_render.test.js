@@ -1612,7 +1612,7 @@ function installNetEditAlpine(page) {
   const instance = {
     networks: [],
     subnets: [],
-    openNetworkEdit(name, at) { calls.push(["openNetworkEdit", name, at]); },
+    openNetworkEdit(name, at) { calls.push(["openNetworkEdit", name, at]); this._panel.open(at); },
   };
   globalThis.Alpine = { $data: (el) => (el === page.ids["net-edit"] ? instance : null) };
   return { instance, calls, done: () => { delete globalThis.Alpine; } };
@@ -1706,14 +1706,15 @@ test("net-edit window can be dragged by its header, clamped to the canvas bounds
   assert.equal(box.style.top, "80px", "window follows the cursor vertically");
   // canvas is 1200x800 (see makeEl's default getBoundingClientRect); with no
   // real offsetWidth/offsetHeight in this DOM stub the drag falls back to
-  // net-edit's fixed 520x560 size (networks.js's NET_EDIT_W/H), clamping the
-  // window well short of the far edge.
+  // net-edit's fixed 520x560 size (topology.js's createFloatingPanel
+  // fallbackW/fallbackH for #net-edit), clamping the window well short of
+  // the far edge.
   fire(page.doc, "mousemove", { clientX: 5000, clientY: 5000 });
-  assert.equal(box.style.left, "680px", "left clamped so the window stays on the canvas");
-  assert.equal(box.style.top, "240px", "top clamped so the window stays on the canvas");
+  assert.equal(box.style.left, "672px", "left clamped so the window stays on the canvas, margin kept on the far edge too");
+  assert.equal(box.style.top, "232px", "top clamped so the window stays on the canvas, margin kept on the far edge too");
   fire(page.doc, "mouseup", {});
   fire(page.doc, "mousemove", { clientX: 999, clientY: 999 });
-  assert.equal(box.style.left, "680px", "drag stops listening for mousemove after mouseup");
+  assert.equal(box.style.left, "672px", "drag stops listening for mousemove after mouseup");
 });
 
 test("net-edit header mousedown on the close button does not start a drag", async () => {
@@ -1746,6 +1747,25 @@ test("net-edit save port applies update-network through the canvas sync queue", 
   }
 });
 
+test("zooming the camera repositions the open net-edit window", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const alpine = installNetEditAlpine(page);
+  try {
+    fire(page.canvas, "contextmenu", { clientX: AT.net1.x, clientY: AT.net1.y });
+    fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+    const box = page.doc.getElementById("net-edit");
+    const anchor = { x: parseFloat(box.style.left), y: parseFloat(box.style.top) };
+    fire(page.canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
+    page.pump();
+    const cam = JSON.parse(page.get("JSON.stringify(State.camera)"));
+    assert.equal(box.style.left, `${anchor.x * cam.z + cam.x}px`, "window follows its network after zoom");
+    assert.equal(box.style.top, `${anchor.y * cam.z + cam.y}px`, "window follows its network after zoom");
+  } finally {
+    alpine.done();
+  }
+});
+
 // --- device-edit: ПКМ по устройству → «Редактировать» открывает плавающее окно устройства ---
 
 // installDeviceEditAlpine зеркалит installNetEditAlpine для окна #device-edit
@@ -1755,7 +1775,7 @@ function installDeviceEditAlpine(page) {
   const instance = {
     devices: [],
     unions: [],
-    openDeviceEdit(name, at) { calls.push(["openDeviceEdit", name, at]); },
+    openDeviceEdit(name, at) { calls.push(["openDeviceEdit", name, at]); this._panel.open(at); },
   };
   globalThis.Alpine = { $data: (el) => (el === page.ids["device-edit"] ? instance : null) };
   return { instance, calls, done: () => { delete globalThis.Alpine; } };
@@ -1849,11 +1869,11 @@ test("device-edit window can be dragged by its header, clamped to the canvas bou
   assert.equal(box.style.left, "140px", "window follows the cursor horizontally");
   assert.equal(box.style.top, "80px", "window follows the cursor vertically");
   fire(page.doc, "mousemove", { clientX: 5000, clientY: 5000 });
-  assert.equal(box.style.left, "680px", "left clamped so the window stays on the canvas");
-  assert.equal(box.style.top, "240px", "top clamped so the window stays on the canvas");
+  assert.equal(box.style.left, "672px", "left clamped so the window stays on the canvas, margin kept on the far edge too");
+  assert.equal(box.style.top, "412px", "top clamped so the window stays on the canvas, margin kept on the far edge too");
   fire(page.doc, "mouseup", {});
   fire(page.doc, "mousemove", { clientX: 999, clientY: 999 });
-  assert.equal(box.style.left, "680px", "drag stops listening for mousemove after mouseup");
+  assert.equal(box.style.left, "672px", "drag stops listening for mousemove after mouseup");
 });
 
 test("device-edit header mousedown on the close button does not start a drag", async () => {
@@ -1881,6 +1901,25 @@ test("device-edit save port applies update-device through the canvas sync queue"
     assert.ok(page.calls.some((c) => c.path === "/api/drafts/d1/topology/operations/batch" && c.method === "POST"), "batch posted by the canvas queue");
     assert.equal(page.get("State.topology.devices[0].name"), "core-1", "canvas state updated");
     assert.equal(snapshot.topology.devices[0].name, "core-1", "port resolves with the confirmed snapshot");
+  } finally {
+    alpine.done();
+  }
+});
+
+test("zooming the camera repositions the open device-edit window", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const alpine = installDeviceEditAlpine(page);
+  try {
+    fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+    fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+    const box = page.doc.getElementById("device-edit");
+    const anchor = { x: parseFloat(box.style.left), y: parseFloat(box.style.top) };
+    fire(page.canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
+    page.pump();
+    const cam = JSON.parse(page.get("JSON.stringify(State.camera)"));
+    assert.equal(box.style.left, `${anchor.x * cam.z + cam.x}px`, "window follows its device after zoom");
+    assert.equal(box.style.top, `${anchor.y * cam.z + cam.y}px`, "window follows its device after zoom");
   } finally {
     alpine.done();
   }

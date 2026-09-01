@@ -396,31 +396,25 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .net-info-cidr { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .net-info-empty { color: var(--muted); font-size: 0.82rem; }
 
-/* floating object editor (canvas: ПКМ по сети/устройству → «Редактировать»),
-   shared by #net-edit and #device-edit. Дублирует модальное окно страницы
-   «Сети»/«Устройства» как плавающее окно, прижатое к точке ПКМ и не
-   выходящее за границы канваса. */
-.net-edit {
+/* floating panel chrome shared by canvas edit windows (#net-edit,
+   #device-edit, #link-panel) and diagnose tool panels (#diag-panel,
+   #spread-panel) — opened near a canvas point, draggable by header,
+   world-anchored via floating_panel.js. */
+.floating-panel {
   position: absolute;
-  z-index: 20;
-  width: min(var(--net-edit-w), calc(100% - 2 * var(--space-3)));
+  z-index: 10;
+  width: 380px;
+  max-width: calc(100% - 2 * var(--space-3));
+  max-height: calc(100% - 2 * var(--space-3));
   display: flex;
   flex-direction: column;
   background: var(--panel-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow);
-  max-height: calc(100% - 2 * var(--space-3));
-  /* overflow: visible — не auto: .member-suggestions (position: absolute)
-     всплывает над окном, но по DOM-дереву остаётся его потомком, и auto
-     считал бы её высоту в скролл-области .net-edit, пряча список за
-     скроллбаром самого окна вместо того, чтобы дать ему просто открыться
-     поверх содержимого. Высота окна всё равно ограничена max-height —
-     ограничивает именно рамку/фон, а не клипует контент. */
-  overflow: visible;
 }
-.net-edit[hidden] { display: none; }
-.net-edit-header {
+.floating-panel[hidden] { display: none; }
+.floating-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -430,13 +424,26 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   cursor: move;
   user-select: none;
 }
-.net-edit-title { margin: 0; font-size: 1rem; }
-.net-edit-close { border: none; background: none; color: var(--fg); font-size: 1.2rem; line-height: 1; cursor: pointer; padding: 0; }
-.net-edit-close:hover { color: var(--accent); }
-.net-edit-body { padding: var(--space-3); }
-.net-edit-body label,
-.net-edit-body .modal-field { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); font-size: 0.9rem; }
-.net-edit-body .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: auto; }
+.floating-panel-title { margin: 0; font-size: 1rem; }
+.floating-panel-close { border: none; background: none; color: var(--fg); font-size: 1.2rem; line-height: 1; cursor: pointer; padding: 0 var(--space-1); }
+.floating-panel-close:hover { color: var(--accent); }
+.floating-panel-body { padding: var(--space-3); }
+.floating-panel-body form { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-3); }
+.floating-panel-body label,
+.floating-panel-body .modal-field { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); font-size: 0.9rem; }
+.floating-panel-body .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: auto; }
+
+/* .net-edit — модификатор поверх .floating-panel для #net-edit/#device-edit:
+   шире (--net-edit-w) и с overflow: visible — .member-suggestions
+   (position: absolute) у net-edit всплывает над окном, но по DOM-дереву
+   остаётся его потомком; overflow: auto считал бы её высоту в scroll-области,
+   пряча список за скроллбаром самого окна вместо того, чтобы дать ему
+   открыться поверх содержимого. */
+.net-edit {
+  z-index: 20;
+  width: min(var(--net-edit-w), calc(100% - 2 * var(--space-3)));
+  overflow: visible;
+}
 
 /* floating link filter editor (canvas: ПКМ по связи → «Редактировать») */
 .link-panel {

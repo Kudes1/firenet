@@ -14,12 +14,6 @@ import { makeColumnsResizable, initializeColumns } from "./columns.js";
 const DEVICES_COL_WIDTHS_KEY = "firenet-devices-col-widths-v1";
 const DEVICES_COL_WIDTHS_VERSION = 1;
 
-// Размер плавающего окна редактирования устройства на холсте топологии;
-// зеркалит NET_EDIT_W/H/MARGIN из networks.js — тот же приём, другое окно.
-const DEVICE_EDIT_W = 520; // держим в паре с --net-edit-w в style.css
-const DEVICE_EDIT_H = 380;
-const DEVICE_EDIT_MARGIN = 8;
-
 document.addEventListener("alpine:init", () => {
   Alpine.data("devicesPage", () => ({
     devices: [], // {name, kind, description, union}
@@ -85,37 +79,20 @@ document.addEventListener("alpine:init", () => {
     // openDeviceEdit открывает плавающее окно редактирования устройства на
     // холсте топологии (ПКМ по устройству → «Редактировать»). Поведение
     // дублирует openEdit страницы «Устройства» — тот же draft; отличие —
-    // окно позиционируется в точке at, а не открывается как native <dialog>.
-    // Тип устройства (router/switch) не редактируется — как и в openEdit.
+    // открытие/позиционирование окна на холсте делегировано this._panel
+    // (floating_panel.js-инстанс, который topology.js создаёт и кладёт на
+    // инстанс перед вызовом — см. Topology.openDeviceEditWindow). Тип
+    // устройства (router/switch) не редактируется — как и в openEdit.
     openDeviceEdit(name, at) {
       const i = this.devices.findIndex((d) => d.name === name);
       if (i < 0) return;
       const d = this.devices[i];
       this.draft = { index: i, name: d.name, description: d.description, union: d.union };
-      this.showDeviceEdit(at.x, at.y);
+      this._panel.open(at);
     },
 
     closeModal() {
       this.$refs.dialog.close();
-    },
-
-    // showDeviceEdit позиционирует плавающее окно редактирования устройства
-    // в экранной точке (x, y), не выпуская его за границы канваса — зеркалит
-    // networks.js's showNetworkEdit.
-    showDeviceEdit(x, y) {
-      const box = this.$refs.deviceEdit;
-      const r = document.getElementById("topo-canvas").getBoundingClientRect();
-      const w = box.offsetWidth || DEVICE_EDIT_W;
-      const h = box.offsetHeight || DEVICE_EDIT_H;
-      box.style.left = Math.min(Math.max(x, DEVICE_EDIT_MARGIN), Math.max(DEVICE_EDIT_MARGIN, r.width - w)) + "px";
-      box.style.top = Math.min(Math.max(y, DEVICE_EDIT_MARGIN), Math.max(DEVICE_EDIT_MARGIN, r.height - h)) + "px";
-      box.hidden = false;
-    },
-
-    // closeDeviceEdit скрывает плавающее окно редактирования устройства.
-    closeDeviceEdit() {
-      const box = this.$refs.deviceEdit;
-      if (box) box.hidden = true;
     },
 
     // closeEditor закрывает открытый редактор: модальный диалог страницы
@@ -123,7 +100,7 @@ document.addEventListener("alpine:init", () => {
     // примонтировано.
     closeEditor() {
       if (this.$refs.dialog) this.closeModal();
-      else this.closeDeviceEdit();
+      else this._panel.close();
     },
 
     get draftHint() {

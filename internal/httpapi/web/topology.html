@@ -85,12 +85,12 @@
       <div id="topo-context-menu" class="context-menu" hidden></div>
       <div id="net-info" class="net-info" hidden></div>
       <div id="link-panel" class="link-panel" hidden></div>
-      <div id="device-edit" class="net-edit" x-data="devicesPage" x-ref="deviceEdit" hidden>
-        <header id="device-edit-header" class="net-edit-header">
-          <h3 class="net-edit-title">Изменить устройство</h3>
-          <button type="button" id="device-edit-close" class="net-edit-close" title="Закрыть" aria-label="Закрыть">×</button>
+      <div id="device-edit" class="floating-panel net-edit" x-data="devicesPage" x-ref="deviceEdit" hidden>
+        <header id="device-edit-header" class="floating-panel-header">
+          <h3 class="floating-panel-title">Изменить устройство</h3>
+          <button type="button" id="device-edit-close" class="floating-panel-close" title="Закрыть" aria-label="Закрыть">×</button>
         </header>
-        <div class="net-edit-body">
+        <div class="floating-panel-body">
           <label>Имя
             <input x-model.trim="draft.name" placeholder="r1">
           </label>
@@ -107,17 +107,17 @@
           </label>
           <p class="cell-hint" x-show="draftHint" x-text="draftHint"></p>
           <div class="modal-actions">
-            <button type="button" @click="closeDeviceEdit()">Отмена</button>
+            <button type="button" @click="closeEditor()">Отмена</button>
             <button type="button" class="primary" :disabled="!!draftHint || saving" @click="saveDraft()">Сохранить</button>
           </div>
         </div>
       </div>
-      <div id="net-edit" class="net-edit" x-data="networksPage" x-ref="netEdit" hidden>
-        <header id="net-edit-header" class="net-edit-header">
-          <h3 class="net-edit-title">Изменить сеть</h3>
-          <button type="button" id="net-edit-close" class="net-edit-close" title="Закрыть" aria-label="Закрыть">×</button>
+      <div id="net-edit" class="floating-panel net-edit" x-data="networksPage" x-ref="netEdit" hidden>
+        <header id="net-edit-header" class="floating-panel-header">
+          <h3 class="floating-panel-title">Изменить сеть</h3>
+          <button type="button" id="net-edit-close" class="floating-panel-close" title="Закрыть" aria-label="Закрыть">×</button>
         </header>
-        <div class="net-edit-body">
+        <div class="floating-panel-body">
           <label>Имя
             <input x-model.trim="draft.name" placeholder="office">
           </label>
@@ -149,7 +149,7 @@
           </div>
           <p class="cell-hint" x-show="draftHint" x-text="draftHint"></p>
           <div class="modal-actions">
-            <button type="button" @click="closeNetworkEdit()">Отмена</button>
+            <button type="button" @click="closeEditor()">Отмена</button>
             <button type="button" class="primary" :disabled="!!draftHint || saving" @click="saveDraft()">Сохранить</button>
           </div>
         </div>
