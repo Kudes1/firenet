@@ -90,7 +90,7 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("GET /ui/links", servePage("links.html"))
 	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
 	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
-	mux.HandleFunc("GET /ui/diagnose", servePage("diagnose.html"))
+	mux.HandleFunc("GET /ui/diagnose", serveTemplatedPage(mustPageTemplate(pages, "diagnose"), templatedPages["diagnose"].data))
 	mux.HandleFunc("GET /ui/users", servePage("users.html"))
 	mux.HandleFunc("GET /ui/drafts", servePage("drafts.html"))
 	mux.HandleFunc("GET /ui/history", servePage("history.html"))
@@ -159,8 +159,9 @@ type templatedPage struct {
 // page's file and its Title/Nav/Script can't drift apart as more pages
 // migrate.
 var templatedPages = map[string]templatedPage{
-	"subnets": {file: "templates/subnets.html", data: pageData{Title: "firenet — подсети", Nav: "subnets", Script: "subnets.js"}},
-	"unions":  {file: "templates/unions.html", data: pageData{Title: "firenet — объединения", Nav: "unions", Script: "unions.js"}},
+	"subnets":  {file: "templates/subnets.html", data: pageData{Title: "firenet — подсети", Nav: "subnets", Script: "subnets.js"}},
+	"unions":   {file: "templates/unions.html", data: pageData{Title: "firenet — объединения", Nav: "unions", Script: "unions.js"}},
+	"diagnose": {file: "templates/diagnose.html", data: pageData{Title: "firenet — диагностика", Nav: "diagnose", Script: "diagnose.js"}},
 }
 
 // parsePageTemplates parses layout.html once and Clone()s it per page before

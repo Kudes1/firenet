@@ -1,24 +1,4 @@
-<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>firenet — диагностика</title>
-<script>
-  try {
-    var saved = localStorage.getItem("firenet-theme");
-    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
-  } catch (e) {}
-</script>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="stylesheet" href="/style.css">
-<style>
-  #diag-canvas { inset: 0; width: 100%; height: 100%; }
-  #diag-fit { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 2; }
-</style>
-</head>
-<body data-nav="diagnose" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
-
-<main>
+{{define "content"}}<main>
   <div class="topology-layout">
     <div class="canvas-wrap" id="diag-wrap">
       <canvas id="diag-canvas"></canvas>
@@ -107,10 +87,4 @@
       <canvas id="diag-minimap" class="diag-minimap" hidden></canvas>
     </div>
   </div>
-</main>
-
-<script type="module" src="/common.js"></script>
-<script type="module" src="/diagnose.js"></script>
-<script src="/alpine.min.js" defer></script>
-</body>
-</html>
+</main>{{end}}
