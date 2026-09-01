@@ -13,7 +13,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
-<body data-nav="{{.Nav}}" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
+<body data-nav="{{.Nav}}"{{if .NoDraftBanner}} data-no-draft-banner="true"{{end}} x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
 
 {{template "content" .}}
 

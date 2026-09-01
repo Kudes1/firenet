@@ -142,9 +142,10 @@ func servePage(name string) http.HandlerFunc {
 }
 
 type pageData struct {
-	Title  string
-	Nav    string
-	Script string
+	Title         string
+	Nav           string
+	Script        string
+	NoDraftBanner bool
 }
 
 type templatedPage struct {
@@ -163,10 +164,10 @@ var templatedPages = map[string]templatedPage{
 	"unions":   {file: "templates/unions.html", data: pageData{Title: "firenet — объединения", Nav: "unions", Script: "unions.js"}},
 	"diagnose": {file: "templates/diagnose.html", data: pageData{Title: "firenet — диагностика", Nav: "diagnose", Script: "diagnose.js"}},
 	"compile":  {file: "templates/compile.html", data: pageData{Title: "firenet — компиляция", Nav: "compile", Script: "compile.js"}},
-	"history":  {file: "templates/history.html", data: pageData{Title: "firenet — история версий", Nav: "history", Script: "history.js"}},
-	"drafts":   {file: "templates/drafts.html", data: pageData{Title: "firenet — черновики", Nav: "drafts", Script: "drafts.js"}},
+	"history":  {file: "templates/history.html", data: pageData{Title: "firenet — история версий", Nav: "history", Script: "history.js", NoDraftBanner: true}},
+	"drafts":   {file: "templates/drafts.html", data: pageData{Title: "firenet — черновики", Nav: "drafts", Script: "drafts.js", NoDraftBanner: true}},
 	"devices":  {file: "templates/devices.html", data: pageData{Title: "firenet — устройства", Nav: "devices", Script: "devices.js"}},
-	"users":    {file: "templates/users.html", data: pageData{Title: "firenet — пользователи", Nav: "users", Script: "users.js"}},
+	"users":    {file: "templates/users.html", data: pageData{Title: "firenet — пользователи", Nav: "users", Script: "users.js", NoDraftBanner: true}},
 	"networks": {file: "templates/networks.html", data: pageData{Title: "firenet — сети", Nav: "networks", Script: "networks.js"}},
 	"links":    {file: "templates/links.html", data: pageData{Title: "firenet — связи", Nav: "links", Script: "links.js"}},
 	"rules":    {file: "templates/rules.html", data: pageData{Title: "firenet — правила", Nav: "rules", Script: "rules.js"}},

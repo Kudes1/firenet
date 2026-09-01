@@ -95,24 +95,25 @@ func TestTemplatedPages(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
 	cases := []struct {
-		path   string
-		title  string
-		nav    string
-		marker string
+		path          string
+		title         string
+		nav           string
+		marker        string
+		noDraftBanner bool
 	}{
-		{"/ui/subnets", "firenet — подсети", "subnets", `x-data="subnetsPage"`},
-		{"/ui/unions", "firenet — объединения", "unions", `x-data="unionsPage"`},
-		{"/ui/diagnose", "firenet — диагностика", "diagnose", `id="diag-canvas"`},
-		{"/ui/compile", "firenet — компиляция", "compile", `id="compile-run"`},
-		{"/ui/history", "firenet — история версий", "history", `id="history-table"`},
-		{"/ui/drafts", "firenet — черновики", "drafts", `id="drafts-table"`},
-		{"/ui/devices", "firenet — устройства", "devices", `x-data="devicesPage"`},
-		{"/ui/users", "firenet — пользователи", "users", `x-data="usersPage"`},
-		{"/ui/networks", "firenet — сети", "networks", `x-data="networksPage"`},
-		{"/ui/links", "firenet — связи", "links", `x-data="linksPage"`},
-		{"/ui/rules", "firenet — правила", "rules", `x-data="rulesPage"`},
-		{"/ui/sets", "firenet — наборы", "sets", `x-data="setsPage"`},
-		{"/ui/topology", "firenet — топология", "topology", `id="topo-canvas"`},
+		{"/ui/subnets", "firenet — подсети", "subnets", `x-data="subnetsPage"`, false},
+		{"/ui/unions", "firenet — объединения", "unions", `x-data="unionsPage"`, false},
+		{"/ui/diagnose", "firenet — диагностика", "diagnose", `id="diag-canvas"`, false},
+		{"/ui/compile", "firenet — компиляция", "compile", `id="compile-run"`, false},
+		{"/ui/history", "firenet — история версий", "history", `id="history-table"`, true},
+		{"/ui/drafts", "firenet — черновики", "drafts", `id="drafts-table"`, true},
+		{"/ui/devices", "firenet — устройства", "devices", `x-data="devicesPage"`, false},
+		{"/ui/users", "firenet — пользователи", "users", `x-data="usersPage"`, true},
+		{"/ui/networks", "firenet — сети", "networks", `x-data="networksPage"`, false},
+		{"/ui/links", "firenet — связи", "links", `x-data="linksPage"`, false},
+		{"/ui/rules", "firenet — правила", "rules", `x-data="rulesPage"`, false},
+		{"/ui/sets", "firenet — наборы", "sets", `x-data="setsPage"`, false},
+		{"/ui/topology", "firenet — топология", "topology", `id="topo-canvas"`, false},
 	}
 
 	for _, c := range cases {
@@ -132,6 +133,13 @@ func TestTemplatedPages(t *testing.T) {
 		}
 		if !strings.Contains(body, c.marker) {
 			t.Errorf("GET %s: body missing %s", c.path, c.marker)
+		}
+		if !strings.Contains(body, `src="/`+c.nav+`.js"`) {
+			t.Errorf("GET %s: body missing own script tag src=\"/%s.js\"", c.path, c.nav)
+		}
+		hasBanner := strings.Contains(body, `data-no-draft-banner="true"`)
+		if hasBanner != c.noDraftBanner {
+			t.Errorf("GET %s: data-no-draft-banner=%v, want %v", c.path, hasBanner, c.noDraftBanner)
 		}
 		assertLayoutInvariants(t, c.path, body)
 	}
