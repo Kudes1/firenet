@@ -106,6 +106,8 @@ func TestTemplatedPages(t *testing.T) {
 		{"/ui/compile", "firenet — компиляция", "compile", `id="compile-run"`},
 		{"/ui/history", "firenet — история версий", "history", `id="history-table"`},
 		{"/ui/drafts", "firenet — черновики", "drafts", `id="drafts-table"`},
+		{"/ui/devices", "firenet — устройства", "devices", `x-data="devicesPage"`},
+		{"/ui/users", "firenet — пользователи", "users", `x-data="usersPage"`},
 	}
 
 	for _, c := range cases {

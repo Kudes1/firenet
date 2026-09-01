@@ -84,14 +84,14 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("GET /ui/topology", servePage("topology.html"))
 	mux.HandleFunc("GET /ui/subnets", serveTemplatedPage(mustPageTemplate(pages, "subnets"), templatedPages["subnets"].data))
 	mux.HandleFunc("GET /ui/networks", servePage("networks.html"))
-	mux.HandleFunc("GET /ui/devices", servePage("devices.html"))
+	mux.HandleFunc("GET /ui/devices", serveTemplatedPage(mustPageTemplate(pages, "devices"), templatedPages["devices"].data))
 	mux.HandleFunc("GET /ui/sets", servePage("sets.html"))
 	mux.HandleFunc("GET /ui/unions", serveTemplatedPage(mustPageTemplate(pages, "unions"), templatedPages["unions"].data))
 	mux.HandleFunc("GET /ui/links", servePage("links.html"))
 	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
 	mux.HandleFunc("GET /ui/compile", serveTemplatedPage(mustPageTemplate(pages, "compile"), templatedPages["compile"].data))
 	mux.HandleFunc("GET /ui/diagnose", serveTemplatedPage(mustPageTemplate(pages, "diagnose"), templatedPages["diagnose"].data))
-	mux.HandleFunc("GET /ui/users", servePage("users.html"))
+	mux.HandleFunc("GET /ui/users", serveTemplatedPage(mustPageTemplate(pages, "users"), templatedPages["users"].data))
 	mux.HandleFunc("GET /ui/drafts", serveTemplatedPage(mustPageTemplate(pages, "drafts"), templatedPages["drafts"].data))
 	mux.HandleFunc("GET /ui/history", serveTemplatedPage(mustPageTemplate(pages, "history"), templatedPages["history"].data))
 
@@ -165,6 +165,8 @@ var templatedPages = map[string]templatedPage{
 	"compile":  {file: "templates/compile.html", data: pageData{Title: "firenet — компиляция", Nav: "compile", Script: "compile.js"}},
 	"history":  {file: "templates/history.html", data: pageData{Title: "firenet — история версий", Nav: "history", Script: "history.js"}},
 	"drafts":   {file: "templates/drafts.html", data: pageData{Title: "firenet — черновики", Nav: "drafts", Script: "drafts.js"}},
+	"devices":  {file: "templates/devices.html", data: pageData{Title: "firenet — устройства", Nav: "devices", Script: "devices.js"}},
+	"users":    {file: "templates/users.html", data: pageData{Title: "firenet — пользователи", Nav: "users", Script: "users.js"}},
 }
 
 // parsePageTemplates parses layout.html once and Clone()s it per page before
