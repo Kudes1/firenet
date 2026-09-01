@@ -3,15 +3,25 @@
 // Shared page plumbing: Alpine app state, API helpers and the sidebar shell
 // injected into every standalone UI page.
 
+// initialTheme resolves the theme to show on load: the persisted choice,
+// or the system preference when the user never picked one. Read-only — it
+// does not write localStorage, so an unpinned choice keeps following the
+// system preference on later visits.
+export function initialTheme() {
+  return localStorage.getItem("firenet-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+
+// applyTheme sets the theme (pinning it in localStorage) — the single path
+// every theme change goes through, so the sidebar's toggle button and
+// anything else that changes theme can't drift from each other.
+export function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem("firenet-theme", theme);
+}
+
 export function appData() {
   return {
-    theme: localStorage.getItem("firenet-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
     banner: { show: false, message: "", kind: "error", timer: null },
-    toggleTheme() {
-      this.theme = this.theme === "dark" ? "light" : "dark";
-      document.documentElement.dataset.theme = this.theme;
-      localStorage.setItem("firenet-theme", this.theme);
-    },
     showBanner(message, kind) {
       this.banner.message = message;
       this.banner.kind = kind || "error";
@@ -183,16 +193,36 @@ let lastDraftRevision = null;
 // loginRedirectURL builds the /login target for an unauthenticated
 // request, preserving where the user was so they land back there after
 // logging in. Guards against open redirects: only same-origin, absolute
-// paths are honored as the "next" target.
+// paths are honored as the "next" target. Already being on /login is
+// returned unchanged rather than wrapped again — otherwise a redirect
+// fired from the login page itself (e.g. a stale request resolving after
+// a first 401 already sent us here) would nest another /login?next= layer
+// around the existing one, growing without bound on every repeat.
 export function loginRedirectURL(pathname, search) {
+  if (pathname === "/login") return pathname + search;
   const target = pathname + search;
   const safe = target.startsWith("/") && !target.startsWith("//");
   return "/login" + (safe ? "?next=" + encodeURIComponent(target) : "");
 }
 
+// A page load fires several API calls in parallel (topology, subnets,
+// layout, the draft banner, ...); an expired session makes all of them
+// 401 around the same time. Without this guard each one would independently
+// read window.location and kick off its own navigation — most racing to
+// the same target harmlessly, but a straggler that reads location after an
+// earlier one has already landed on /login would wrap that URL in another
+// layer of /login?next= (compounding on real, slower connections into the
+// deeply-nested next= chains this was reported with). One shared pending
+// promise means only the first 401 ever navigates; every other caller just
+// hangs on it, same as if it had triggered the redirect itself.
+let loginRedirectPending = null;
+
 async function redirectToLogin() {
-  window.location.href = loginRedirectURL(window.location.pathname, window.location.search);
-  return new Promise(() => {}); // navigation is underway; never resolve
+  if (!loginRedirectPending) {
+    window.location.href = loginRedirectURL(window.location.pathname, window.location.search);
+    loginRedirectPending = new Promise(() => {}); // navigation is underway; never resolve
+  }
+  return loginRedirectPending;
 }
 
 export const Api = {
@@ -384,13 +414,19 @@ const NAV_GROUPS = [
       { id: "compile", href: "/ui/compile", label: "Компиляция" },
     ],
   },
+  {
+    id: "versions",
+    label: "Версии",
+    links: [
+      { id: "drafts", href: "/ui/drafts", label: "Черновики" },
+      { id: "history", href: "/ui/history", label: "История" },
+    ],
+  },
 ];
 
 const NAV_STANDALONE = [
   { id: "diagnose", href: "/ui/diagnose", label: "Диагностика" },
   { id: "users", href: "/ui/users", label: "Пользователи" },
-  { id: "drafts", href: "/ui/drafts", label: "Черновики" },
-  { id: "history", href: "/ui/history", label: "История" },
 ];
 
 const svgOpen = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
@@ -418,9 +454,7 @@ export async function buildNav(active) {
     .then((res) => (res.ok ? res.json() : null))
     .catch(() => null);
 
-  document.documentElement.dataset.theme =
-    localStorage.getItem("firenet-theme") ||
-    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = initialTheme();
 
   const aside = document.createElement("aside");
   aside.className = "sidebar";
@@ -523,9 +557,7 @@ export async function buildNav(active) {
     '<svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
   themeBtn.addEventListener("click", () => {
-    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem("firenet-theme", next);
+    applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
   });
   const logoutBtn = document.createElement("button");
   logoutBtn.type = "button";

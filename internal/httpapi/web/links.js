@@ -1,6 +1,8 @@
 "use strict";
 
 import { Api, showBanner, apiPath, assertEditable, containsFold, matchSubnetMembers } from "./common.js";
+import * as Table from "./table.js";
+import * as Combo from "./combo.js";
 
 // Links page: table over topology.yaml links. A regular link can convert
 // to a filtered one (per-side export lists of networks/subnets) and back.
@@ -58,16 +60,14 @@ document.addEventListener("alpine:init", () => {
     // the right link. Export columns match entity names as substrings and
     // IP/partial-IP/CIDR queries semantically against the subnets' CIDRs.
     get filteredLinks() {
-      const f = this.filters;
       return this.links
         .map((link, index) => ({ index, link }))
-        .filter(
-          ({ link }) =>
-            (containsFold(link.a.device, f.devices) || containsFold(link.b.device, f.devices)) &&
-            containsFold(link.filter ? "фильтрованная" : "обычная", f.mode) &&
-            matchSubnetMembers(this.exportMembers(link.filter?.aExports), (s) => this.cidrOf(s), f.aExports) &&
-            matchSubnetMembers(this.exportMembers(link.filter?.bExports), (s) => this.cidrOf(s), f.bExports)
-        );
+        .filter(({ link }) => Table.matchAll(link, this.filters, {
+          devices: (l, q) => containsFold(l.a.device, q) || containsFold(l.b.device, q),
+          mode: (l, q) => containsFold(l.filter ? "фильтрованная" : "обычная", q),
+          aExports: (l, q) => matchSubnetMembers(this.exportMembers(l.filter?.aExports), (s) => this.cidrOf(s), q),
+          bExports: (l, q) => matchSubnetMembers(this.exportMembers(l.filter?.bExports), (s) => this.cidrOf(s), q),
+        }));
     },
 
     // BIRD-like view helpers: each link side has an editable export list
@@ -124,13 +124,13 @@ document.addEventListener("alpine:init", () => {
     },
 
     moveCursor(delta) {
-      const max = this.availableEntities(this.combo.side).length - 1;
-      if (!this.combo.side || max < 0) return;
-      this.combo.cursor = Math.min(Math.max(this.combo.cursor + delta, 0), max);
+      if (!this.combo.side) return;
+      const list = this.availableEntities(this.combo.side);
+      this.combo.cursor = Combo.clampCursor(this.combo.cursor, delta, list.length);
     },
 
     pickEntity() {
-      const e = this.availableEntities(this.combo.side)[this.combo.cursor];
+      const e = Combo.pickAt(this.availableEntities(this.combo.side), this.combo.cursor);
       if (e) this.addExport(this.combo.side, e.name);
     },
 

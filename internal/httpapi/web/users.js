@@ -2,7 +2,7 @@
 "use strict";
 
 import { Api, showBanner, containsFold } from "./common.js";
-import { makeColumnsResizable, initializeColumns } from "./columns.js";
+import * as Table from "./table.js";
 
 const USERS_COL_WIDTHS_KEY = "firenet-users-col-widths-v1";
 const USERS_COL_WIDTHS_VERSION = 1;
@@ -38,14 +38,13 @@ document.addEventListener("alpine:init", () => {
     },
 
     initTable(tableEl) {
-      if (!tableEl || tableEl.dataset.columnsReady) return;
-      tableEl.dataset.columnsReady = "1";
-      initializeColumns(tableEl, USERS_COL_WIDTHS_KEY, USERS_COL_WIDTHS_VERSION);
-      makeColumnsResizable(tableEl, USERS_COL_WIDTHS_KEY, USERS_COL_WIDTHS_VERSION);
+      Table.initTable(tableEl, USERS_COL_WIDTHS_KEY, USERS_COL_WIDTHS_VERSION);
     },
 
     get filteredUsers() {
-      return this.users.filter((u) => containsFold(u.username, this.filters.username));
+      return this.users.filter((u) => Table.matchAll(u, this.filters, {
+        username: (x, q) => containsFold(x.username, q),
+      }));
     },
 
     formatDate(iso) {

@@ -1,7 +1,7 @@
 "use strict";
 
 import { Api, showBanner, apiPath, assertEditable, containsFold, ipv4CidrOverlap } from "./common.js";
-import { makeColumnsResizable, initializeColumns } from "./columns.js";
+import * as Table from "./table.js";
 
 // Subnets page: read-only table over subnets.yaml via /api/subnets;
 // editing happens one record at a time in a native <dialog> modal.
@@ -36,23 +36,18 @@ document.addEventListener("alpine:init", () => {
     },
 
     get filteredRows() {
-      const f = this.filters;
       return this.rows
         .map((row, index) => ({ index, row }))
-        .filter(
-          ({ row }) =>
-            containsFold(row.name, f.name) &&
-            containsFold(row.cidr, f.cidr) &&
-            containsFold(row.owner, f.owner) &&
-            containsFold(row.description, f.description)
-        );
+        .filter(({ row }) => Table.matchAll(row, this.filters, {
+          name: (r, q) => containsFold(r.name, q),
+          cidr: (r, q) => containsFold(r.cidr, q),
+          owner: (r, q) => containsFold(r.owner, q),
+          description: (r, q) => containsFold(r.description, q),
+        }));
     },
 
     initTable(tableEl) {
-      if (!tableEl || tableEl.dataset.columnsReady) return;
-      tableEl.dataset.columnsReady = "1";
-      initializeColumns(tableEl, SUBNETS_COL_WIDTHS_KEY, SUBNETS_COL_WIDTHS_VERSION);
-      makeColumnsResizable(tableEl, SUBNETS_COL_WIDTHS_KEY, SUBNETS_COL_WIDTHS_VERSION);
+      Table.initTable(tableEl, SUBNETS_COL_WIDTHS_KEY, SUBNETS_COL_WIDTHS_VERSION);
     },
 
     openAdd() {

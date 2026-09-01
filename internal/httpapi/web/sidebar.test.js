@@ -32,7 +32,7 @@ function makeEl(tag) {
   return el;
 }
 
-async function loadCommon(store, me) {
+async function loadCommon(store, me, prefersDark = false) {
   const doc = makeEl("#document");
   doc.body = makeEl("body");
   doc.documentElement = { dataset: {} };
@@ -43,12 +43,12 @@ async function loadCommon(store, me) {
     getItem: (k) => (k in store ? store[k] : null),
     setItem: (k, v) => { store[k] = v; },
   };
-  global.matchMedia = () => ({ matches: false });
+  global.matchMedia = () => ({ matches: prefersDark });
   global.CustomEvent = class {};
   global.confirm = () => false;
   global.fetch = () => Promise.resolve(me ? { ok: true, json: () => Promise.resolve(me) } : { ok: false });
-  const { buildNav } = await import(path.join(__dirname, "common.js") + `?t=${Date.now()}-${Math.random()}`);
-  return { buildNav, doc };
+  const { buildNav, initialTheme, applyTheme } = await import(path.join(__dirname, "common.js") + `?t=${Date.now()}-${Math.random()}`);
+  return { buildNav, initialTheme, applyTheme, doc };
 }
 
 (async () => {
@@ -75,10 +75,11 @@ test("buildNav renders an aside.sidebar with brand, groups and nav links", async
   assert.ok(nav, "sidebar contains a nav");
 
   const groups = byTag(nav, "div").filter((d) => String(d.className).split(" ").includes("nav-group"));
-  assert.equal(groups.length, 2, "two groups: Топология and Firewall");
+  assert.equal(groups.length, 3, "three groups: Топология, Firewall and Версии");
   const header = (g) => byTag(g, "button").find((b) => b.classList.contains("nav-group-header"));
   assert.equal(label(header(groups[0])), "Топология");
   assert.equal(label(header(groups[1])), "Firewall");
+  assert.equal(label(header(groups[2])), "Версии");
 
   const links = (root) => {
     const acc = [];
@@ -91,9 +92,10 @@ test("buildNav renders an aside.sidebar with brand, groups and nav links", async
   const groupLinks = (g) => links(g).map(label);
   assert.deepEqual(groupLinks(groups[0]), ["Схема", "Устройства", "Сети", "Объединения", "Связи"]);
   assert.deepEqual(groupLinks(groups[1]), ["Подсети", "Наборы", "Правила", "Компиляция"]);
+  assert.deepEqual(groupLinks(groups[2]), ["Черновики", "История"]);
   assert.deepEqual(
-    navLinks.slice(-4).map(label),
-    ["Диагностика", "Пользователи", "Черновики", "История"],
+    navLinks.slice(-2).map(label),
+    ["Диагностика", "Пользователи"],
     "standalone links after the groups",
   );
 
@@ -185,5 +187,54 @@ test("brand keeps its height when collapsed by swapping the label for a short le
   const short = brand.children.find((s) => s.className === "brand-short");
   assert.equal(full.textContent, "firenet", "full brand name in expanded state");
   assert.equal(short.textContent, "F", "single letter in collapsed state");
+});
+
+// --- theme: initialTheme()/applyTheme() shared by buildNav's own toggle
+// and, once wired up, by login.js/invite.js's initial paint ---
+
+test("initialTheme prefers the persisted value over the system preference", async () => {
+  const { initialTheme } = await loadCommon({ "firenet-theme": "dark" }, null, false);
+  assert.equal(initialTheme(), "dark");
+});
+
+test("initialTheme falls back to the system preference when nothing is persisted", async () => {
+  const { initialTheme } = await loadCommon({}, null, true);
+  assert.equal(initialTheme(), "dark");
+  const { initialTheme: initialThemeLight } = await loadCommon({}, null, false);
+  assert.equal(initialThemeLight(), "light");
+});
+
+test("applyTheme sets the document theme and persists it", async () => {
+  const store = {};
+  const { applyTheme, doc } = await loadCommon(store, null);
+  applyTheme("dark");
+  assert.equal(doc.documentElement.dataset.theme, "dark");
+  assert.equal(store["firenet-theme"], "dark");
+});
+
+test("buildNav applies the initial theme to the document without persisting it", async () => {
+  const store = {};
+  const { buildNav, doc } = await loadCommon(store, { username: "root", role: "admin" }, true);
+  await buildNav("topology");
+  assert.equal(doc.documentElement.dataset.theme, "dark", "system preference applied");
+  assert.ok(!("firenet-theme" in store), "reading the system preference does not pin it");
+});
+
+test("the theme button toggles and persists the theme", async () => {
+  const store = {};
+  const { buildNav, doc } = await loadCommon(store, { username: "root", role: "admin" }, false);
+  await buildNav("topology");
+  assert.equal(doc.documentElement.dataset.theme, "light");
+
+  const userBox = doc.body.children[0].children.find((c) => String(c.className).split(" ").includes("user-box"));
+  const toggleBtn = userBox.children.find((c) => String(c.className).split(" ").includes("theme-toggle"));
+
+  fire(toggleBtn, "click");
+  assert.equal(doc.documentElement.dataset.theme, "dark", "toggles to dark");
+  assert.equal(store["firenet-theme"], "dark", "persists the toggle");
+
+  fire(toggleBtn, "click");
+  assert.equal(doc.documentElement.dataset.theme, "light", "toggles back to light");
+  assert.equal(store["firenet-theme"], "light");
 });
 })();

@@ -1,5 +1,7 @@
 "use strict";
 
+import { initialTheme } from "./common.js";
+
 export function tokenFromPath(pathname) {
   const m = pathname.match(/^\/invite\/([^/]+)$/);
   return m ? m[1] : "";
@@ -12,9 +14,7 @@ export function validatePasswords(password, confirmPassword) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  document.documentElement.dataset.theme =
-    localStorage.getItem("firenet-theme") ||
-    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = initialTheme();
 
   const token = tokenFromPath(window.location.pathname);
   const loadingEl = document.getElementById("invite-loading");

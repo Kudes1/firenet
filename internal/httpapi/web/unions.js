@@ -1,7 +1,13 @@
 "use strict";
 
 import { Api, showBanner, apiPath, assertEditable, containsFold, matchPrefixQuery } from "./common.js";
-import { makeColumnsResizable, initializeColumns } from "./columns.js";
+import * as Table from "./table.js";
+
+// an empty member list only fails a non-empty search: a freshly created
+// union without devices/networks must stay visible
+function matchesAny(list, q) {
+  return !q || (list || []).some((d) => containsFold(d, q));
+}
 
 // Unions page: table over topology.yaml unions; editing happens one union
 // at a time in a native <dialog> modal covering only name and description.
@@ -40,19 +46,14 @@ document.addEventListener("alpine:init", () => {
     },
 
     get filteredUnions() {
-      const f = this.filters;
-      // an empty member list only fails a non-empty search: a freshly
-      // created union without devices/networks must stay visible
-      const matchesAny = (list, q) => !q || (list || []).some((d) => containsFold(d, q));
       return this.unions
         .map((union, index) => ({ index, union }))
-        .filter(
-          ({ union }) =>
-            containsFold(union.name, f.name) &&
-            containsFold(union.description, f.description) &&
-            matchesAny(union.devices, f.devices) &&
-            (!f.networks || this.matchNetworks(union.networks, f.networks))
-        );
+        .filter(({ union }) => Table.matchAll(union, this.filters, {
+          name: (u, q) => containsFold(u.name, q),
+          description: (u, q) => containsFold(u.description, q),
+          devices: (u, q) => matchesAny(u.devices, q),
+          networks: (u, q) => this.matchNetworks(u.networks, q),
+        }));
     },
 
     // matchNetworks searches the union's network badges like the networks
@@ -73,10 +74,7 @@ document.addEventListener("alpine:init", () => {
     },
 
     initTable(tableEl) {
-      if (!tableEl || tableEl.dataset.columnsReady) return;
-      tableEl.dataset.columnsReady = "1";
-      initializeColumns(tableEl, UNIONS_COL_WIDTHS_KEY, UNIONS_COL_WIDTHS_VERSION);
-      makeColumnsResizable(tableEl, UNIONS_COL_WIDTHS_KEY, UNIONS_COL_WIDTHS_VERSION);
+      Table.initTable(tableEl, UNIONS_COL_WIDTHS_KEY, UNIONS_COL_WIDTHS_VERSION);
     },
 
     openAdd() {

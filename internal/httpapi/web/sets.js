@@ -1,7 +1,8 @@
 "use strict";
 
 import { Api, showBanner, apiPath, assertEditable, containsFold, matchPrefixQuery, matchSubnetMembers } from "./common.js";
-import { makeColumnsResizable, initializeColumns } from "./columns.js";
+import * as Table from "./table.js";
+import * as Combo from "./combo.js";
 
 // Sets page: read-only table over topology.yaml sets; editing happens one
 // set at a time in a native <dialog> modal. A set mixes subnet references
@@ -70,16 +71,14 @@ document.addEventListener("alpine:init", () => {
     },
 
     get filteredSets() {
-      const f = this.filters;
       return this.sets
         .map((set, index) => ({ index, set }))
-        .filter(
-          ({ set }) =>
-            containsFold(set.name, f.name) &&
-            containsFold(set.description, f.description) &&
-            this.matchMembers(set.subnets, f.subnets) &&
-            this.matchAddresses(set, f.addresses)
-        );
+        .filter(({ set }) => Table.matchAll(set, this.filters, {
+          name: (s, q) => containsFold(s.name, q),
+          description: (s, q) => containsFold(s.description, q),
+          subnets: (s, q) => this.matchMembers(s.subnets, q),
+          addresses: (s, q) => this.matchAddresses(s, q),
+        }));
     },
 
     // matchMembers searches the set's subnet badges like on the networks
@@ -97,10 +96,7 @@ document.addEventListener("alpine:init", () => {
     },
 
     initTable(tableEl) {
-      if (!tableEl || tableEl.dataset.columnsReady) return;
-      tableEl.dataset.columnsReady = "1";
-      initializeColumns(tableEl, SETS_COL_WIDTHS_KEY, SETS_COL_WIDTHS_VERSION);
-      makeColumnsResizable(tableEl, SETS_COL_WIDTHS_KEY, SETS_COL_WIDTHS_VERSION);
+      Table.initTable(tableEl, SETS_COL_WIDTHS_KEY, SETS_COL_WIDTHS_VERSION);
     },
 
     cidrOf(subnetName) {
@@ -157,13 +153,11 @@ document.addEventListener("alpine:init", () => {
     },
 
     moveCursor(delta) {
-      const max = this.availableSubnets.length - 1;
-      if (max < 0) return;
-      this.memberCursor = Math.min(Math.max(this.memberCursor + delta, 0), max);
+      this.memberCursor = Combo.clampCursor(this.memberCursor, delta, this.availableSubnets.length);
     },
 
     pickCursor() {
-      const s = this.availableSubnets[this.memberCursor];
+      const s = Combo.pickAt(this.availableSubnets, this.memberCursor);
       if (s) this.addMember(s.name);
     },
 

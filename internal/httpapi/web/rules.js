@@ -1,7 +1,8 @@
 "use strict";
 
 import { Api, showBanner, apiPath, assertEditable, containsFold, parseIPv4, parsePrefix, parseQueryPrefix, formatIPv4, prefixContains, prefixOverlap } from "./common.js";
-import { makeColumnsResizable, initializeColumns } from "./columns.js";
+import * as Table from "./table.js";
+import * as Combo from "./combo.js";
 
 // Rules page: client-side table over rules.yaml, mirroring the networks
 // page. One <dialog> modal serves both create (draft.index === -1) and edit;
@@ -92,10 +93,7 @@ function registerRulesPage() {
     },
 
     initTable(tableEl) {
-      if (!tableEl || tableEl.dataset.columnsReady) return;
-      tableEl.dataset.columnsReady = "1";
-      initializeColumns(tableEl, RULES_COL_WIDTHS_KEY, RULES_COL_WIDTHS_VERSION);
-      makeColumnsResizable(tableEl, RULES_COL_WIDTHS_KEY, RULES_COL_WIDTHS_VERSION);
+      Table.initTable(tableEl, RULES_COL_WIDTHS_KEY, RULES_COL_WIDTHS_VERSION);
     },
 
     get endpoints() {
@@ -166,20 +164,18 @@ function registerRulesPage() {
     get filteredRules() {
       const chain = this.activeChain;
       if (!chain) return [];
-      const f = this.filters;
       return chain.rules
         .map((rule, index) => ({ index, rule }))
-        .filter(
-          ({ rule }) =>
-            containsFold(rule.name, f.name) &&
-            containsFold(rule.comment, f.comment) &&
-            containsFold(rule.proto, f.proto) &&
-            containsFold((rule.srcPorts || []).join(","), f.srcPorts) &&
-            containsFold((rule.dstPorts || []).join(","), f.dstPorts) &&
-            containsFold(rule.action, f.action) &&
-            this.matchEndpoints(rule.src, f.src) &&
-            this.matchEndpoints(rule.dst, f.dst)
-        );
+        .filter(({ rule }) => Table.matchAll(rule, this.filters, {
+          name: (r, q) => containsFold(r.name, q),
+          comment: (r, q) => containsFold(r.comment, q),
+          proto: (r, q) => containsFold(r.proto, q),
+          srcPorts: (r, q) => containsFold((r.srcPorts || []).join(","), q),
+          dstPorts: (r, q) => containsFold((r.dstPorts || []).join(","), q),
+          action: (r, q) => containsFold(r.action, q),
+          src: (r, q) => this.matchEndpoints(r.src, q),
+          dst: (r, q) => this.matchEndpoints(r.dst, q),
+        }));
     },
 
     // --- unified create/edit modal ---
@@ -243,14 +239,12 @@ function registerRulesPage() {
     },
 
     moveCursor(field, delta) {
-      const max = this.availableEndpoints(field).length - 1;
-      if (max < 0) return;
       const key = field + "Cursor";
-      this[key] = Math.min(Math.max(this[key] + delta, 0), max);
+      this[key] = Combo.clampCursor(this[key], delta, this.availableEndpoints(field).length);
     },
 
     pickCursor(field) {
-      const e = this.availableEndpoints(field)[this[field + "Cursor"]];
+      const e = Combo.pickAt(this.availableEndpoints(field), this[field + "Cursor"]);
       if (e) this.addEndpoint(field, e);
     },
 

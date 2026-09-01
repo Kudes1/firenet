@@ -1,7 +1,7 @@
 "use strict";
 
 import { Api, showBanner, apiPath, assertEditable, containsFold } from "./common.js";
-import { makeColumnsResizable, initializeColumns } from "./columns.js";
+import * as Table from "./table.js";
 
 // Devices page: table over topology.yaml devices; creation and deletion
 // of the device itself still start on the topology canvas (a device needs
@@ -52,22 +52,17 @@ document.addEventListener("alpine:init", () => {
     },
 
     get filteredDevices() {
-      const f = this.filters;
       return this.devices
         .map((device, index) => ({ index, device }))
-        .filter(
-          ({ device }) =>
-            containsFold(device.name, f.name) &&
-            containsFold(device.union, f.union) &&
-            containsFold(device.description, f.description)
-        );
+        .filter(({ device }) => Table.matchAll(device, this.filters, {
+          name: (d, q) => containsFold(d.name, q),
+          union: (d, q) => containsFold(d.union, q),
+          description: (d, q) => containsFold(d.description, q),
+        }));
     },
 
     initTable(tableEl) {
-      if (!tableEl || tableEl.dataset.columnsReady) return;
-      tableEl.dataset.columnsReady = "1";
-      initializeColumns(tableEl, DEVICES_COL_WIDTHS_KEY, DEVICES_COL_WIDTHS_VERSION);
-      makeColumnsResizable(tableEl, DEVICES_COL_WIDTHS_KEY, DEVICES_COL_WIDTHS_VERSION);
+      Table.initTable(tableEl, DEVICES_COL_WIDTHS_KEY, DEVICES_COL_WIDTHS_VERSION);
     },
 
     openEdit(i) {

@@ -1,4 +1,5 @@
 ## Code style
+ - After write code use reuse-analysis
  - Write compact code.
  - Try to write in a style that allows the code to be reused.
  - Make sure the code is easy to review.

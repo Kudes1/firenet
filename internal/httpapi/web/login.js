@@ -1,5 +1,7 @@
 "use strict";
 
+import { initialTheme } from "./common.js";
+
 // loginRedirectTarget picks where to send the browser after a successful
 // login: the "next" query param if it's a same-origin absolute path,
 // otherwise the topology page. Guards against open redirects the same
@@ -15,9 +17,7 @@ export function activatedNoticeVisible(search) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  document.documentElement.dataset.theme =
-    localStorage.getItem("firenet-theme") ||
-    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = initialTheme();
 
   const form = document.getElementById("login-form");
   const errorEl = document.getElementById("login-error");

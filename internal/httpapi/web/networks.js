@@ -1,7 +1,8 @@
 "use strict";
 
 import { Api, showBanner, apiPath, assertEditable, containsFold, matchSubnetMembers } from "./common.js";
-import { makeColumnsResizable, initializeColumns } from "./columns.js";
+import * as Table from "./table.js";
+import * as Combo from "./combo.js";
 
 // Networks page: table over topology.yaml networks; creation and deletion
 // happen on the topology page, here one network at a time is edited in a
@@ -43,15 +44,13 @@ document.addEventListener("alpine:init", () => {
     },
 
     get filteredNetworks() {
-      const f = this.filters;
       return this.networks
         .map((net, index) => ({ index, net }))
-        .filter(
-          ({ net }) =>
-            containsFold(net.name, f.name) &&
-            containsFold(net.description, f.description) &&
-            this.matchMembers(net.subnets, f.subnets)
-        );
+        .filter(({ net }) => Table.matchAll(net, this.filters, {
+          name: (n, q) => containsFold(n.name, q),
+          description: (n, q) => containsFold(n.description, q),
+          subnets: (n, q) => this.matchMembers(n.subnets, q),
+        }));
     },
 
     // matchMembers searches the network's subnet badges like the rules
@@ -62,10 +61,7 @@ document.addEventListener("alpine:init", () => {
     },
 
     initTable(tableEl) {
-      if (!tableEl || tableEl.dataset.columnsReady) return;
-      tableEl.dataset.columnsReady = "1";
-      initializeColumns(tableEl, NETWORKS_COL_WIDTHS_KEY, NETWORKS_COL_WIDTHS_VERSION);
-      makeColumnsResizable(tableEl, NETWORKS_COL_WIDTHS_KEY, NETWORKS_COL_WIDTHS_VERSION);
+      Table.initTable(tableEl, NETWORKS_COL_WIDTHS_KEY, NETWORKS_COL_WIDTHS_VERSION);
     },
 
     ownerOf(subnetName, exceptIndex = -1) {
@@ -131,13 +127,11 @@ document.addEventListener("alpine:init", () => {
     },
 
     moveCursor(delta) {
-      const max = this.availableSubnets.length - 1;
-      if (max < 0) return;
-      this.memberCursor = Math.min(Math.max(this.memberCursor + delta, 0), max);
+      this.memberCursor = Combo.clampCursor(this.memberCursor, delta, this.availableSubnets.length);
     },
 
     pickCursor() {
-      const s = this.availableSubnets[this.memberCursor];
+      const s = Combo.pickAt(this.availableSubnets, this.memberCursor);
       if (s) this.addMember(s.name);
     },
 
