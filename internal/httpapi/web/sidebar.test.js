@@ -157,12 +157,16 @@ test("toggle collapses the sidebar and persists the state", async () => {
   const aside = doc.body.children[0];
   const toggle = byTag(doc.body.children[0], "button").find((b) => b.classList.contains("sidebar-toggle"));
 
+  assert.equal(toggle.textContent, "<", "open state shows <");
+
   fire(toggle, "click");
   assert.ok(aside.classList.contains("collapsed"), "sidebar collapses on click");
+  assert.equal(toggle.textContent, ">", "collapsed state shows >");
   assert.equal(store["firenet-sidebar"], "collapsed", "collapsed state is stored");
 
   fire(toggle, "click");
   assert.ok(!aside.classList.contains("collapsed"), "sidebar expands back");
+  assert.equal(toggle.textContent, "<", "expanded state shows < again");
   assert.notEqual(store["firenet-sidebar"], "collapsed", "expanded state is stored");
 });
 

@@ -497,38 +497,36 @@ export async function buildNav(active) {
   toggle.type = "button";
   toggle.title = "Свернуть/развернуть меню";
   toggle.setAttribute("aria-label", "Свернуть/развернуть меню");
-  toggle.innerHTML =
-    svgOpen + '<polyline points="15 18 9 12 15 6"/></svg>';
+  toggle.textContent = aside.classList.contains("collapsed") ? ">" : "<";
   toggle.addEventListener("click", () => {
-    const collapsed = !aside.classList.contains("collapsed");
-    aside.classList.toggle("collapsed", collapsed);
-    localStorage.setItem("firenet-sidebar", collapsed ? "collapsed" : "open");
+    const next = !aside.classList.contains("collapsed");
+    aside.classList.toggle("collapsed", next);
+    toggle.textContent = next ? ">" : "<";
+    localStorage.setItem("firenet-sidebar", next ? "collapsed" : "open");
   });
   aside.append(toggle);
-
-  const btn = document.createElement("button");
-  btn.id = "theme-toggle";
-  btn.className = "theme-toggle";
-  btn.type = "button";
-  btn.title = "Переключить тему";
-  btn.setAttribute("aria-label", "Переключить тему");
-  btn.innerHTML =
-    '<svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<circle cx="12" cy="12" r="4"></circle>' +
-    '<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>' +
-    '<svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
-  btn.addEventListener("click", () => {
-    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem("firenet-theme", next);
-  });
-  aside.append(btn);
 
   const userBox = document.createElement("div");
   userBox.className = "user-box";
   const userName = document.createElement("span");
   userName.className = "user-name";
+  const themeBtn = document.createElement("button");
+  themeBtn.id = "theme-toggle";
+  themeBtn.className = "theme-toggle";
+  themeBtn.type = "button";
+  themeBtn.title = "Переключить тему";
+  themeBtn.setAttribute("aria-label", "Переключить тему");
+  themeBtn.innerHTML =
+    '<svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<circle cx="12" cy="12" r="4"></circle>' +
+    '<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>' +
+    '<svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+  themeBtn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("firenet-theme", next);
+  });
   const logoutBtn = document.createElement("button");
   logoutBtn.type = "button";
   logoutBtn.className = "logout-btn";
@@ -537,7 +535,7 @@ export async function buildNav(active) {
     await fetch("/api/logout", { method: "POST" });
     window.location.href = "/login";
   });
-  userBox.append(userName, logoutBtn);
+  userBox.append(userName, themeBtn, logoutBtn);
   aside.append(userBox);
 
   if (me) userName.textContent = me.username + (me.role === "admin" ? " · admin" : "");
