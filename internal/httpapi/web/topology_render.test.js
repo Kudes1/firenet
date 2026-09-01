@@ -1589,6 +1589,37 @@ test("editing a just-created link is unavailable until its create-link operation
   assert.ok(!edit2.disabled, "edit becomes available once the create confirms");
 });
 
+test("link panel closes on Escape and on canvas mousedown", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  const panel = page.ids["link-panel"];
+  assert.ok(!panel.hidden, "panel opened");
+  fire(page.doc, "keydown", { key: "Escape" });
+  assert.ok(panel.hidden, "Escape hides the panel");
+  panel.hidden = false;
+  fire(page.canvas, "mousedown", { button: 0, clientX: 400, clientY: 300 });
+  assert.ok(panel.hidden, "canvas press hides the panel");
+  panel.hidden = false;
+  fire(page.canvas, "mousedown", { button: 2, clientX: 400, clientY: 300 });
+  assert.ok(!panel.hidden, "right-button pan does not hide the panel");
+});
+
+test("zooming the camera repositions the open link panel", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  const box = page.ids["link-panel"];
+  const anchor = { x: parseFloat(box.style.left), y: parseFloat(box.style.top) };
+  fire(page.canvas, "wheel", { clientX: 300, clientY: 200, deltaY: -120 });
+  page.pump();
+  const cam = JSON.parse(page.get("JSON.stringify(State.camera)"));
+  assert.equal(box.style.left, `${anchor.x * cam.z + cam.x}px`, "panel follows the link after zoom");
+  assert.equal(box.style.top, `${anchor.y * cam.z + cam.y}px`, "panel follows the link after zoom");
+});
+
 // --- net-edit: ПКМ по сети → «Редактировать» открывает плавающее окно сети ---
 
 // installNetEditAlpine подменяет globalThis.Alpine двойником: канал между

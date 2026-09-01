@@ -1533,15 +1533,15 @@ const Topology = (() => {
     netEditPanel = createFloatingPanel({
       panelId: "net-edit", headerId: "net-edit-header", closeId: "net-edit-close",
       viewportEl: canvas, getCamera: () => State.camera,
-      posKey: "firenet-net-edit-pos-v1",
-      fallbackW: 520, fallbackH: 560,
+      fallbackW: 520, // держим в паре с --net-edit-w в style.css
+      fallbackH: 560,
       closeOnEscape: true, closeOnCanvasClick: canvas,
     });
     deviceEditPanel = createFloatingPanel({
       panelId: "device-edit", headerId: "device-edit-header", closeId: "device-edit-close",
       viewportEl: canvas, getCamera: () => State.camera,
-      posKey: "firenet-device-edit-pos-v1",
-      fallbackW: 520, fallbackH: 380,
+      fallbackW: 520, // держим в паре с --net-edit-w в style.css
+      fallbackH: 380,
       closeOnEscape: true, closeOnCanvasClick: canvas,
     });
     setTool("select");

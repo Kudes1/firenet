@@ -456,6 +456,11 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   padding-top: var(--space-2);
 }
 .link-panel .member-add select { width: 100%; }
+/* link-panel has no popover that needs overflow: visible (unlike .net-edit's
+   .member-suggestions), and its filtered-link content can grow tall, so give
+   its body its own scrollbar instead of clipping against .canvas-wrap's
+   overflow: hidden — also what makes .modal-actions' position: sticky work. */
+.link-panel .floating-panel-body { overflow-y: auto; }
 
 /* right-click menu */
 .context-menu {
@@ -1006,11 +1011,21 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .diag-combo input { padding-right: 4.2rem; }
 
 /* — диагностика пути: плавающее окно параметров и отчёта — */
-/* .diag-panel — модификатор поверх .floating-panel для #diag-panel/
+/* .diag-panel-body — модификатор поверх .floating-panel-body для #diag-panel/
    #spread-panel: тело со своим вертикальным скроллом (в отличие от
    .net-edit, у этих панелей нет всплывающего поверх .member-suggestions,
    которому нужен был бы overflow: visible). */
 .diag-panel-body { overflow-y: auto; }
+/* .floating-panel-body label/.modal-field (выше) стилизуют net-edit/
+   device-edit под их форму (flex-column, отступы) — diagnose делил это
+   правило непреднамеренно; до объединения панелей его label были обычным
+   inline-элементом браузера. Возвращаем исходную раскладку. */
+.diag-panel-body label,
+.diag-panel-body .modal-field {
+  display: inline;
+  margin-bottom: 0;
+  font-size: inherit;
+}
 .diag-path { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-2); margin-bottom: var(--space-2); }
 .diag-path header { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-1); }
 .diag-chain { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }

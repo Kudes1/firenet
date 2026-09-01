@@ -205,7 +205,7 @@ const LinkPanel = (() => {
   }
 
   function hide() {
-    panel.close();
+    if (panel) panel.close();
   }
 
   // attach создаёт панель поверх канваса: getCamera — геттер камеры холста
