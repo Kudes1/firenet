@@ -1,14 +1,4 @@
-<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>firenet — черновики</title>
-<link rel="icon" href="/favicon.svg">
-<link rel="stylesheet" href="/style.css">
-</head>
-<body data-nav="drafts" data-no-draft-banner="true" x-data="appData()" @notify.window="showBanner($event.detail.message, $event.detail.kind)">
-<main class="page">
+{{define "content"}}<main class="page">
   <h1>Черновики</h1>
 
   <label id="all-toggle" hidden><input type="checkbox" id="all-checkbox"> Показать черновики всех пользователей</label>
@@ -31,9 +21,4 @@
     </table>
     <button type="button" id="confirm-btn" hidden>Подтвердить</button>
   </section>
-</main>
-<script type="module" src="/common.js"></script>
-<script type="module" src="/drafts.js"></script>
-<script src="/alpine.min.js" defer></script>
-</body>
-</html>
+</main>{{end}}

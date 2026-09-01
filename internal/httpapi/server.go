@@ -89,11 +89,11 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("GET /ui/unions", serveTemplatedPage(mustPageTemplate(pages, "unions"), templatedPages["unions"].data))
 	mux.HandleFunc("GET /ui/links", servePage("links.html"))
 	mux.HandleFunc("GET /ui/rules", servePage("rules.html"))
-	mux.HandleFunc("GET /ui/compile", servePage("compile.html"))
+	mux.HandleFunc("GET /ui/compile", serveTemplatedPage(mustPageTemplate(pages, "compile"), templatedPages["compile"].data))
 	mux.HandleFunc("GET /ui/diagnose", serveTemplatedPage(mustPageTemplate(pages, "diagnose"), templatedPages["diagnose"].data))
 	mux.HandleFunc("GET /ui/users", servePage("users.html"))
-	mux.HandleFunc("GET /ui/drafts", servePage("drafts.html"))
-	mux.HandleFunc("GET /ui/history", servePage("history.html"))
+	mux.HandleFunc("GET /ui/drafts", serveTemplatedPage(mustPageTemplate(pages, "drafts"), templatedPages["drafts"].data))
+	mux.HandleFunc("GET /ui/history", serveTemplatedPage(mustPageTemplate(pages, "history"), templatedPages["history"].data))
 
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {
@@ -162,6 +162,9 @@ var templatedPages = map[string]templatedPage{
 	"subnets":  {file: "templates/subnets.html", data: pageData{Title: "firenet — подсети", Nav: "subnets", Script: "subnets.js"}},
 	"unions":   {file: "templates/unions.html", data: pageData{Title: "firenet — объединения", Nav: "unions", Script: "unions.js"}},
 	"diagnose": {file: "templates/diagnose.html", data: pageData{Title: "firenet — диагностика", Nav: "diagnose", Script: "diagnose.js"}},
+	"compile":  {file: "templates/compile.html", data: pageData{Title: "firenet — компиляция", Nav: "compile", Script: "compile.js"}},
+	"history":  {file: "templates/history.html", data: pageData{Title: "firenet — история версий", Nav: "history", Script: "history.js"}},
+	"drafts":   {file: "templates/drafts.html", data: pageData{Title: "firenet — черновики", Nav: "drafts", Script: "drafts.js"}},
 }
 
 // parsePageTemplates parses layout.html once and Clone()s it per page before

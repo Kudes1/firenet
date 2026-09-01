@@ -1,0 +1,16 @@
+{{define "content"}}<main class="page">
+  <h1>История версий</h1>
+
+  <table id="history-table" class="data-table">
+    <thead><tr><th>Версия</th><th>Дата</th><th>Подтвердил</th><th>Заметка</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <section id="diff-panel" hidden>
+    <h2>Изменения <span id="diff-version-label"></span></h2>
+    <table class="data-table">
+      <thead><tr><th>Тип</th><th>Ключ</th><th>Изменение</th></tr></thead>
+      <tbody id="diff-body"></tbody>
+    </table>
+  </section>
+</main>{{end}}
