@@ -783,11 +783,17 @@ test("connect tool previews from a network and cancels on repeated click", async
   page.pump();
   const dashes = () => page.ctx.calls.filter((c) => c[0] === "setLineDash" && String(c[1][0]) === "6,4").length;
   assert.ok(dashes() > 0, "dashed preview painted from the network");
-  const before = dashes();
   clickNode(page, "net1"); // повторный клик отменяет pending
+  page.pump();
+  // isolate: only what is painted after the cancel counts — the canceling
+  // mousedown may legitimately repaint the still-alive preview first
+  // (synchronous rAF in tests), and the fixture has no filtered links,
+  // so [6,4] here can only come from a preview wire
+  page.ctx.calls.length = 0;
   fire(page.canvas, "mousemove", { clientX: 520, clientY: 310 });
   page.pump();
-  assert.equal(dashes(), before, "no new preview dash after cancel");
+  const after = page.ctx.calls.filter((c) => c[0] === "setLineDash" && String(c[1][0]) === "6,4").length;
+  assert.equal(after, 0, "no preview dash painted after cancel");
 });
 
 // контекстное меню: правый клик по канве в режиме select открывает меню
