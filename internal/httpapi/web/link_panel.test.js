@@ -194,6 +194,35 @@ function findBtn(node, text) {
     assert.match(texts(page.body).join("|"), /Импорт \(из r1\).*office/s, "b's import column mirrors a's export");
   });
 
+  test("sides render in canonical order regardless of which end is stored as a", async () => {
+    const page = boot();
+    const swapped = { a: { device: "r2" }, b: { device: "r1" }, filter: { aExports: ["office"], bExports: [] } };
+    const { applied } = showPanel(page, swapped);
+    await Promise.resolve();
+    assert.match(String(page.title.textContent), /^Связь r1 ↔ r2$/, "title lists devices canonically");
+    const t = texts(page.body);
+    const first = t.indexOf("r1 → r2");
+    const second = t.indexOf("r2 → r1");
+    const office = t.indexOf("office");
+    assert.ok(first >= 0 && second >= 0, "both column legends present");
+    assert.ok(first < second, "alphabetically-first device renders as the left column");
+    assert.ok(second < t.lastIndexOf("office"), "r2's export (office) renders in r2's export list");
+    fire(findBtn(page.body, "Применить"), "click");
+    assert.deepEqual(applied(), [{ aExports: ["office"], bExports: [] }], "apply still reports real sides");
+  });
+
+  test("column end classes follow the canonical order even when the first device is stored in b", async () => {
+    const page = boot();
+    const swapped = { a: { device: "r2" }, b: { device: "r1" }, filter: { aExports: ["office"], bExports: [] } };
+    showPanel(page, swapped);
+    await Promise.resolve();
+    const cols = findAll(page.body, (n) => n.attrs.class === "link-end-col-a" || n.attrs.class === "link-end-col-b");
+    assert.deepEqual(cols.map((c) => c.attrs.class), ["link-end-col-a", "link-end-col-b"],
+      "col-a renders before col-b");
+    assert.match(texts(cols[0]).join("|"), /r1 → r2/, "col-a (end A color) belongs to r1, alphabetically first");
+    assert.match(texts(cols[1]).join("|"), /r2 → r1/, "col-b (end B color) belongs to r2");
+  });
+
   test("apply hands the current filter to onApply and closes the panel", async () => {
     const page = boot();
     const { applied } = showPanel(page, filteredLink);

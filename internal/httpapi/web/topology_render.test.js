@@ -1483,6 +1483,19 @@ test("right-click on a link offers Редактировать and opens the link
   assert.equal(panel.style.left, "224px", "anchored near the click point");
 });
 
+// while the link panel is open, its two endpoint devices are outlined in
+// distinct end colors so the panel's columns map unambiguously onto the map
+test("opening the link panel outlines its endpoint devices in the end colors", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  const a = byId(page.get, "device:r1");
+  const b = byId(page.get, "device:r2");
+  assert.equal(a.style.stroke, "#0ea5e9", "r1 (canonical first end) outlined in end-a color");
+  assert.equal(b.style.stroke, "#f97316", "r2 (canonical second end) outlined in end-b color");
+});
+
 test("link panel uses the shared floating-panel header and close action", async () => {
   const page = await bootTopology(responses);
   await tick();
@@ -1491,6 +1504,41 @@ test("link panel uses the shared floating-panel header and close action", async 
   assert.match(String(page.ids["link-panel-title"].textContent), /r1.*↔.*r2/);
   fire(page.ids["link-panel-close"], "click", {});
   assert.ok(page.ids["link-panel"].hidden, "close button hides the panel");
+});
+
+// каждый путь закрытия панели обязан снять end-подсветку: контуры устройств
+// возвращаются к цвету типа (router => #d97706), а не остаются end-a/end-b
+test("closing the link panel with Escape restores the device kind strokes", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  fire(page.doc, "keydown", { key: "Escape" });
+  assert.ok(page.ids["link-panel"].hidden, "panel closed");
+  assert.equal(byId(page.get, "device:r1").style.stroke, "#d97706", "end-a outline cleared on Escape");
+  assert.equal(byId(page.get, "device:r2").style.stroke, "#d97706", "end-b outline cleared on Escape");
+});
+
+test("closing the link panel with the close button restores the device kind strokes", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  fire(page.ids["link-panel-close"], "click", {});
+  assert.ok(page.ids["link-panel"].hidden, "panel closed");
+  assert.equal(byId(page.get, "device:r1").style.stroke, "#d97706", "end-a outline cleared via close button");
+  assert.equal(byId(page.get, "device:r2").style.stroke, "#d97706", "end-b outline cleared via close button");
+});
+
+test("applying from the link panel clears the end outlines too", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  fire(findBtn(page.ids["link-panel-body"], (b) => String(b.textContent).trim() === "Применить"), "click", {});
+  assert.ok(page.ids["link-panel"].hidden, "panel closed");
+  assert.equal(byId(page.get, "device:r1").style.stroke, "#d97706", "end-a outline cleared on apply");
+  assert.equal(byId(page.get, "device:r2").style.stroke, "#d97706", "end-b outline cleared on apply");
 });
 
 test("applying a filter from the link panel persists it via set-link-filter, addressed by endpoint pair", async () => {
