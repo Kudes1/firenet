@@ -94,12 +94,13 @@ const LinkPanel = (() => {
     return el;
   }
 
-  function sideColumn(side) {
+  function sideColumn(side, endClass) {
     const key = side + "Exports";
     const peerKey = (side === "a" ? "b" : "a") + "Exports";
     const device = s.link[side].device;
     const peer = s.link[side === "a" ? "b" : "a"].device;
     const wrap = document.createElement("div");
+    wrap.setAttribute("class", endClass);
     const legend = document.createElement("h4");
     legend.setAttribute("class", "filter-dir-title");
     legend.textContent = `${device} → ${peer}`;
@@ -113,8 +114,16 @@ const LinkPanel = (() => {
     return wrap;
   }
 
-  function actions() {
-    const el = document.createElement("div");
+  // sides returns the link's endpoints as {first, second} in canonical
+  // (alphabetical) display order, so the panel reads the same regardless of
+  // which end the canvas happened to store as a/b. Each side keeps its real
+  // key — data and onApply stay untouched; only rendering order changes.
+  function sides() {
+    const [first, second] = s.link.a.device <= s.link.b.device ? ["a", "b"] : ["b", "a"];
+    return { first, second };
+  }
+
+  function actions() {    const el = document.createElement("div");
     el.setAttribute("class", "modal-actions");
     const cancel = document.createElement("button");
     cancel.setAttribute("type", "button");
@@ -140,7 +149,8 @@ const LinkPanel = (() => {
   function render() {
     const b = bodyEl();
     if (!b || !s) return;
-    titleEl().textContent = `Связь ${s.link.a.device} ↔ ${s.link.b.device}`;
+    const { first, second } = sides();
+    titleEl().textContent = `Связь ${s.link[first].device} ↔ ${s.link[second].device}`;
     b.innerHTML = "";
     const toggle = document.createElement("button");
     toggle.setAttribute("type", "button");
@@ -158,7 +168,7 @@ const LinkPanel = (() => {
     if (s.filter) {
       const grid = document.createElement("div");
       grid.setAttribute("class", "link-panel-grid");
-      grid.append(sideColumn("a"), sideColumn("b"));
+      grid.append(sideColumn(first, "link-end-col-a"), sideColumn(second, "link-end-col-b"));
       b.append(grid);
     } else {
       const hint = document.createElement("p");
@@ -191,7 +201,9 @@ const LinkPanel = (() => {
 
   // show открывает панель для связи link (deps.fetchExports(side) уже
   // замкнут на конкретную пару link.a/link.b — см. Topology.openLinkPanel)
-  // рядом с экранной точкой at (правый клик), со сдвигом OFFSET.
+  // рядом с экранной точкой at (правый клик), со сдвигом OFFSET. onChange
+  // сообщает хосту (topology.js) имена концов в каноническом порядке при
+  // открытии и null при закрытии — тот подсвечивает устройства на канве.
   function show(link, deps, at) {
     s = {
       link, deps,
@@ -200,6 +212,8 @@ const LinkPanel = (() => {
       candidates: { a: [], b: [] },
     };
     panel.open({ x: at.x + OFFSET.x, y: at.y + OFFSET.y });
+    const { first, second } = sides();
+    if (deps.onChange) deps.onChange({ first: s.link[first].device, second: s.link[second].device });
     render();
     if (s.filter) loadCandidates();
   }
@@ -211,9 +225,10 @@ const LinkPanel = (() => {
   // attach создаёт панель поверх канваса: getCamera — геттер камеры холста
   // (topology.js's State.camera), нужен для мировой привязки — та же логика,
   // что и у net-edit/device-edit (см. Topology.applyCamera). onClose чистит
-  // s, чтобы дальнейший render() (например от уже летящего loadCandidates)
-  // не писал в закрытую панель.
-  function attach(canvasEl, getCamera) {
+  // s и снимает подсветку концов на канве (onChange(null)), чтобы
+  // дальнейший render() (например от уже летящего loadCandidates) не писал
+  // в закрытую панель.
+  function attach(canvasEl, getCamera, onChange) {
     panel = createFloatingPanel({
       panelId: "link-panel",
       headerId: "link-panel-header",
@@ -224,7 +239,7 @@ const LinkPanel = (() => {
       fallbackH: 320,
       closeOnEscape: true,
       closeOnCanvasClick: () => canvasEl,
-      onClose: () => { s = null; },
+      onClose: () => { s = null; if (onChange) onChange(null); },
     });
   }
 

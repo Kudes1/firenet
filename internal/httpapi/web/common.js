@@ -425,6 +425,7 @@ const NAV_GROUPS = [
 ];
 
 const NAV_STANDALONE = [
+  { id: "search", href: "/ui/search", label: "Поиск" },
   { id: "diagnose", href: "/ui/diagnose", label: "Диагностика" },
   { id: "users", href: "/ui/users", label: "Пользователи" },
 ];
@@ -444,6 +445,7 @@ const NAV_ICONS = {
   users: svgOpen + '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 8a3 3 0 1 1 0 6"/><path d="M21 20c0-2.5-1.6-4.6-4-5.5"/></svg>',
   drafts: svgOpen + '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
   history: svgOpen + '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 3"/></svg>',
+  search: svgOpen + '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/></svg>',
 };
 
 // buildNav renders the shared sidebar shell (brand, collapsible nav with

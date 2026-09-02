@@ -1313,6 +1313,67 @@ func TestDiagnoseHandler(t *testing.T) {
 	})
 }
 
+// spreadPath drafts variant of the network-propagation endpoint.
+func TestSpreadHandler(t *testing.T) {
+	h, _, draftID := newTestServer(t)
+	spreadPath := draftPath(draftID, "diagnose/spread")
+
+	t.Run("spread reports per-candidate reports and a merged mark", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, spreadPath, map[string]any{"src": "office"})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var out diagnose.SpreadResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		// fixture has office+dmz: one source, one candidate (dmz)
+		if len(out.Reports) != 1 || out.Reports[0].Candidate != "dmz" {
+			t.Fatalf("unexpected reports: %+v", out.Reports)
+		}
+		if out.Mark == nil || out.Mark.Highlight == nil {
+			t.Fatalf("expected a merged mark, got %+v", out.Mark)
+		}
+		if !slices.Contains(out.Mark.Highlight, "n-office") {
+			t.Fatalf("the inspected network must be highlighted, got %v", out.Mark.Highlight)
+		}
+		if !slices.Contains(out.Mark.Ok, "n-office") {
+			t.Fatalf("the inspected network must be green, got %v", out.Mark.Ok)
+		}
+	})
+
+	t.Run("spread by network name resolves every member subnet", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, spreadPath, map[string]any{"src": "n-office"})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var out diagnose.SpreadResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(out.Sources) != 1 || out.Sources[0].SubnetName != "office" {
+			t.Fatalf("n-office must resolve to the office subnet, got %+v", out.Sources)
+		}
+	})
+
+	t.Run("unknown name is unprocessable", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, spreadPath, map[string]any{"src": "no-such-thing"})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		if msg := errorBody(t, rec); !strings.Contains(msg, "no-such-thing") {
+			t.Fatalf("error should mention the bad input, got %q", msg)
+		}
+	})
+
+	t.Run("missing input is unprocessable", func(t *testing.T) {
+		rec := doJSON(t, h, http.MethodPost, spreadPath, map[string]any{})
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status %d", rec.Code)
+		}
+	})
+}
+
 // writeDraftRules bypasses the PUT handler's own validation, going
 // straight through pgstore — used to simulate rules content that
 // somehow already made it into storage without passing normal checks.

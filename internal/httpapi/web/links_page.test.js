@@ -146,17 +146,33 @@ test("openEdit copies current exports into the draft and fetches candidates", as
   assert.deepEqual(plain(page.draft), { index: 0, aExports: [], bExports: [] });
 });
 
+test("init normalizes link sides canonically so display never depends on creation order", async () => {
+  const { page } = await bootLoadedPage();
+  // fixture stores m-d as a=m,b=d; canonical order is d first
+  assert.equal(page.links[0].a.device, "d");
+  assert.equal(page.links[0].b.device, "m");
+  assert.equal(page.pairLabel(0), "d ↔ m");
+});
+
+test("saving a normalized link persists the canonical endpoint order", async () => {
+  const { page, calls } = await bootLoadedPage();
+  page.openEdit(0);
+  await page.saveDraft();
+  const put = calls.find((c) => c.path === "/api/drafts/d1/topology" && c.method === "PUT");
+  assert.deepEqual(put.body.links[0], { a: { device: "d" }, b: { device: "m" }, filter: { aExports: [], bExports: [] } });
+});
+
 test("saveDraft writes edited exports preserving the rest verbatim", async () => {
   const { page, calls } = await bootLoadedPage();
   page.openEdit(0);
   page.draft.aExports = ["NA"];
-  page.draft.bExports = [];
+  page.draft.bExports = ["NC"];
 
   await page.saveDraft();
 
   const put = calls.find((c) => c.path === "/api/drafts/d1/topology" && c.method === "PUT");
-  assert.deepEqual(put.body.links[0], { a: { device: "m" }, b: { device: "d" }, filter: { aExports: ["NA"], bExports: [] } });
-  // untouched filtered link preserved as-is
+  assert.deepEqual(put.body.links[0], { a: { device: "d" }, b: { device: "m" }, filter: { aExports: ["NA"], bExports: ["NC"] } });
+  // untouched filtered link preserved as-is (also in canonical side order)
   assert.deepEqual(put.body.links[1], { a: { device: "m" }, b: { device: "o" }, filter: { aExports: ["NA"], bExports: ["NC"] } });
   assert.deepEqual(put.body.networks, topoNetworks());
   function topoNetworks() {

@@ -149,5 +149,6 @@ func (s *Store) Confirm(ctx context.Context, draftID string, admin auth.User) (i
 	if err := tx.Commit(ctx); err != nil {
 		return 0, nil, fmt.Errorf("commit: %w", err)
 	}
+	s.invalidateSnapshots()
 	return versionID, nil, nil
 }

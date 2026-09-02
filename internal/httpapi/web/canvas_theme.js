@@ -30,6 +30,10 @@ const CanvasTheme = (() => {
       flowOk: "#10b981",
       flowDeny: "#ef4444",
       flowHalf: "#f59e0b",
+      // link-edit end markers: the open link panel's two endpoint devices
+      // are outlined in these so columns map onto the canvas unambiguously
+      endA: "#0ea5e9",
+      endB: "#f97316",
       dimAlpha: 0.35,
       textHideZoom: 0.5,
       fonts: { label: "12px system-ui, sans-serif", sub: "11px system-ui, sans-serif" },

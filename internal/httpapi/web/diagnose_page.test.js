@@ -206,6 +206,15 @@ const sampleReport = {
       verdict: "allow",
     },
   ],
+  mapMark: {
+    hl: ["n-office", "n-dmz", "r1", "r2"],
+    ok: ["n-office", "n-dmz", "r1", "r2"],
+    okE: ["n-office\x00r1", "r1\x00r2", "n-dmz\x00r2"],
+    denyE: [],
+    half: [],
+    halfE: [],
+    deny: {},
+  },
 };
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
@@ -450,19 +459,31 @@ const switchedReport = {
     routers: [],
     verdict: "allow",
   }],
+  mapMark: {
+    hl: ["MAIN", "sw1", "r1", "r2", "sw2", "OFFICE"],
+    ok: ["MAIN", "sw1", "r1", "r2", "sw2", "OFFICE"],
+    okE: ["MAIN\x00sw1", "r1\x00sw1", "r1\x00r2", "r2\x00sw2", "OFFICE\x00sw2"],
+    denyE: [],
+    half: [],
+    halfE: [],
+    deny: {},
+  },
 };
 
+// The full-route highlight now comes precomputed in report.mapMark; the
+// client only dims what is not highlighted and paints flow marks.
 test("highlight covers the full path: networks, switches, links and attaches", async () => {
   const { get, frames } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
   await frames(10);
-  const hl = get("Diagnose.expandHighlight(Diagnose.state.result, Diagnose.state.topology)");
+  const flow = JSON.parse(get("JSON.stringify({hl: [...Diagnose.state.flow.hl], ok: [...Diagnose.state.flow.ok]})"));
   for (const name of ["MAIN", "OFFICE", "sw1", "sw2", "r1", "r2"]) {
-    assert.ok(hl.has(name), `${name} belongs to the highlighted path`);
+    assert.ok(flow.hl.includes(name), `${name} belongs to the highlighted path`);
+    assert.ok(flow.ok.includes(name), `${name} is on the allowed route`);
   }
-  assert.ok(!hl.has("lone"), "devices off the path stay unhighlighted");
+  assert.ok(!flow.hl.includes("lone"), "devices off the path stay unhighlighted");
   // канва: приглушены только одиночный свитч, его подписи и его связь
   const dimmed = JSON.parse(get(
     "JSON.stringify(Diagnose.state.list.filter((i) => (i.style.alpha ?? 1) < 1).map((i) => i.id).sort())",
@@ -490,6 +511,15 @@ const collidingReport = {
     routers: [],
     verdict: "allow",
   }],
+  mapMark: {
+    hl: ["r1", "sw1"],
+    ok: ["r1", "sw1"],
+    okE: ["r1\x00sw1"],
+    denyE: [],
+    half: [],
+    halfE: [],
+    deny: {},
+  },
 };
 
 test("a network and a router sharing one name still light the switch between them", async () => {
@@ -498,12 +528,11 @@ test("a network and a router sharing one name still light the switch between the
   await frames(1);
   get(`Diagnose.renderReport(${JSON.stringify(collidingReport)})`);
   await frames(10);
-  const hl = get("Diagnose.expandHighlight(Diagnose.state.result, Diagnose.state.topology)");
+  const flow = JSON.parse(get("JSON.stringify({hl: [...Diagnose.state.flow.hl], ok: [...Diagnose.state.flow.ok]})"));
   for (const name of ["r1", "sw1"]) {
-    assert.ok(hl.has(name), `${name} belongs to the highlighted path`);
+    assert.ok(flow.hl.includes(name), `${name} belongs to the highlighted path`);
+    assert.ok(flow.ok.includes(name), `${name} is on an allowed route`);
   }
-  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
-  assert.ok(f.ok.has("sw1"), "switch on an allowed route is green");
 });
 
 test("form submit posts to /api/diagnose and renders the report", async () => {
@@ -570,7 +599,7 @@ test("verdict rows look expandable: button-like summary with chevron", async () 
   }
 });
 
-// — разметка движения трафика (expandFlow + mark на карте) —
+// — разметка движения трафика (серверный mapMark + mark на карте) —
 
 const denyReport = {
   srcSubnet: "main",
@@ -587,40 +616,50 @@ const denyReport = {
     ],
     verdict: "deny",
   }],
+  mapMark: {
+    hl: ["MAIN", "sw1", "r1", "r2", "sw2", "OFFICE"],
+    ok: ["MAIN", "sw1", "r1"],
+    okE: ["MAIN\x00sw1", "r1\x00sw1", "r1\x00r2"],
+    denyE: ["r2\x00sw2", "OFFICE\x00sw2"],
+    half: [],
+    halfE: [],
+    deny: { r2: { rule: "block-office", reason: "правило запретило" } },
+  },
 };
 
-test("expandFlow colors the route green up to the denying router", async () => {
+test("toFlow colors the route green up to the denying router", async () => {
   const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
-  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
-  for (const name of ["MAIN", "sw1", "r1"]) assert.ok(f.ok.has(name), `${name} is before the deny point`);
-  assert.ok(!f.ok.has("r2"), "denying router itself is not green");
-  assert.ok(!f.ok.has("OFFICE"), "destination beyond deny stays unlit");
-  assert.deepEqual([...f.deny.keys()], ["r2"]);
-  assert.equal(f.deny.get("r2").rule, "block-office");
+  const f = JSON.parse(get("JSON.stringify({ok: [...Diagnose.state.flow.ok], deny: [...Diagnose.state.flow.deny.keys()]})"));
+  for (const name of ["MAIN", "sw1", "r1"]) assert.ok(f.ok.includes(name), `${name} is before the deny point`);
+  assert.ok(!f.ok.includes("r2"), "denying router itself is not green");
+  assert.ok(!f.ok.includes("OFFICE"), "destination beyond deny stays unlit");
+  assert.deepEqual(f.deny, ["r2"]);
+  assert.equal(get("Diagnose.state.flow.deny.get('r2').rule"), "block-office");
 });
 
 test("allowed path lights the whole route including destination", async () => {
   const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
-  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
+  const ok = JSON.parse(get("JSON.stringify([...Diagnose.state.flow.ok])"));
   for (const name of ["MAIN", "sw1", "r1", "r2", "sw2", "OFFICE"]) {
-    assert.ok(f.ok.has(name), `${name} is on an allowed route`);
+    assert.ok(ok.includes(name), `${name} is on an allowed route`);
   }
-  assert.equal(f.deny.size, 0);
+  assert.equal(JSON.parse(get("JSON.stringify(Diagnose.state.flow.deny.size)")), 0);
 });
 
 test("a denying router never turns green, even via another allowed path", async () => {
   const rep = JSON.parse(JSON.stringify(denyReport));
   rep.paths.push(JSON.parse(JSON.stringify(switchedReport.paths[0])));
+  rep.mapMark.ok = rep.mapMark.ok.filter((n) => n !== "r2" && n !== "OFFICE");
   const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
-  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
-  assert.ok(f.deny.has("r2"), "deny verdict wins on the shared route");
-  assert.ok(!f.ok.has("r2") && !f.ok.has("OFFICE"), "denied elements are not green");
+  const f = JSON.parse(get("JSON.stringify({ok: [...Diagnose.state.flow.ok], deny: [...Diagnose.state.flow.deny.keys()]})"));
+  assert.ok(f.deny.includes("r2"), "deny verdict wins on the shared route");
+  assert.ok(!f.ok.includes("r2") && !f.ok.includes("OFFICE"), "denied elements are not green");
 });
 
 // The drop happens ON the denying router, so the hop leading into it has
@@ -629,7 +668,7 @@ test("hop into the denying router stays green, segments beyond it turn red", asy
   const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
   get(`Diagnose.renderReport(${JSON.stringify(denyReport)})`);
-  const mark = get("Diagnose.flowMark(Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology))");
+  const mark = get("Diagnose.flowMark(Diagnose.state.flow)");
   assert.equal(mark({ a: { device: "sw1" }, b: { device: "r1" } }), "diag-flow-ok", "wire before the deny point");
   assert.equal(mark({ a: { device: "r1" }, b: { device: "r2" } }), "diag-flow-ok", "wire into the deny router is traversed");
   assert.equal(mark({ type: "attach", net: { name: "MAIN" }, device: "sw1" }), "diag-flow-ok", "attach before the deny point");
@@ -637,47 +676,71 @@ test("hop into the denying router stays green, segments beyond it turn red", asy
   assert.equal(mark({ type: "attach", net: { name: "OFFICE" }, device: "sw2" }), "diag-flow-deny", "attach beyond the deny point");
 });
 
-// — половинная доступность (returnPathAllowed: false) —
+// — половинная доступность (returnPathAllowed: false → сервер кладёт всё в half) —
 
-test("expandFlow marks the allowed route half-open when there is no return path", async () => {
+test("server marks the allowed route half-open when there is no return path", async () => {
   const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
-  const rep = { ...switchedReport, returnPathAllowed: false };
+  const rep = {
+    ...switchedReport,
+    returnPathAllowed: false,
+    mapMark: {
+      ...switchedReport.mapMark,
+      ok: [], okE: [],
+      half: switchedReport.mapMark.ok, halfE: switchedReport.mapMark.okE,
+    },
+  };
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
-  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
+  const f = JSON.parse(get("JSON.stringify({half: [...Diagnose.state.flow.half], ok: [...Diagnose.state.flow.ok], halfE: [...Diagnose.state.flow.halfE]})"));
   for (const name of ["MAIN", "sw1", "r1", "r2", "sw2", "OFFICE"]) {
-    assert.ok(f.half.has(name), `${name} is marked half-open without a return path`);
+    assert.ok(f.half.includes(name), `${name} is marked half-open without a return path`);
   }
-  assert.equal(f.ok.size, 0, "a one-way report leaves ok empty — mergeFlows relies on this to know when to promote");
-  assert.equal(f.okE.size, 0);
+  assert.deepEqual(f.ok, [], "a one-way report leaves ok empty");
+  assert.equal(f.halfE.length, switchedReport.mapMark.okE.length);
 });
 
-test("expandFlow leaves half empty when a return path exists", async () => {
+test("server leaves half empty when a return path exists", async () => {
   const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
-  const rep = { ...switchedReport, returnPathAllowed: true };
-  get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
-  const f = get("Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology)");
-  assert.equal(f.half.size, 0);
-  assert.equal(f.halfE.size, 0);
+  get(`Diagnose.renderReport(${JSON.stringify(switchedReport)})`);
+  const f = JSON.parse(get("JSON.stringify({half: [...Diagnose.state.flow.half], halfE: [...Diagnose.state.flow.halfE]})"));
+  assert.deepEqual(f.half, []);
+  assert.deepEqual(f.halfE, []);
 });
 
 test("flowMark paints allowed segments yellow when there is no return path", async () => {
   const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
-  const rep = { ...switchedReport, returnPathAllowed: false };
+  const rep = {
+    ...switchedReport,
+    returnPathAllowed: false,
+    mapMark: {
+      ...switchedReport.mapMark,
+      ok: [], okE: [],
+      half: switchedReport.mapMark.ok, halfE: switchedReport.mapMark.okE,
+    },
+  };
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
-  const mark = get("Diagnose.flowMark(Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology))");
+  const mark = get("Diagnose.flowMark(Diagnose.state.flow)");
   assert.equal(mark({ a: { device: "r1" }, b: { device: "r2" } }), "diag-flow-half", "no return path colors the wire yellow, not green");
   assert.equal(mark({ type: "attach", net: { name: "MAIN" }, device: "sw1" }), "diag-flow-half");
 });
-
 test("flowMark keeps deny red even without a return path", async () => {
   const { get } = await bootDiagnose({ ...responses, "/api/drafts/d1/topology": switchedTopo });
   await tick();
-  const rep = { ...denyReport, returnPathAllowed: false };
+  // Сервер при returnPathAllowed:false переносит ok в half, но рёбра,
+  // попавшие в denyE, остаются красными: allow-хоп r1–r2 сдвинут в half.
+  const rep = {
+    ...denyReport,
+    returnPathAllowed: false,
+    mapMark: {
+      ...denyReport.mapMark,
+      ok: [], okE: [],
+      half: denyReport.mapMark.ok, halfE: denyReport.mapMark.okE.filter((k) => k !== "r2\x00sw2" && k !== "OFFICE\x00sw2"),
+    },
+  };
   get(`Diagnose.renderReport(${JSON.stringify(rep)})`);
-  const mark = get("Diagnose.flowMark(Diagnose.expandFlow(Diagnose.state.result, Diagnose.state.topology))");
+  const mark = get("Diagnose.flowMark(Diagnose.state.flow)");
   assert.equal(mark({ a: { device: "r2" }, b: { device: "sw2" } }), "diag-flow-deny", "deny still wins over half");
   assert.equal(mark({ a: { device: "r1" }, b: { device: "r2" } }), "diag-flow-half", "allowed hop turns yellow without a return path");
 });
@@ -908,61 +971,10 @@ test("saved form values are restored on boot", async () => {
   assert.equal(ids["diag-dstports"].value, "53");
 });
 
-// — распространение сети (инструмент «Распространение сети») —
+// — распространение сети (инструмент «Распространение сети»); резолв
+// источников и мерж разметки переехали на сервер (/api/diagnose/spread);
+// их семантика покрыта Go-тестами internal/diagnose/spread_test.go —
 
-test("resolveSpreadSources resolves a subnet name to its base IP", async () => {
-  const { get } = await bootDiagnose(responses);
-  await tick();
-  const out = JSON.parse(get(
-    'JSON.stringify(Diagnose.resolveSpreadSources("main", [{name:"main",cidr:"10.0.0.0/24"},{name:"office-net",cidr:"10.0.1.0/24"}], []))',
-  ));
-  assert.deepEqual(out, [{ ip: "10.0.0.0", subnetName: "main" }]);
-});
-
-test("resolveSpreadSources resolves a network name to every attached subnet", async () => {
-  const { get } = await bootDiagnose(responses);
-  await tick();
-  const out = JSON.parse(get(
-    'JSON.stringify(Diagnose.resolveSpreadSources("HQ", ' +
-    '[{name:"main",cidr:"10.0.0.0/24"},{name:"office-net",cidr:"10.0.1.0/24"}], ' +
-    '[{name:"HQ",subnets:["main","office-net"]}]))',
-  ));
-  assert.deepEqual(out, [{ ip: "10.0.0.0", subnetName: "main" }, { ip: "10.0.1.0", subnetName: "office-net" }]);
-});
-
-test("resolveSpreadSources treats unmatched input as a literal IP", async () => {
-  const { get } = await bootDiagnose(responses);
-  await tick();
-  const out = JSON.parse(get('JSON.stringify(Diagnose.resolveSpreadSources("10.0.0.5", [{name:"main",cidr:"10.0.0.0/24"}], []))'));
-  assert.deepEqual(out, [{ ip: "10.0.0.5", subnetName: null }]);
-});
-
-test("mergeFlows unions ok/deny/edge/half sets from several reports and promotes half to ok when another pair round-trips through the same element", async () => {
-  const { get } = await bootDiagnose(responses);
-  await tick();
-  const out = JSON.parse(get(`JSON.stringify((() => {
-    // f1: one-way-only pair — "a" and "r1" (and the edge between them) are
-    // only reachable, no return route (expandFlow's real invariant: a
-    // one-way report leaves ok/okE empty and puts everything in half/halfE).
-    const f1 = { hl: new Set(["a", "r1"]), ok: new Set(), deny: new Map(), okE: new Set(), denyE: new Set(), half: new Set(["a", "r1"]), halfE: new Set(["a\\0r1"]) };
-    // f2: a different pair that round-trips through "a" and the same edge
-    // fully (e.g. a second gateway with a mirrored route back) — this must
-    // win over f1's half marking for the elements they share.
-    const f2 = { hl: new Set(["a", "r2"]), ok: new Set(["a"]), deny: new Map([["r2", { rule: "x", reason: "y" }]]), okE: new Set(["a\\0r1"]), denyE: new Set(["a\\0r2"]), half: new Set(), halfE: new Set() };
-    const m = Diagnose.mergeFlows([f1, f2]);
-    return {
-      hl: [...m.hl].sort(), ok: [...m.ok].sort(), denyKeys: [...m.deny.keys()], okE: [...m.okE], denyE: [...m.denyE],
-      half: [...m.half], halfE: [...m.halfE],
-    };
-  })())`));
-  assert.deepEqual(out.hl, ["a", "r1", "r2"]);
-  assert.deepEqual(out.ok, ["a"], "\"a\" is promoted to full green: f2 shows a return path through it");
-  assert.deepEqual(out.denyKeys, ["r2"]);
-  assert.deepEqual(out.okE, ["a\0r1"], "the shared edge is promoted too");
-  assert.deepEqual(out.denyE, ["a\0r2"]);
-  assert.deepEqual(out.half, ["r1"], "\"r1\" stays half: no other pair shows a return path through it");
-  assert.deepEqual(out.halfE, [], "the edge no longer has any un-promoted half mark left");
-});
 
 const spreadSubnets = {
   subnets: [
@@ -985,40 +997,29 @@ const spreadTopo = {
     { name: "BRANCH", subnets: ["branch-net"], attach: [{ device: "r1" }] },
   ],
 };
+// Серверный ответ /api/diagnose/spread: разметка уже смёржена — office-net
+// ходит до main полностью (ok), dmz упирается в deny на r2, branch-net без
+// обратного пути (half); self-сеть MAIN подсвечена и зелёная.
 const spreadResponses = {
   ...responses,
   "/api/drafts/d1/topology": spreadTopo,
   "/api/drafts/d1/subnets": spreadSubnets,
-  "/api/drafts/d1/diagnose": (body) => {
-    if (body.src === "10.0.1.0") {
-      return {
-        srcSubnet: "office-net", dstSubnet: "main", note: "", paths: [{
-          nodes: [{ kind: 1, name: "office-net" }, { kind: 0, name: "r1" }, { kind: 1, name: "main" }],
-          routers: [{ router: "r1", action: "allow", reason: "ok" }], verdict: "allow",
-        }],
-      };
-    }
-    if (body.src === "10.0.2.0") {
-      return {
-        srcSubnet: "dmz", dstSubnet: "main", note: "", paths: [{
-          nodes: [{ kind: 1, name: "dmz" }, { kind: 0, name: "r2" }, { kind: 0, name: "r1" }, { kind: 1, name: "main" }],
-          routers: [
-            { router: "r2", action: "deny", matchedRule: "block-dmz", reason: "запрещено" },
-            { router: "r1", action: "allow", reason: "ok" },
-          ],
-          verdict: "deny",
-        }],
-      };
-    }
-    if (body.src === "10.0.3.0") {
-      return {
-        srcSubnet: "branch-net", dstSubnet: "main", note: "", returnPathAllowed: false, paths: [{
-          nodes: [{ kind: 1, name: "branch-net" }, { kind: 0, name: "r1" }, { kind: 1, name: "main" }],
-          routers: [{ router: "r1", action: "allow", reason: "ok" }], verdict: "allow",
-        }],
-      };
-    }
-    throw new Error("unexpected src " + body.src);
+  "/api/drafts/d1/diagnose/spread": {
+    sources: [{ ip: "10.0.0.0", subnetName: "main" }],
+    reports: [
+      { candidate: "branch-net", report: { paths: [{ nodes: [], routers: [], verdict: "allow" }] } },
+      { candidate: "dmz", report: { paths: [{ nodes: [], routers: [{ router: "r2", action: "deny" }], verdict: "deny" }] } },
+      { candidate: "office-net", report: { paths: [{ nodes: [], routers: [], verdict: "allow" }] } },
+    ],
+    mark: {
+      hl: ["MAIN", "OFFICE", "r1", "DMZ", "r2", "BRANCH"],
+      ok: ["MAIN", "OFFICE", "r1"],
+      okE: ["MAIN\x00r1", "OFFICE\x00r1"],
+      denyE: ["r1\x00r2", "DMZ\x00r2"],
+      half: ["BRANCH"],
+      halfE: ["BRANCH\x00r1"],
+      deny: { r2: { rule: "block-dmz", reason: "запрещено" } },
+    },
   },
 };
 
@@ -1130,7 +1131,7 @@ test("spread panel starts closed while the path panel starts open", async () => 
   assert.ok(ids["diag-tool-spread"].classList.contains("active"));
 });
 
-test("spread form queries every other subnet and highlights what's reachable", async () => {
+test("spread form posts once to the spread endpoint and paints the merged mark", async () => {
   const { ids, calls, frames, get } = await bootDiagnose(spreadResponses);
   await tick();
   await frames(1);
@@ -1138,16 +1139,9 @@ test("spread form queries every other subnet and highlights what's reachable", a
   ids["spread-src"].value = "main";
   fire(ids["spread-form"], "submit", {});
   await tick();
-  const posts = calls.filter((c) => c.path === "/api/drafts/d1/diagnose");
-  assert.equal(posts.length, 3, "one call per non-source subnet");
-  assert.deepEqual(
-    posts.map((c) => c.body).sort((a, b) => a.src.localeCompare(b.src)),
-    [
-      { src: "10.0.1.0", dst: "10.0.0.0", proto: "", dstPorts: [] },
-      { src: "10.0.2.0", dst: "10.0.0.0", proto: "", dstPorts: [] },
-      { src: "10.0.3.0", dst: "10.0.0.0", proto: "", dstPorts: [] },
-    ],
-  );
+  const posts = calls.filter((c) => c.path === "/api/drafts/d1/diagnose/spread");
+  assert.equal(posts.length, 1, "one spread call instead of per-candidate diagnostics");
+  assert.deepEqual(posts[0].body, { src: "main", proto: "", dstPorts: [] });
   await frames(10);
   const ok = JSON.parse(get("JSON.stringify([...Diagnose.state.flow.ok])"));
   const half = JSON.parse(get("JSON.stringify([...Diagnose.state.flow.half])"));
@@ -1159,13 +1153,9 @@ test("spread form queries every other subnet and highlights what's reachable", a
   assert.ok(ok.includes("OFFICE") && ok.includes("r1"), "office-net already routes to main — fully lit");
   assert.ok(deny.includes("r2"), "r2 is where dmz's route toward main is blocked");
   assert.ok(denyE.includes("r1\0r2"), "propagation beyond the deny boundary is not lit");
-  // branch-net has no return path of its own, but office-net round-trips
-  // through the very same r1: the shared node must come out green, not
-  // yellow — only branch-net itself, which nothing else vouches for, stays
-  // half-open.
-  assert.ok(ok.includes("r1"), "r1 is promoted to green: office-net already round-trips through it");
-  assert.ok(half.includes("BRANCH"), "branch-net itself has no return path and nothing promotes it");
-  assert.ok(!half.includes("r1"), "r1 is not left half-open just because branch-net alone can't reach back");
+  assert.ok(ok.includes("r1"), "r1 is green: office-net already round-trips through it");
+  assert.ok(half.includes("BRANCH"), "branch-net itself has no return path and stays half-open");
+  assert.ok(!half.includes("r1"), "r1 is not left half-open: the merged mark came resolved");
   assert.ok(!ids["spread-summary"].hidden);
   assert.match(String(ids["spread-summary"]._text || ""), /main/);
   // достижимость считает физический путь, а не вердикт фаервола: к dmz путь

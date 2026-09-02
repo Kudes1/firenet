@@ -58,3 +58,57 @@ func Diagnose(_ context.Context, log *slog.Logger, opts DiagnoseOptions) (*diagn
 	log.Debug("diagnosed flow", "src", opts.Flow.Src, "dst", opts.Flow.Dst)
 	return diagnose.Run(topo, devices, g, limits, opts.Flow)
 }
+
+// SpreadOptions describes the network-propagation query over project YAML.
+type SpreadOptions struct {
+	TopologyYAML []byte
+	SubnetsYAML  []byte
+	RulesYAML    []byte
+	MaxHops      int // 0 = use graph.DefaultLimits()
+	MaxPaths     int // 0 = use graph.DefaultLimits()
+	Input        string
+	Proto        rules.Proto
+	DstPorts     []string
+}
+
+// Spread answers "where does this network already propagate to" over the
+// same load -> build -> compile pipeline as Diagnose: it resolves the input
+// source, diagnoses every other subnet toward it, and merges the per-pair
+// map marks into one picture.
+func Spread(_ context.Context, log *slog.Logger, opts SpreadOptions) (*diagnose.SpreadResult, error) {
+	topo, err := LoadProject(opts.TopologyYAML, opts.SubnetsYAML)
+	if err != nil {
+		return nil, err
+	}
+	pol, err := rules.Load(bytes.NewReader(opts.RulesYAML))
+	if err != nil {
+		return nil, fmt.Errorf("load rules: %w", err)
+	}
+	if err := pol.Validate(topo); err != nil {
+		return nil, fmt.Errorf("invalid rules: %w", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		return nil, fmt.Errorf("build graph: %w", err)
+	}
+
+	limits := graph.DefaultLimits()
+	if opts.MaxHops > 0 {
+		limits.MaxHops = opts.MaxHops
+	}
+	if opts.MaxPaths > 0 {
+		limits.MaxPaths = opts.MaxPaths
+	}
+
+	devices, err := compiler.Compile(topo, pol, g, limits)
+	if err != nil {
+		return nil, fmt.Errorf("compile: %w", err)
+	}
+
+	log.Debug("spread", "input", opts.Input)
+	return diagnose.Spread(topo, devices, g, limits, diagnose.SpreadOptions{
+		Input:    opts.Input,
+		Proto:    opts.Proto,
+		DstPorts: opts.DstPorts,
+	})
+}

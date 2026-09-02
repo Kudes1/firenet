@@ -6,7 +6,7 @@
 
 ## Tool usage
  - Use MCP Context7 if it is available.
- - Use the MCP and LSP server Serena if it is available.
+ - Use built-in OpenCode LSP (gopls, typescript-language-server) for code navigation.
  - Don't use playwright unless explicitly asked to do so.
 
 ## Project structure

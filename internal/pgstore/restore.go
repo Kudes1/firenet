@@ -57,5 +57,6 @@ func (s *Store) Restore(ctx context.Context, toVersion int64, actor auth.User) (
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("commit: %w", err)
 	}
+	s.invalidateSnapshots()
 	return versionID, nil
 }

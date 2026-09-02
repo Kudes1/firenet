@@ -27,3 +27,6 @@ e2e/node_modules/
 .worktrees/
 
 .env
+
+# JS tooling (typescript for LSP only, not an app dependency)
+node_modules/

@@ -39,9 +39,11 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	apiMux.HandleFunc("GET /api/versions/current/rules", h.getCurrentRules)
 	apiMux.HandleFunc("GET /api/versions/current/layout", h.getCurrentLayout)
 	apiMux.HandleFunc("GET /api/versions/current/link-exports", h.getCurrentLinkExports)
+	apiMux.HandleFunc("GET /api/versions/current/search-index", h.getCurrentSearchIndex)
 	apiMux.HandleFunc("POST /api/versions/current/validate", h.validateCurrent)
 	apiMux.HandleFunc("POST /api/versions/current/compile", h.compileCurrent)
 	apiMux.HandleFunc("POST /api/versions/current/diagnose", h.diagnoseCurrent)
+	apiMux.HandleFunc("POST /api/versions/current/diagnose/spread", h.spreadCurrent)
 	apiMux.HandleFunc("GET /api/versions/current/lint", h.lintCurrent)
 
 	apiMux.HandleFunc("POST /api/drafts", h.createDraft)
@@ -64,7 +66,9 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	apiMux.HandleFunc("POST /api/drafts/{id}/validate", h.validateDraft)
 	apiMux.HandleFunc("POST /api/drafts/{id}/compile", h.compileDraft)
 	apiMux.HandleFunc("POST /api/drafts/{id}/diagnose", h.diagnoseDraft)
+	apiMux.HandleFunc("POST /api/drafts/{id}/diagnose/spread", h.spreadDraft)
 	apiMux.HandleFunc("GET /api/drafts/{id}/lint", h.lintDraft)
+	apiMux.HandleFunc("GET /api/drafts/{id}/search-index", h.getDraftSearchIndex)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/login", h.login)
@@ -94,6 +98,7 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("GET /ui/users", serveTemplatedPage(mustPageTemplate(pages, "users"), templatedPages["users"].data))
 	mux.HandleFunc("GET /ui/drafts", serveTemplatedPage(mustPageTemplate(pages, "drafts"), templatedPages["drafts"].data))
 	mux.HandleFunc("GET /ui/history", serveTemplatedPage(mustPageTemplate(pages, "history"), templatedPages["history"].data))
+	mux.HandleFunc("GET /ui/search", serveTemplatedPage(mustPageTemplate(pages, "search"), templatedPages["search"].data))
 
 	webRoot, err := fs.Sub(webFiles, "web")
 	if err != nil {
@@ -101,7 +106,7 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	}
 	mux.Handle("/", noCache(webRoot, http.FileServer(http.FS(webRoot))))
 
-	return withLogging(log, mux)
+	return withLogging(log, withAPICache(mux))
 }
 
 // noCache lets browsers keep assets cached but forbids reuse without
@@ -173,6 +178,7 @@ var templatedPages = map[string]templatedPage{
 	"rules":    {file: "templates/rules.html", data: pageData{Title: "firenet — правила", Nav: "rules", Script: "rules.js"}},
 	"sets":     {file: "templates/sets.html", data: pageData{Title: "firenet — наборы", Nav: "sets", Script: "sets.js"}},
 	"topology": {file: "templates/topology.html", data: pageData{Title: "firenet — топология", Nav: "topology", Script: "topology.js"}},
+	"search":   {file: "templates/search.html", data: pageData{Title: "firenet — поиск", Nav: "search", Script: "search.js", NoDraftBanner: true}},
 }
 
 // parsePageTemplates parses layout.html once and Clone()s it per page before

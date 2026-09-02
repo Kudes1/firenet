@@ -284,6 +284,10 @@ const Topology = (() => {
   let minimap = null; // Minimap над #topo-minimap
   let netEditPanel = null; // floating_panel.js-инстанс окна #net-edit
   let deviceEditPanel = null; // floating_panel.js-инстанс окна #device-edit
+  // {first, second} — имена устройств связи, чья панель редактирования
+  // открыта: их контуры окрашиваются цветами end-a/end-b, чтобы колонки
+  // панели однозначно ложились на карту; null — панель закрыта
+  let linkPanelEnds = null;
   // поиск по канвасу: подсветка совпавших узлов, приглушение остальных,
   // камера центрируется на активном совпадении
   let searchQ = "";
@@ -365,7 +369,16 @@ const Topology = (() => {
           ...(filter ? { filter } : {}),
         });
       },
+      onChange: setLinkPanelEnds,
     }, at);
+  }
+
+  // setLinkPanelEnds включает/выключает цветную подсветку концов
+  // редактируемой связи и перерисовывает канву; ends — {first, second}
+  // (имена устройств) или null при закрытии панели.
+  function setLinkPanelEnds(ends) {
+    linkPanelEnds = ends;
+    render();
   }
 
   // isNetworkCreatePending — true пока create-network для этой сети ещё не
@@ -1345,8 +1358,11 @@ const Topology = (() => {
       return (part === "shape" ? (attachSelected(obj.net, obj.device) ? " selected" : "") : "") + mark(false);
     }
     if (part === "shape") {
+      const endClass = linkPanelEnds && obj.name === linkPanelEnds.first ? " end-a"
+        : linkPanelEnds && obj.name === linkPanelEnds.second ? " end-b" : "";
       return (State.selection.has(obj) ? " selected" : "")
         + (pending && obj.name !== undefined && (pending.device === obj.name || pending.network === obj.name) ? " pending" : "")
+        + endClass
         + mark(searchSet.has(obj));
     }
     return shade(searchSet.has(obj));
@@ -1529,7 +1545,7 @@ const Topology = (() => {
     setupPopover();
     setupSearch();
     NetInfo.attach(canvas());
-    LinkPanel.attach(canvas(), () => State.camera);
+    LinkPanel.attach(canvas(), () => State.camera, setLinkPanelEnds);
     netEditPanel = createFloatingPanel({
       panelId: "net-edit", headerId: "net-edit-header", closeId: "net-edit-close",
       viewportEl: canvas, getCamera: () => State.camera,

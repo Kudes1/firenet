@@ -1,0 +1,52 @@
+{{define "content"}}<main x-data="searchPage">
+  <div class="table-toolbar">
+    <div class="toolbar-text">
+      <h3>Поиск</h3>
+      <p class="hint">Единый поиск по всем сущностям: устройства, подсети, сети, наборы, объединения, связи и правила. Запрос вида IP или CIDR ищет по префиксам (10.0.0.5 попадает в 10.0.0.0/24).</p>
+    </div>
+  </div>
+  <div class="search-controls">
+    <input class="search-input" type="search" x-model.trim="q" placeholder="имя, описание или IP/CIDR…" autofocus spellcheck="false" autocomplete="off">
+    <select class="search-type" x-model="type">
+      <option value="all">все типы</option>
+      <option value="device">устройства</option>
+      <option value="subnet">подсети</option>
+      <option value="network">сети</option>
+      <option value="set">наборы</option>
+      <option value="union">объединения</option>
+      <option value="link">связи</option>
+      <option value="rule">правила</option>
+    </select>
+  </div>
+  <div class="table-wrap" x-show="loaded" x-cloak>
+    <table class="data-table">
+      <colgroup>
+        <col data-default-width="140" data-min-width="100">
+        <col data-default-width="260" data-min-width="140">
+        <col data-default-width="340" data-min-width="160">
+        <col data-default-width="340" data-min-width="160">
+      </colgroup>
+      <thead>
+        <tr><th>Тип</th><th>Имя</th><th>Детали</th><th>Описание</th></tr>
+      </thead>
+      <tbody>
+        <template x-for="(e, i) in results" :key="e.type + ':' + i">
+          <tr class="search-hit" @click="window.location.href = e.href" :title="'Перейти: ' + e.href">
+            <td><span class="badge badge-default" x-text="e.typeLabel"></span></td>
+            <td x-text="e.name"></td>
+            <td>
+              <span x-show="e.details" x-text="e.details"></span>
+              <span class="hint" x-show="!e.details">—</span>
+            </td>
+            <td>
+              <span x-show="e.description" x-text="e.description"></span>
+              <span class="hint" x-show="!e.description">—</span>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="loaded && !results.length"><td colspan="4" class="empty-cell">Ничего не найдено</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="hint" x-show="!loaded" x-cloak>Загрузка…</p>
+</main>{{end}}

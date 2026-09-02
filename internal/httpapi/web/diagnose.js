@@ -15,7 +15,9 @@ import { Api, showBanner, apiPath } from "./common.js";
 
 // Diagnose — карта топологии на canvas с подсветкой путей и отчёт
 // диагностики трафика (POST /api/diagnose). Карта только для чтения:
-// перетаскивание узлов и правка — на /ui/topology.
+// перетаскивание узлов и правка — на /ui/topology. Вся разметка карты
+// (подсветка, поток, точки запрета) приходит с сервера готовым полем
+// mapMark отчёта — клиент её только рисует.
 const Diagnose = (() => {
   const { DEVICE_W, DEVICE_H, NET_W, NET_H } = NetMap;
   const state = {
@@ -29,185 +31,19 @@ const Diagnose = (() => {
   const canvasEl = () => document.getElementById("diag-canvas");
   const wrapEl = () => document.getElementById("diag-wrap");
 
-  // buildAdj: симметричная смежность устройств и сетей — линки устройство–
-  // устройство плюс привязки «сеть ↔ устройство». Ключи квалифицированы
-  // префиксом пространства имён («d:»/«n:»), чтобы сеть и устройство с
-  // одинаковым именем не сливались в один узел графа.
-  const DEV = "d:", NET = "n:";
-  const bare = (k) => k.slice(DEV.length);
-  function buildAdj(topology) {
-    const adj = new Map();
-    const link = (a, b) => {
-      if (!adj.has(a)) adj.set(a, []);
-      adj.get(a).push(b);
+  // toFlow переводит серверную разметку mapMark в множества/карты,
+  // ожидаемые flowMark и отрисовкой тултипов deny.
+  function toFlow(mark) {
+    if (!mark) return null;
+    return {
+      hl: new Set(mark.hl || []),
+      ok: new Set(mark.ok || []),
+      okE: new Set(mark.okE || []),
+      denyE: new Set(mark.denyE || []),
+      half: new Set(mark.half || []),
+      halfE: new Set(mark.halfE || []),
+      deny: new Map(Object.entries(mark.deny || {})),
     };
-    topology.links.forEach((l) => { link(DEV + l.a.device, DEV + l.b.device); link(DEV + l.b.device, DEV + l.a.device); });
-    topology.networks.forEach((n) => (n.attach || []).forEach((a) => { link(NET + n.name, DEV + a.device); link(DEV + a.device, NET + n.name); }));
-    return adj;
-  }
-
-  // shortestPath: BFS-цепочка имён от якоря from до to; null, если связи нет.
-  function shortestPath(adj, from, to) {
-    if (from === to) return [from];
-    const prev = new Map([[from, null]]);
-    const queue = [from];
-    for (let i = 0; i < queue.length; i++) {
-      const cur = queue[i];
-      for (const next of adj.get(cur) || []) {
-        if (prev.has(next)) continue;
-        prev.set(next, cur);
-        if (next === to) {
-          const path = [];
-          for (let n = to; n !== null; n = prev.get(n)) path.unshift(n);
-          return path;
-        }
-        queue.push(next);
-      }
-    }
-    return null;
-  }
-
-  // узел отчёта без близнеца на карте (l2-bus) даёт null и просто пропускается;
-  // якорь — квалифицированный ключ (роутер-устройство или сеть)
-  const anchorOf = (topology) => (n) => {
-    if (n.kind === 0) return DEV + n.name;
-    const w = topology.networks.find((w) => (w.subnets || []).includes(n.name));
-    return w ? NET + w.name : null;
-  };
-
-  // expandHighlight переводит путь отчёта в имена элементов карты. Узлы
-  // отчёта — подсети, роутеры и синтетические l2-bus, поэтому каждая пара
-  // соседей приводится к якорю карты (роутер или сеть по членству подсети),
-  // а стыки соединяются кратчайшей физической цепочкой устройств через
-  // свитчи; всё это попадает в результирующий набор.
-  function expandHighlight(report, topology) {
-    if (!report || !report.paths.length) return null;
-    const adj = buildAdj(topology);
-    const anchor = anchorOf(topology);
-    const hl = new Set();
-    report.paths.forEach((p) => {
-      // l2-bus не имеет близнеца на карте; стыки ищем по соседним якорям.
-      // В hl имена без префикса: подсветке не нужно различать пространства имён.
-      const anchors = p.nodes.map(anchor).filter(Boolean);
-      anchors.forEach((a) => hl.add(bare(a)));
-      for (let i = 0; i + 1 < anchors.length; i++) {
-        if (anchors[i] === anchors[i + 1]) continue;
-        const chain = shortestPath(adj, anchors[i], anchors[i + 1]);
-        if (chain) chain.forEach((x) => hl.add(bare(x)));
-      }
-    });
-    return hl;
-  }
-
-  // edgeKey канонизирует пару имён концов связи/привязки в ключ ребра карты.
-  const edgeKey = (a, b) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`);
-
-  // expandFlow делит маршрут на пройденную и непройденную части по вердиктам
-  // роутеров: ok — узлы карты до точки срабатывания запрета, okE — рёбра,
-  // которые трафик прошёл целиком (включая последний хоп к точке запрета:
-  // дроп случается на самом роутере, а не на подходе к нему), denyE — рёбра
-  // за точкой запрета, deny — карта «роутер → {rule, reason}» для точек
-  // запрета, hl — весь путь целиком (для приглушения остального). half/halfE
-  // забирают содержимое ok/okE (а не просто копируют — иначе один и тот же
-  // элемент оказался бы одновременно и «half», и «ok» уже внутри одного
-  // отчёта), когда report.returnPathAllowed === false: обратного пути нет
-  // либо потому что его не пропускает firewall (нет mirror/встречного
-  // правила), либо потому что маршрут в обратную сторону вообще не
-  // анонсирован (пересечение фильтрованной связи проверяется только по
-  // назначению, см. graph.AllSimplePaths) — на карте оба случая красятся
-  // одинаково жёлтым, «доступно только в одну сторону». Запрет сильнее
-  // разрешения: элемент с deny-вердиктом и всё за ним на запрещённом
-  // маршруте никогда не попадают ни в ok, ни в half.
-  function expandFlow(report, topology) {
-    const hl = expandHighlight(report, topology);
-    if (!hl) return null;
-    const adj = buildAdj(topology);
-    const anchor = anchorOf(topology);
-    const ok = new Set();
-    const deny = new Map();
-    const blocked = new Set();
-    const okE = new Set(), denyE = new Set();
-    report.paths.forEach((p) => {
-      const anchors = p.nodes.map(anchor).filter(Boolean);
-      const di = p.routers.findIndex((rv) => rv.action === "deny");
-      const cut = di >= 0 ? anchors.indexOf(DEV + p.routers[di].router) : anchors.length;
-      if (cut < 0) return; // запрет вне якорей карты — маршрут не размечаем
-      const rv = di >= 0 ? p.routers[di] : null;
-      for (let i = 0; i + 1 < anchors.length; i++) {
-        if (anchors[i] === anchors[i + 1]) continue;
-        const seg = (shortestPath(adj, anchors[i], anchors[i + 1]) || []).map(bare);
-        if (!seg) continue;
-        const edges = seg.slice(1).map((x, j) => edgeKey(seg[j], x));
-        if (rv && i + 1 > cut) {
-          seg.forEach((x) => blocked.add(x));
-          edges.forEach((k) => denyE.add(k));
-          continue;
-        }
-        const stopped = rv && i + 1 === cut;
-        seg.slice(0, stopped ? -1 : seg.length).forEach((x) => ok.add(x));
-        edges.forEach((k) => okE.add(k));
-        if (stopped) deny.set(seg[seg.length - 1], { rule: rv.matchedRule || "", reason: rv.reason || "" });
-      }
-    });
-    deny.forEach((_, n) => ok.delete(n)); // запрет сильнее разрешения
-    blocked.forEach((n) => ok.delete(n));
-    const half = new Set(), halfE = new Set();
-    if (report.returnPathAllowed === false) {
-      ok.forEach((n) => half.add(n));
-      okE.forEach((k) => halfE.add(k));
-      ok.clear();
-      okE.clear();
-    }
-    return { hl, ok, deny, okE, denyE, half, halfE };
-  }
-
-  // baseIp — представительский адрес подсети: сетевой адрес её CIDR, который
-  // по определению принадлежит подсети независимо от версии IP.
-  const baseIp = (cidr) => cidr.split("/")[0];
-
-  // resolveSpreadSources резолвит ввод инструмента «Распространение сети» в
-  // список представительских источников для /api/diagnose: точное совпадение
-  // с именем подсети или сети даёт известный subnetName (чтобы не опрашивать
-  // источник сам про себя), а любой другой ввод считается голым IP-адресом.
-  function resolveSpreadSources(input, subnets, networks) {
-    const subnet = subnets.find((s) => s.name === input);
-    if (subnet) return [{ ip: baseIp(subnet.cidr), subnetName: subnet.name }];
-    const net = networks.find((n) => n.name === input);
-    if (net) {
-      return (net.subnets || []).map((name) => {
-        const s = subnets.find((s) => s.name === name);
-        return { ip: s ? baseIp(s.cidr) : name, subnetName: name };
-      });
-    }
-    return [{ ip: input, subnetName: null }];
-  }
-
-  // mergeFlows объединяет несколько expandFlow (один на пару источник×подсеть-
-  // назначения) в одну разметку карты. Приоритет запрета над разрешением уже
-  // встроен в flowMark (проверяет deny/denyE раньше ok/okE), поэтому для них
-  // достаточно простого объединения множеств. half/halfE — иначе: один и тот
-  // же элемент карты может лежать на пути одной пары (нет обратного маршрута
-  // — half) и одновременно на пути другой пары того же среза (обратный
-  // маршрут есть — ok): например, узел с двумя шлюзами, один из которых
-  // зеркалит связь, а другой — нет. Раз для элемента есть хоть одна пара
-  // с полной двусторонней связностью, он красится зелёным целиком, поэтому
-  // ok вычитается из half/halfE уже после объединения всех пар.
-  function mergeFlows(flows) {
-    const hl = new Set(), ok = new Set(), okE = new Set(), denyE = new Set();
-    const half = new Set(), halfE = new Set();
-    const deny = new Map();
-    flows.forEach((f) => {
-      f.hl.forEach((n) => hl.add(n));
-      f.ok.forEach((n) => ok.add(n));
-      f.okE.forEach((k) => okE.add(k));
-      f.denyE.forEach((k) => denyE.add(k));
-      f.half.forEach((n) => half.add(n));
-      f.halfE.forEach((k) => halfE.add(k));
-      f.deny.forEach((v, k) => { if (!deny.has(k)) deny.set(k, v); });
-    });
-    ok.forEach((n) => half.delete(n));
-    okE.forEach((k) => halfE.delete(k));
-    return { hl, ok, deny, okE, denyE, half, halfE };
   }
 
   // flowMark возвращает mark(obj) для TopoScene: состояние движения трафика
@@ -216,6 +52,7 @@ const Diagnose = (() => {
   // концов, иначе хоп к запрещающему роутеру красился бы по его вердикту.
   // Приоритет: запрет > доступность в одну сторону > полное разрешение.
   // Непомеченные элементы остаются приглушёнными.
+  const edgeKey = (a, b) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`);
   const flowMark = (flow) => (obj) => {
     if (!flow || obj.devices) return "";
     if (!obj.a && obj.type !== "attach") {
@@ -426,7 +263,7 @@ const Diagnose = (() => {
     const summary = document.getElementById("diag-summary");
     summary.hidden = false;
     summary.textContent = `${report.srcSubnet} → ${report.dstSubnet}: путей ${report.paths.length}` + (report.note ? `. ${report.note}` : "");
-    const flow = expandFlow(report, state.topology);
+    const flow = toFlow(report.mapMark);
     state.hl = flow && flow.hl;
     state.flow = flow;
     if (state.topology) {
@@ -704,17 +541,10 @@ const Diagnose = (() => {
     setSpreadOpen(false);
   }
 
-  // ownerNetwork находит сеть, которой принадлежит подсеть — для переноса
-  // источника (известного только по имени подсети) в якорь карты, где узлы
-  // подсетей адресуются по имени их сети (см. anchorOf).
-  const ownerNetwork = (subnetName) => {
-    const n = state.topology.networks.find((n) => (n.subnets || []).includes(subnetName));
-    return n ? n.name : null;
-  };
-
-  // runSpread опрашивает /api/diagnose от каждой другой подсети топологии до
-  // каждого резолвленного узла инструмента (любой трафик, без фильтра по
-  // протоколу/портам) и объединяет результаты в одну разметку карты.
+  // runSpread запрашивает /api/diagnose/spread: сервер сам резолвит источник
+  // (имя подсети, сети или голый IP), опрашивает каждую другую подсеть
+  // топологии (любой трафик, без фильтра по протоколу/портам) и возвращает
+  // готовую объединённую разметку карты вместе с per-кандидатными отчётами.
   // Источник и назначение диагностики здесь — подсеть-кандидат и сама
   // проверяемая сеть соответственно (а не наоборот): инструмент показывает,
   // куда докатился анонс/реэкспорт проверяемой сети — то есть кто уже умеет
@@ -722,29 +552,16 @@ const Diagnose = (() => {
   // самой (это была бы обратная, «исходящая» связность). Подсеть считается
   // достижимой, если существует хотя бы один физический путь до проверяемой
   // сети от кандидата, — это проверка маршрутизации, а не фаерволла: вердикт
-  // правила (allow/deny/return) на достижимость не влияет. Отдельные подсети
-  // проверяемой сети на карте адресуются по имени владеющей сети (см.
-  // ownerNetwork).
+  // правила (allow/deny/return) на достижимость не влияет.
   async function runSpread(ev) {
     ev.preventDefault();
     const input = document.getElementById("spread-src").value.trim();
-    const sources = resolveSpreadSources(input, state.subnets, state.topology.networks);
-    const selfNames = new Set(sources.map((s) => s.subnetName).filter(Boolean));
-    const candidates = state.subnets.map((s) => s.name).filter((n) => !selfNames.has(n));
-    const ipOf = (name) => baseIp(state.subnets.find((s) => s.name === name).cidr);
-    const pairs = sources.flatMap((src) => candidates.map((dstName) => ({ src, dstName })));
     try {
-      const reports = await Promise.all(
-        pairs.map(({ src, dstName }) => Api.post(apiPath("diagnose"), { src: ipOf(dstName), dst: src.ip, proto: "", dstPorts: [] })),
-      );
-      const flows = reports.map((r) => expandFlow(r, state.topology)).filter(Boolean);
-      const merged = mergeFlows(flows);
-      selfNames.forEach((n) => {
-        const owner = ownerNetwork(n);
-        if (owner) { merged.hl.add(owner); merged.ok.add(owner); }
-      });
+      const spread = await Api.post(apiPath("diagnose/spread"), { src: input, proto: "", dstPorts: [] });
+      const merged = toFlow(spread.mark);
+      const selfNames = new Set(spread.sources.map((s) => s.subnetName).filter(Boolean));
       const reached = new Set(selfNames);
-      reports.forEach((r, i) => { if (r.paths.length) reached.add(pairs[i].dstName); });
+      spread.reports.forEach((r) => { if (r.report.paths.length) reached.add(r.candidate); });
       renderSpread(input, merged, reached.size);
     } catch (e) {
       showBanner("Ошибка распространения: " + e.message);
@@ -834,8 +651,7 @@ const Diagnose = (() => {
   }
 
   return {
-    boot, renderReport, run, resetResult, state, expandHighlight, expandFlow, flowMark,
-    resolveSpreadSources, mergeFlows, runSpread,
+    boot, renderReport, run, resetResult, state, toFlow, flowMark, runSpread,
   };
 })();
 

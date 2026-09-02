@@ -9,6 +9,21 @@ import * as Combo from "./combo.js";
 // The canvas creates plain links only; conversion lives here. The server
 // re-validates authoritatively on save.
 
+// normalizeLink flips a link's sides into canonical (alphabetical) order,
+// so display never depends on which end the canvas stored as a/b. A link
+// is symmetric: swapping a/b together with its export lists is a no-op
+// semantically, and the server identifies links by canonical pair anyway.
+function normalizeLink(l) {
+  const flip = l.a.device > l.b.device;
+  const a = flip ? l.b : l.a;
+  const b = flip ? l.a : l.b;
+  const f = l.filter;
+  return {
+    a, b,
+    ...(f ? { filter: { aExports: [...(flip ? f.bExports : f.aExports) || []], bExports: [...(flip ? f.aExports : f.bExports) || []] } } : {}),
+  };
+}
+
 document.addEventListener("alpine:init", () => {
   Alpine.data("linksPage", () => ({
     links: [], // {a:{device}, b:{device}, filter?:{aExports:[], bExports:[]}}
@@ -30,11 +45,7 @@ document.addEventListener("alpine:init", () => {
         this._topo = topo;
         this.subnets = subs.subnets || [];
         this.networks = topo.networks || [];
-        this.links = (topo.links || []).map((l) => ({
-          a: { device: l.a.device },
-          b: { device: l.b.device },
-          ...(l.filter ? { filter: { aExports: [...(l.filter.aExports || [])], bExports: [...(l.filter.bExports || [])] } } : {}),
-        }));
+        this.links = (topo.links || []).map(normalizeLink);
         this.loaded = true;
       } catch (e) {
         showBanner("Не удалось загрузить связи: " + e.message);
@@ -200,11 +211,7 @@ document.addEventListener("alpine:init", () => {
           unions: this._topo.unions || [],
         });
         this._topo = doc;
-        this.links = (doc.links || []).map((l) => ({
-          a: { device: l.a.device },
-          b: { device: l.b.device },
-          ...(l.filter ? { filter: { aExports: [...(l.filter.aExports || [])], bExports: [...(l.filter.bExports || [])] } } : {}),
-        }));
+        this.links = (doc.links || []).map(normalizeLink);
         showBanner("Связи сохранены", "ok");
         return true;
       } catch (e) {

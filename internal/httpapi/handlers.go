@@ -778,6 +778,99 @@ func (h *handlers) diagnoseDraft(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rep)
 }
 
+// spreadRequest is the body of the network-propagation endpoint: the source
+// input (subnet name, network name, or literal IP) plus an optional traffic
+// filter shared by every candidate diagnostic.
+type spreadRequest struct {
+	Src      string   `json:"src"`
+	Proto    string   `json:"proto"`
+	DstPorts []string `json:"dstPorts"`
+}
+
+// spreadDoc runs the network-propagation query over one project document:
+// resolve the input into sources, diagnose every other subnet toward them,
+// and merge the per-pair map marks into one picture.
+func (h *handlers) spreadDoc(ctx context.Context, doc projectdoc.ProjectDoc, req spreadRequest) (*diagnose.SpreadResult, error) {
+	topoYAML, err := yaml.Marshal(doc.Topology)
+	if err != nil {
+		return nil, err
+	}
+	subnetsYAML, err := yaml.Marshal(doc.Subnets)
+	if err != nil {
+		return nil, err
+	}
+	rulesYAML, err := yaml.Marshal(doc.Rules)
+	if err != nil {
+		return nil, err
+	}
+	return app.Spread(ctx, h.log, app.SpreadOptions{
+		TopologyYAML: topoYAML,
+		SubnetsYAML:  subnetsYAML,
+		RulesYAML:    rulesYAML,
+		Input:        req.Src,
+		Proto:        rules.Proto(req.Proto),
+		DstPorts:     req.DstPorts,
+	})
+}
+
+func parseSpreadRequest(r *http.Request) (spreadRequest, error) {
+	var req spreadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return req, fmt.Errorf("invalid body: %w", err)
+	}
+	if req.Src == "" {
+		return req, fmt.Errorf("src: источник не указан")
+	}
+	if !diagnoseProtos[req.Proto] {
+		return req, fmt.Errorf("invalid proto %q", req.Proto)
+	}
+	if err := validatePortList(req.DstPorts); err != nil {
+		return req, err
+	}
+	return req, nil
+}
+
+func (h *handlers) spreadCurrent(w http.ResponseWriter, r *http.Request) {
+	req, err := parseSpreadRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	doc, err := h.currentDoc(r)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	out, err := h.spreadDoc(r.Context(), doc, req)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *handlers) spreadDraft(w http.ResponseWriter, r *http.Request) {
+	req, err := parseSpreadRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if _, ok := h.resolveDraftForAccess(w, r); !ok {
+		return
+	}
+	doc, _, err := h.projects.ReadDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	out, err := h.spreadDoc(r.Context(), doc, req)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (h *handlers) lintDoc(ctx context.Context, doc projectdoc.ProjectDoc) (any, error) {
 	topo, err := loadTopologyDoc(doc)
 	if err != nil {

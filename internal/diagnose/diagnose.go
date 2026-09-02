@@ -38,6 +38,10 @@ type Report struct {
 	// so this can only be false because of one-directional firewall rules
 	// (no matching return rule or Mirror) — never because of routing.
 	ReturnPathAllowed bool `json:"returnPathAllowed"`
+	// MapMark is the server-computed map decoration: highlights, flow
+	// segments and deny points translated into map element names. The
+	// frontend renders it as-is without rebuilding any graph.
+	MapMark *MapMark `json:"mapMark"`
 }
 
 type PathResult struct {
@@ -107,6 +111,7 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 			Note:    "трафик не пересекает управляемые роутеры (L2-сегмент)",
 		}}
 		rep.ReturnPathAllowed = true
+		rep.MapMark = MarkMap(topo, rep)
 		return rep, nil
 	}
 
@@ -128,6 +133,7 @@ func Run(topo *topology.Topology, sets []compiler.DeviceRuleset, g *graph.Graph,
 		return nil, err
 	}
 	rep.ReturnPathAllowed = returnPathAllowed(back)
+	rep.MapMark = MarkMap(topo, rep)
 	return rep, nil
 }
 

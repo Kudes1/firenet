@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -12,16 +13,34 @@ import (
 // personal drafts.
 type Store struct {
 	db *pgxpool.Pool
+
+	// snapshotCache caches confirmed-version snapshots: a confirmed
+	// version is immutable, so a snapshot for versionID never changes and
+	// the cache needs no TTL — only invalidation when new versions appear
+	// (confirm, restore), which invalidates everything for simplicity:
+	// historical snapshots are rarely re-read, and the current one is
+	// rebuilt once on first access after each new version.
+	snapshotMu    sync.Mutex
+	snapshotCache map[int64]map[entityRef]entityRow
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
-	return &Store{db: pool}
+	return &Store{db: pool, snapshotCache: map[int64]map[entityRef]entityRow{}}
 }
 
 // entitySnapshotAt returns the live entity set as of versionID: for each
 // (kind, key), the row with the highest version_id <= versionID, unless
-// that row's change is "removed".
+// that row's change is "removed". Results are cached per versionID — the
+// returned map is shared between callers and must be treated as
+// read-only (mergeSnapshot already copies before mutating).
 func (s *Store) entitySnapshotAt(ctx context.Context, versionID int64) (map[entityRef]entityRow, error) {
+	s.snapshotMu.Lock()
+	cached, ok := s.snapshotCache[versionID]
+	s.snapshotMu.Unlock()
+	if ok {
+		return cached, nil
+	}
+
 	rows, err := s.db.Query(ctx, `
 		SELECT kind, key, change, data FROM (
 			SELECT DISTINCT ON (kind, key) kind, key, change, data
@@ -44,7 +63,22 @@ func (s *Store) entitySnapshotAt(ctx context.Context, versionID int64) (map[enti
 		}
 		out[ref] = row
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	s.snapshotMu.Lock()
+	s.snapshotCache[versionID] = out
+	s.snapshotMu.Unlock()
+	return out, nil
+}
+
+// invalidateSnapshots drops the snapshot cache; called whenever new
+// confirmed versions appear (confirm, restore).
+func (s *Store) invalidateSnapshots() {
+	s.snapshotMu.Lock()
+	s.snapshotCache = map[int64]map[entityRef]entityRow{}
+	s.snapshotMu.Unlock()
 }
 
 // draftOverrides returns a draft's current per-entity edits, including
