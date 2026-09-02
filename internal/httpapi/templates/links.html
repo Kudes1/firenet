@@ -55,7 +55,7 @@
     <h3>Фильтры связи <span x-text="draft.index >= 0 ? pairLabel(draft.index) : ''"></span></h3>
     <p class="hint">Как в BIRD: <b>экспорт</b> — сети, которые устройство анонсирует соседу через связь; <b>импорт</b> — сети, которые оно принимает от соседа (зеркало его экспорта, правится в блоке соседа). Пакет пройдёт по связи, только если его источник есть в экспорте отправителя, а получатель — в экспорте получателя.</p>
     <template x-for="side in ['a', 'b']" :key="side">
-      <fieldset>
+      <fieldset :class="side === 'a' ? 'link-end-col-a' : 'link-end-col-b'">
         <legend><span x-text="draftDevice(side)"></span> <span class="hint" x-text="'(сосед: ' + draftPeer(side) + ')'"></span></legend>
         <div class="filter-dirs">
           <div>

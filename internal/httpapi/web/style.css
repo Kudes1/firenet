@@ -22,6 +22,10 @@
   --kind-switch: #7c3aed;
   --kind-network: #16a34a;
 
+  /* link-edit end markers: A/B colors shared by the canvas and panel columns */
+  --link-end-a: #0ea5e9;
+  --link-end-b: #f97316;
+
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 1rem;
@@ -50,6 +54,9 @@
     --kind-router: #f59e0b;
     --kind-switch: #a78bfa;
     --kind-network: #4ade80;
+    /* link-edit end markers: A/B colors shared by the canvas and panel columns */
+    --link-end-a: #0ea5e9;
+    --link-end-b: #f97316;
   }
 }
 :root[data-theme="dark"] {
@@ -70,6 +77,9 @@
     --kind-router: #f59e0b;
     --kind-switch: #a78bfa;
     --kind-network: #4ade80;
+    /* link-edit end markers: A/B colors shared by the canvas and panel columns */
+    --link-end-a: #0ea5e9;
+    --link-end-b: #f97316;
 }
 
 * { box-sizing: border-box; }
@@ -450,6 +460,8 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 /* .link-panel — модификатор поверх .floating-panel для #link-panel:
    раскладка полей фильтра по сторонам связи. */
 .link-panel-grid { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-2); }
+.link-end-col-a { border-left: 3px solid var(--link-end-a); padding-left: 8px; }
+.link-end-col-b { border-left: 3px solid var(--link-end-b); padding-left: 8px; }
 .link-panel .member-add { margin: var(--space-2) 0 var(--space-3); }
 .link-panel .modal-actions {
   position: sticky;
