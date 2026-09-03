@@ -1,9 +1,0 @@
-subnets:
-  - name: office-lan
-    cidr: 10.10.0.0/24
-
-  - name: dmz-web
-    cidr: 10.20.0.0/25
-
-  - name: dmz-db
-    cidr: 10.20.0.128/25

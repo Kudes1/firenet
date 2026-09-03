@@ -63,19 +63,12 @@ export default async function globalSetup() {
     await waitForPostgres(container);
 
     const appPort = await freePort();
-    fs.mkdirSync(new URL("./.tmp/", import.meta.url), { recursive: true });
-    // legacy-файлы не существуют -> SeedInitialVersion получает пустой проект
-    // (internal/cli/legacy.go: отсутствующий файл = empty-but-valid doc)
-    const legacy = (name) => new URL(`./.tmp/${name}`, import.meta.url).pathname;
-    server = spawn("bin/firenet", [
-      "serve", "--addr", `127.0.0.1:${appPort}`,
-      "--topology", legacy("topology.yaml"),
-      "--subnets", legacy("subnets.yaml"),
-      "--rules", legacy("rules.yaml"),
-    ], {
+    // пустая БД -> сервер сам сеет пустую версию 1
+    server = spawn("bin/firenet", [], {
       cwd: new URL("../", import.meta.url).pathname,
       env: {
         ...process.env,
+        FIRENET_ADDR: `127.0.0.1:${appPort}`,
         FIRENET_DATABASE_URL: `postgres://${PG.user}:${PG.pass}@127.0.0.1:${pgPort}/${PG.db}?sslmode=disable`,
         FIRENET_ADMIN_USER: ADMIN.username,
         FIRENET_ADMIN_PASSWORD: ADMIN.password,
