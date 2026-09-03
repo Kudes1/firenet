@@ -7,6 +7,7 @@ import (
 
 	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/graph"
+	"github.com/kudes1/firenet/internal/projectdoc"
 	"github.com/kudes1/firenet/internal/rules"
 )
 
@@ -109,13 +110,10 @@ func TestSpread_OneWayStaysHalf(t *testing.T) {
 // merged mark keeps ok for elements some pair lit green (the renderer gives
 // deny paint priority), but the deny point itself is out of ok — MarkMap
 // removes it per-pair, mirroring the frontend expandFlow.
-const diagRulesDenyReverse = `
-defaultAction: allow
-chainName: FIRENET-FWD
-chainPosition: top
-rules:
-  - {name: block-dmz-office, src: [dmz], dst: [office], action: deny}
-`
+var diagRulesDenyReverse = projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+	Name: "FIRENET-FWD", DefaultAction: "allow", ChainPosition: "top",
+	Rules: []projectdoc.RuleDoc{{Name: "block-dmz-office", Src: []string{"dmz"}, Dst: []string{"office"}, Proto: "any", Action: "deny"}},
+}}}
 
 func TestSpread_DenyWinsInMerge(t *testing.T) {
 	topo, g := loadTopo(t)

@@ -32,52 +32,34 @@ subnets:
   - {name: isolated, cidr: 10.0.2.0/24}
 `
 
-const diagRulesAllow = `
-defaultAction: deny
-chainName: FIRENET-FWD
-chainPosition: top
-rules:
-  - {name: office-to-dmz, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: allow}
-`
+var diagRulesAllow = projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+	Name: "FIRENET-FWD", DefaultAction: "deny", ChainPosition: "top",
+	Rules: []projectdoc.RuleDoc{{Name: "office-to-dmz", Src: []string{"office"}, Dst: []string{"dmz"}, Proto: "tcp", DstPorts: []string{"443"}, Action: "allow"}},
+}}}
 
-const diagRulesDeny = `
-defaultAction: allow
-chainName: FIRENET-FWD
-chainPosition: top
-rules:
-  - {name: block-dmz, src: [office], dst: [dmz], action: deny}
-`
+var diagRulesDeny = projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+	Name: "FIRENET-FWD", DefaultAction: "allow", ChainPosition: "top",
+	Rules: []projectdoc.RuleDoc{{Name: "block-dmz", Src: []string{"office"}, Dst: []string{"dmz"}, Action: "deny"}},
+}}}
 
-const diagRulesReturnRule = `
-defaultAction: deny
-chainName: MY-CHAIN
-chainPosition: top
-rules:
-  - {name: bypass-office-dmz, src: [office], dst: [dmz], action: return}
-`
+var diagRulesReturnRule = projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+	Name: "MY-CHAIN", DefaultAction: "deny", ChainPosition: "top",
+	Rules: []projectdoc.RuleDoc{{Name: "bypass-office-dmz", Src: []string{"office"}, Dst: []string{"dmz"}, Action: "return"}},
+}}}
 
-const diagRulesDefaultReturn = `
-defaultAction: return
-chainName: MY-CHAIN
-chainPosition: top
-rules:
-  - {name: unrelated, src: [dmz], dst: [office], proto: udp, action: allow}
-`
+var diagRulesDefaultReturn = projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+	Name: "MY-CHAIN", DefaultAction: "return", ChainPosition: "top",
+	Rules: []projectdoc.RuleDoc{{Name: "unrelated", Src: []string{"dmz"}, Dst: []string{"office"}, Proto: "udp", Action: "allow"}},
+}}}
 
-const diagRulesAllowBothWays = `
-defaultAction: allow
-chainName: FIRENET-FWD
-chainPosition: top
-rules: []
-`
+var diagRulesAllowBothWays = projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+	Name: "FIRENET-FWD", DefaultAction: "allow", ChainPosition: "top", Rules: []projectdoc.RuleDoc{},
+}}}
 
-const diagRulesMirror = `
-defaultAction: deny
-chainName: FIRENET-FWD
-chainPosition: top
-rules:
-  - {name: office-dmz-both-ways, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: allow, mirror: true}
-`
+var diagRulesMirror = projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+	Name: "FIRENET-FWD", DefaultAction: "deny", ChainPosition: "top",
+	Rules: []projectdoc.RuleDoc{{Name: "office-dmz-both-ways", Src: []string{"office"}, Dst: []string{"dmz"}, Proto: "tcp", DstPorts: []string{"443"}, Action: "allow", Mirror: true}},
+}}}
 
 func loadTopo(t *testing.T) (*topology.Topology, *graph.Graph) {
 	t.Helper()
@@ -120,26 +102,23 @@ func loadTopo(t *testing.T) (*topology.Topology, *graph.Graph) {
 	return topo, g
 }
 
-func compilePolicy(t *testing.T, topo *topology.Topology, g *graph.Graph, policyYAML string) []compiler.DeviceRuleset {
+func compilePolicy(t *testing.T, topo *topology.Topology, g *graph.Graph, doc projectdoc.PolicyDoc) []compiler.DeviceRuleset {
 	t.Helper()
-	pol, err := rules.Load(strings.NewReader(policyYAML))
-	if err != nil {
-		t.Fatalf("load rules: %v", err)
-	}
+	pol := doc.ToPolicy()
 	if err := pol.Validate(topo); err != nil {
 		t.Fatalf("validate rules: %v", err)
 	}
-	sets, err := compiler.Compile(topo, pol, g, graph.DefaultLimits())
+	sets, err := compiler.Compile(topo, &pol, g, graph.DefaultLimits())
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	return sets
 }
 
-func runDiag(t *testing.T, policyYAML string, src, dst string, proto rules.Proto, dstPorts ...string) *diagnose.Report {
+func runDiag(t *testing.T, doc projectdoc.PolicyDoc, src, dst string, proto rules.Proto, dstPorts ...string) *diagnose.Report {
 	t.Helper()
 	topo, g := loadTopo(t)
-	sets := compilePolicy(t, topo, g, policyYAML)
+	sets := compilePolicy(t, topo, g, doc)
 	flow := diagnose.Flow{
 		Src:      netip.MustParseAddr(src),
 		Dst:      netip.MustParseAddr(dst),

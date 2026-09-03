@@ -2,7 +2,6 @@ package rules
 
 import (
 	"net/netip"
-	"strings"
 	"testing"
 
 	"github.com/kudes1/firenet/internal/topology"
@@ -199,26 +198,36 @@ func TestValidate_InvalidChainPosition(t *testing.T) {
 	}
 }
 
+func jumpRule(name string, action Action, jumpTo string) Rule {
+	return Rule{Name: name, Src: []string{"dangerous"}, Dst: []string{"dns"}, Proto: ProtoAny, Action: action, JumpTo: jumpTo}
+}
+
 func TestValidateJumpErrors(t *testing.T) {
 	topo := testTopology(t)
 	cases := []struct {
-		name, yaml string
+		name string
+		pol  *Policy
 	}{
-		{"jump without target", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n"},
-		{"jumpTo without jump", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: allow\n        jumpTo: B\n"},
-		{"unknown target", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: NOPE\n"},
-		{"self jump", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: A\n"},
-		{"cycle", "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: B\n  - name: B\n    rules:\n      - name: q\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: A\n"},
-		{"position on secondary", "chains:\n  - name: A\n    rules: []\n  - name: B\n    chainPosition: top\n    rules: []\n"},
-		{"dup chain names", "chains:\n  - name: A\n    rules: []\n  - name: A\n    rules: []\n"},
+		{"jump without target", &Policy{Chains: []Chain{{Name: "A", DefaultAction: ActionDeny, Rules: []Rule{jumpRule("r", ActionJump, "")}}}}},
+		{"jumpTo without jump", &Policy{Chains: []Chain{{Name: "A", DefaultAction: ActionDeny, Rules: []Rule{jumpRule("r", ActionAllow, "B")}}}}},
+		{"unknown target", &Policy{Chains: []Chain{{Name: "A", DefaultAction: ActionDeny, Rules: []Rule{jumpRule("r", ActionJump, "NOPE")}}}}},
+		{"self jump", &Policy{Chains: []Chain{{Name: "A", DefaultAction: ActionDeny, Rules: []Rule{jumpRule("r", ActionJump, "A")}}}}},
+		{"cycle", &Policy{Chains: []Chain{
+			{Name: "A", DefaultAction: ActionDeny, Rules: []Rule{jumpRule("r", ActionJump, "B")}},
+			{Name: "B", DefaultAction: ActionDeny, Rules: []Rule{jumpRule("q", ActionJump, "A")}},
+		}}},
+		{"position on secondary", &Policy{Chains: []Chain{
+			{Name: "A", DefaultAction: ActionDeny, Rules: []Rule{}},
+			{Name: "B", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{}},
+		}}},
+		{"dup chain names", &Policy{Chains: []Chain{
+			{Name: "A", DefaultAction: ActionDeny, Rules: []Rule{}},
+			{Name: "A", DefaultAction: ActionDeny, Rules: []Rule{}},
+		}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pol, err := Load(strings.NewReader(tc.yaml))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := pol.Validate(topo); err == nil {
+			if err := tc.pol.Validate(topo); err == nil {
 				t.Fatalf("expected validation error for %s", tc.name)
 			}
 		})
@@ -231,11 +240,10 @@ func TestValidateJumpErrors(t *testing.T) {
 }
 
 func TestValidateValidJumpChain(t *testing.T) {
-	in := "chains:\n  - name: A\n    rules:\n      - name: r\n        src: [dangerous]\n        dst: [dns]\n        action: jump\n        jumpTo: B\n  - name: B\n    defaultAction: deny\n    rules:\n      - name: dns-ok\n        src: [dangerous]\n        dst: [dns]\n        proto: udp\n        dstPorts: [\"53\"]\n        action: allow\n"
-	pol, err := Load(strings.NewReader(in))
-	if err != nil {
-		t.Fatal(err)
-	}
+	pol := &Policy{Chains: []Chain{
+		{Name: "A", DefaultAction: ActionDeny, ChainPosition: ChainTop, Rules: []Rule{jumpRule("r", ActionJump, "B")}},
+		{Name: "B", DefaultAction: ActionDeny, Rules: []Rule{{Name: "dns-ok", Src: []string{"dangerous"}, Dst: []string{"dns"}, Proto: ProtoUDP, DstPorts: []string{"53"}, Action: ActionAllow}}},
+	}}
 	if err := pol.Validate(testTopology(t)); err != nil {
 		t.Fatal(err)
 	}
