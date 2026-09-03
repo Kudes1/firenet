@@ -646,25 +646,25 @@ func run(ctx context.Context) error {
 **Dockerfile:** строка `ENTRYPOINT ["/firenet", "serve", "--addr", "0.0.0.0:8787"]` →
 `ENTRYPOINT ["/firenet"]` и `ENV FIRENET_ADDR=0.0.0.0:8787`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
-Failing-тест — компиляция: после Task 4 (удалён `rules.Load`) `internal/cli` не собирается; это и есть сигнал, что Task 6 нужен. Новый код `main.go` юнит-тестами не покрывается (как и старый `serve`) — его путь покрыт e2e.
+Failing-тест — компиляция: после Task 4 (удалил `rules.Load`) `internal/cli` не собирается; это и есть сигнал, что Task 6 нужен. Новый код `main.go` юнит-тестами не покрывается (как и старый `serve`) — его путь покрыт e2e.
 
-- [ ] **Step 2: Implement** — `FIRENET_ADDR` в config, новый `main.go`, удалить `internal/cli/` целиком, поправить Dockerfile.
+- [x] **Step 2: Implement** — `FIRENET_ADDR` в config, новый `main.go`, удалить `internal/cli/` целиком, поправить Dockerfile.
 
-- [ ] **Step 3: go mod tidy**
+- [x] **Step 3: go mod tidy**
 
 ```bash
 go mod tidy
 grep -c "spf13/cobra\|yaml.v3" go.mod   # 0 совпадений
 ```
 
-- [ ] **Step 4: Verify вместе с Task 4 и 5**
+- [x] **Step 4: Verify вместе с Task 4 и 5**
 
 Run: `go build ./... && go vet ./... && gofmt -l . && go test ./... -count=1`
 Expected: PASS. (Postgres-backed тесты пропустятся без `FIRENET_TEST_DATABASE_URL`; при наличии — прогонятся.)
 
-- [ ] **Step 5: Commit (Tasks 4+5+6 суммарно)**
+- [x] **Step 5: Commit (Tasks 4+5+6 суммарно)**
 
 ```bash
 git add -A
