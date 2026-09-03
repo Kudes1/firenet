@@ -687,7 +687,7 @@ git commit -m "refactor: drop YAML and CLI; binary runs the web server"
 - Consumes: Task 6 (бинарь без подкоманд, `FIRENET_ADDR`).
 - Produces: репозиторий без `gopkg.in/yaml.v3`.
 
-- [ ] **Step 1: e2e/global-setup.js**
+- [x] **Step 1: e2e/global-setup.js**
 
 Заменить блок spawn (~66–83):
 
@@ -708,21 +708,21 @@ git commit -m "refactor: drop YAML and CLI; binary runs the web server"
 
 (убрать `fs.mkdirSync("./.tmp/")`, хелпер `legacy`, `serve` и четыре флага). Комментарий заменить на: пустая БД → сервер сам сеет пустую версию 1.
 
-- [ ] **Step 2: Delete YAML data files**
+- [x] **Step 2: Delete YAML data files**
 
 ```bash
 git rm topology.yaml subnets.yaml rules.yaml
 git rm -r examples/
 ```
 
-- [ ] **Step 3: go.mod**
+- [x] **Step 3: go.mod**
 
 ```bash
 go mod tidy
 grep -c yaml go.mod   # 0 совпадений (cobra уже ушла в Task 6)
 ```
 
-- [ ] **Step 4: README.md**
+- [x] **Step 4: README.md**
 
 Раздел «При первом запуске…» (строки ~29–33) заменить на:
 
@@ -735,7 +735,7 @@ grep -c yaml go.mod   # 0 совпадений (cobra уже ушла в Task 6)
 В разделе «Конфигурация» описать `FIRENET_ADDR`; в «Структуре проекта»
 убрать упоминания `internal/cli`, если остались.
 
-- [ ] **Step 5: Full verification**
+- [x] **Step 5: Full verification**
 
 ```bash
 go build ./... && go vet ./... && gofmt -l . && go test ./... -count=1
@@ -745,7 +745,7 @@ make test-e2e
 
 Expected: всё зелёное. Для e2e нужны docker и chromium (`cd e2e && npm install && npx playwright install chromium` при первом запуске).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
