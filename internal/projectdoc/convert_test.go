@@ -1,9 +1,12 @@
 package projectdoc
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/kudes1/firenet/internal/rules"
 	"github.com/kudes1/firenet/internal/topology"
@@ -160,4 +163,63 @@ func TestToRules_Defaults(t *testing.T) {
 		t.Fatalf("round-trip lost defaults: %+v", back.Chains[0])
 	}
 }
+
+func TestConverters_MatchYAMLLoad(t *testing.T) {
+	topoYAML := `
+devices:
+  - {name: r1, kind: router}
+  - {name: s1, kind: switch}
+links:
+  - a: {device: r1}
+    b: {device: s1}
+networks:
+  - name: office
+    subnets: [lan]
+    attach: [{device: s1}]
+sets:
+  - name: hosts
+    subnets: [lan]
+    addresses: ["10.0.0.5"]
+unions:
+  - name: hq
+    devices: [r1]
+`
+	subnetsYAML := `
+subnets:
+  - {name: lan, cidr: 10.0.0.0/24}
+`
+	var tdoc TopologyDoc
+	if err := yaml.Unmarshal([]byte(topoYAML), &tdoc); err != nil {
+		t.Fatal(err)
+	}
+	var sdoc SubnetsDoc
+	if err := yaml.Unmarshal([]byte(subnetsYAML), &sdoc); err != nil {
+		t.Fatal(err)
+	}
+
+	viaYAML, err := topology.Load(strings.NewReader(topoYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subViaYAML, err := topology.LoadSubnets(strings.NewReader(subnetsYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaYAML.Subnets = subViaYAML
+
+	viaDoc, err := tdoc.ToTopology()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subViaDoc, err := sdoc.ToSubnets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaDoc.Subnets = subViaDoc
+
+	if !reflect.DeepEqual(viaYAML, viaDoc) {
+		t.Fatalf("converter mismatch:\nviaYAML=%+v\nviaDoc=%+v", viaYAML, viaDoc)
+	}
+}
+
 
