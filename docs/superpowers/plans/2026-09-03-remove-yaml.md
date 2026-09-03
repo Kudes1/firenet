@@ -381,7 +381,7 @@ git commit -m "refactor: app layer takes ProjectDoc; drop topology YAML parser"
 - Consumes: `PolicyDoc.ToPolicy()` с дефолтами (Task 1), `NewPolicyDoc`.
 - Produces: `internal/rules` без зависимости от YAML; все тесты пакета конструируют политики через `PolicyDoc`/литералы `Policy`.
 
-- [ ] **Step 1: Rewrite load_test.go**
+- [x] **Step 1: Rewrite load_test.go**
 
 Заменить YAML-строки на `PolicyDoc`:
 
@@ -396,7 +396,7 @@ func modernPolicy() projectdoc.PolicyDoc {
 
 Каждый тест: `pol := doc.ToPolicy()` вместо `Load(...)`. Тесты на «неизвестные поля», «битый YAML», «legacy flat формат» удалить (эти ошибки больше не могут возникнуть: doc приходит из БD с проверкой JSON-схемой сущностей). Тесты на дефолты уже в `projectdoc` (Task 1).
 
-- [ ] **Step 2: Update validate_test.go**
+- [x] **Step 2: Update validate_test.go**
 
 Места вида:
 
@@ -406,7 +406,7 @@ pol, err := Load(strings.NewReader(tc.yaml))
 
 заменить на конструирование `PolicyDoc` (в `TestValidateJumpErrors` таблица `yaml string` → таблица `doc projectdoc.PolicyDoc`; смысл кейсов тот же: jump без target, cycle и т.д.).
 
-- [ ] **Step 3: Delete rules/load.go**
+- [x] **Step 3: Delete rules/load.go**
 
 ```bash
 rm internal/rules/load.go
@@ -415,12 +415,12 @@ grep -rn "rules.Load" internal/ --include="*.go"   # пусто (после Task
 
 **Порядок важен:** этот шаг не компилируется, пока `internal/cli` и `httpapi/handlers.go` вызывают `rules.Load`. Поэтому Task 4 выполняется вместе с Task 5 и 6 до первого коммита-верификации. Рабочий порядок: сделать Step 1–2, затем сразу Task 5 и Task 6, и только потом билд/тест/коммит всех трёх.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `go build ./... && go test ./internal/rules/ -count=1` (после Tasks 5–6)
 Expected: PASS.
 
-- [ ] **Step 5: Commit (вместе с Task 5 и 6)**
+- [x] **Step 5: Commit (вместе с Task 5 и 6)**
 
 ```bash
 git add -A internal/rules
