@@ -1536,6 +1536,32 @@ test("closing the link panel with the close button restores the device kind stro
   assert.equal(byId(page.get, "device:r2").style.stroke, "#d97706", "end-b outline cleared via close button");
 });
 
+// пока панель связи открыта, всё кроме её концов и самой связи затемнено
+test("opening the link panel dims everything except the link and its endpoints", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  const alpha = (id) => byId(page.get, id).style.alpha ?? 1;
+  assert.equal(alpha("device:r1"), 1, "endpoint r1 stays bright");
+  assert.equal(alpha("device:r2"), 1, "endpoint r2 stays bright");
+  assert.equal(alpha("link:r1|r2"), 1, "edited link stays bright");
+  assert.ok(alpha("network:net1") < 1, "network cloud dimmed");
+  assert.ok(alpha("attach:net1|r1") < 1, "attachment line dimmed");
+});
+
+test("closing the link panel clears the dimming", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.canvas, "contextmenu", { clientX: 210, clientY: 70 });
+  fire(findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать"), "click", {});
+  fire(page.ids["link-panel-close"], "click", {});
+  const alpha = (id) => byId(page.get, id).style.alpha ?? 1;
+  assert.equal(alpha("network:net1"), 1, "network cloud restored");
+  assert.equal(alpha("attach:net1|r1"), 1, "attachment line restored");
+  assert.equal(alpha("device:r1"), 1, "endpoint r1 restored");
+});
+
 test("applying from the link panel clears the end outlines too", async () => {
   const page = await bootTopology(responses);
   await tick();
@@ -2198,6 +2224,50 @@ test("dragging a node sends one coalesced set-device-position, not one per mouse
   assert.equal(ops[0].kind, "set-device-position");
   assert.deepEqual(ops[0].deviceName, "r1");
   assert.deepEqual(ops[0].position, { x: 40 + 40, y: 40 + 20 }); // r1 starts at (40,40)
+});
+
+// --- режим добавления узла (device/network): фон создаёт, узлы можно
+// тащить/выделять, контекстное меню доступно без смены инструмента ---
+
+test("device tool keeps node drag and selection working; background still opens the popover", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  fire(page.ids["tool-device"], "click", {});
+  // drag a node while the add-device tool is active
+  const p = AT.r1;
+  fire(page.canvas, "mousedown", { button: 0, clientX: p.x, clientY: p.y });
+  fire(page.doc, "mousemove", { clientX: p.x + 30, clientY: p.y + 15 });
+  fire(page.doc, "mouseup", {});
+  await tick();
+  const ops = postedOps(page);
+  assert.equal(ops.length, 1, "drag under the add tool sends the position op");
+  assert.equal(ops[0].kind, "set-device-position");
+  assert.deepEqual(ops[0].position, { x: 40 + 30, y: 40 + 15 });
+  // a plain node click selects it (and does not open the popover)
+  fire(page.canvas, "mousedown", { button: 0, clientX: AT.r2.x, clientY: AT.r2.y });
+  fire(page.doc, "mouseup", {});
+  assert.equal(page.get("State.selection.size"), 1, "node click under the add tool selects the node");
+  assert.ok(page.ids["node-popover"].hidden, "popover stays closed on a node click");
+  // background click still opens the creation popover
+  fire(page.canvas, "click", { clientX: 900, clientY: 700 });
+  assert.ok(!page.ids["node-popover"].hidden, "background click opens the popover");
+});
+
+test("device tool: context menu edits a node without switching tools", async () => {
+  const page = await bootTopology(responses);
+  await tick();
+  const alpine = installDeviceEditAlpine(page);
+  try {
+    fire(page.ids["tool-device"], "click", {});
+    fire(page.canvas, "contextmenu", { clientX: AT.r1.x, clientY: AT.r1.y });
+    const edit = findBtn(ctxMenu(page), (b) => String(b.textContent) === "Редактировать");
+    assert.ok(edit, "edit item present while the add tool is active");
+    fire(edit, "click", {});
+    assert.deepEqual(alpine.calls[0]?.slice(0, 2), ["openDeviceEdit", "r1"], "editor opened without leaving the add tool");
+    assert.equal(page.get("State.tool"), "device", "tool unchanged after editing");
+  } finally {
+    alpine.done();
+  }
 });
 
 test("two quick drags queued before the first write resolves coalesce into a single trailing write", async () => {

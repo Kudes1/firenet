@@ -694,13 +694,13 @@ const Topology = (() => {
     return items;
   }
 
-  // Контекстное меню канвы: ПКМ по объекту в режиме select или по связи
-  // в режиме connect.
+  // Контекстное меню канвы: ПКМ по объекту (в режиме connect — только по
+  // связи); доступно во всех инструментах, включая device/network —
+  // «Редактировать» не должно требовать переключения в select.
   // Платформы шлют contextmenu в разное время: пока ПКМ зажата (Linux)
   // ждём чистый mouseup через ctxPending, после отпускания открываем сразу.
   function setupContextMenu() {
     canvas().addEventListener("contextmenu", (e) => {
-      if (State.tool !== "select" && State.tool !== "connect") return;
       e.preventDefault();
       const hit = HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z);
       const isNode = hit && (hit.nodeType === "device" || hit.nodeType === "network");
@@ -938,22 +938,25 @@ const Topology = (() => {
     else if (hit.id.startsWith("link:")) addWaypoint(hit.ref, toWorld(screenPoint(e)));
   }
 
-  // onPlainClick: клик по узлу без движения — connect/select/NetInfo.
+  // onPlainClick: клик по узлу без движения — connect/select/NetInfo;
+  // в режимах создания узлов (device/network) клик ведёт себя как в select:
+  // узел выделяется, а добавление остаётся за кликом по пустому фону.
   function onPlainClick(obj, ev) {
     const isDev = State.topology.devices.includes(obj);
     if (State.tool === "connect") isDev ? onDeviceConnect(obj.name) : onNetworkClick(obj.name);
-    else if (State.tool === "select") {
+    else if (State.tool !== "connect") {
       selectNode(obj, ev.shiftKey);
       LinkPanel.hide();
       isDev ? NetInfo.hide() : showNetInfo(obj);
     }
   }
 
-  // setupSelection: левая кнопка выбирает/тащит узлы, выделяет связи и
-  // привязки, на пустом месте в режиме select тянет рамку.
+  // setupSelection: левая кнопка выбирает/тащит узлы и выделяет связи и
+  // привязки во всех инструментах; на пустом месте в режиме select тянет
+  // рамку (в device/network фон оставлен созданию узла).
   function setupSelection() {
     canvas().addEventListener("mousedown", (e) => {
-      if (e.button !== 0 || State.tool === "device" || State.tool === "network") return;
+      if (e.button !== 0) return;
       const hit = HitTest.pick(State.list, toWorld(screenPoint(e)), State.camera.z);
       if (!hit) {
         if (State.tool === "select") startMarquee(e);
@@ -1350,22 +1353,37 @@ const Topology = (() => {
   const mark = (matched) => (searchQ ? (matched ? " search-hit" : " search-dim") : "");
   const shade = (matched) => (searchQ && !matched ? " search-dim" : "");
 
+  // editEndLink — объект связи, редактируемой в открытой панели (по паре
+  // концов), или null, пока панель закрыта.
+  const editEndLink = () => !linkPanelEnds ? null : State.topology.links.find((l) =>
+    (l.a.device === linkPanelEnds.first && l.b.device === linkPanelEnds.second)
+    || (l.a.device === linkPanelEnds.second && l.b.device === linkPanelEnds.first)) || null;
+
+  // editDim — класс затемнения при открытой панели связи: ярко остаются
+  // только её концы и сама связь.
+  const editDim = (dimmed) => (linkPanelEnds && dimmed ? " edit-dim" : "");
+
   // nodeClasses адаптирует TopoScene к состоянию редактора: контур узла
   // получает выделение/pending/подсветку поиска, внутренности — только
   // затемнение при поиске; привязки сравниваются по полям, не по ссылке.
   const nodeClasses = (obj, part) => {
     if (obj && obj.type === "attach") {
-      return (part === "shape" ? (attachSelected(obj.net, obj.device) ? " selected" : "") : "") + mark(false);
+      return (part === "shape" ? (attachSelected(obj.net, obj.device) ? " selected" : "") : "")
+        + editDim(true) + mark(false);
     }
+    if (obj && obj.a && obj.b) return editDim(obj !== editEndLink());
+    if (obj && obj.link) return editDim(obj.link !== editEndLink());
+    const isEnd = !!linkPanelEnds && State.topology.devices.includes(obj)
+      && (obj.name === linkPanelEnds.first || obj.name === linkPanelEnds.second);
     if (part === "shape") {
-      const endClass = linkPanelEnds && obj.name === linkPanelEnds.first ? " end-a"
-        : linkPanelEnds && obj.name === linkPanelEnds.second ? " end-b" : "";
+      const endClass = isEnd ? (obj.name === linkPanelEnds.first ? " end-a" : " end-b") : "";
       return (State.selection.has(obj) ? " selected" : "")
         + (pending && obj.name !== undefined && (pending.device === obj.name || pending.network === obj.name) ? " pending" : "")
         + endClass
+        + editDim(!isEnd)
         + mark(searchSet.has(obj));
     }
-    return shade(searchSet.has(obj));
+    return editDim(!isEnd) + shade(searchSet.has(obj));
   };
 
   // getOverlay — динамические элементы поверх сцены: превью связи и рамка.

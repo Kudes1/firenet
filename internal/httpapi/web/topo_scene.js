@@ -66,6 +66,7 @@ const TopoScene = (() => {
   // styled применяет состояния к базовому стилю по правилам спецификации:
   // selected/pending → accent; search-hit → утолщение контура; diag-flow-* →
   // лерп цвета и ширины по fade.flow; search-dim|diag-dim → alpha по fade.dim;
+  // edit-dim → мгновенное затемнение неучастников открытой панели связи;
   // end-a/end-b → цветные контуры двух концов редактируемой связи.
   // Служебный признак связи (base.wire) тратится на ширину flow-подсветки
   // и в итоговый стиль не выходит.
@@ -77,6 +78,7 @@ const TopoScene = (() => {
     if (states.has("search-hit")) st.lineWidth = (pub.lineWidth || 1) + 2;
     if (states.has("end-a")) { st.stroke = theme.endA; st.lineWidth = 2.5; }
     if (states.has("end-b")) { st.stroke = theme.endB; st.lineWidth = 2.5; }
+    if (states.has("edit-dim")) st.alpha = (st.alpha ?? 1) * theme.dimAlpha;
     const flow = states.has("diag-flow-ok") ? theme.flowOk
       : states.has("diag-flow-deny") ? theme.flowDeny
       : states.has("diag-flow-half") ? theme.flowHalf

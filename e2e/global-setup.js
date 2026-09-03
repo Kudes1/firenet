@@ -63,7 +63,7 @@ export default async function globalSetup() {
     await waitForPostgres(container);
 
     const appPort = await freePort();
-    // пустая БД -> сервер сам сеет пустую версию 1
+    // пустая БД -> сервер сам сеет версию 1 с дефолтной цепочкой правил
     server = spawn("bin/firenet", [], {
       cwd: new URL("../", import.meta.url).pathname,
       env: {

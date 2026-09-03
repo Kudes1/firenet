@@ -4,23 +4,27 @@
  - Make sure the code is easy to review.
  - The code must be unambiguous. It is implied that the code should do a specific thing; everything else is discarded.
 
+## Serena-first code navigation
+
+Use Serena MCP as the primary tool for exploring and understanding source code.
+
+When locating or analyzing code:
+
+ - Prefer Serena symbolic tools such as find_symbol, find_referencing_symbols, and get_symbols_overview.
+ - Prefer Serena search_for_pattern for textual searches inside the codebase.
+ - Use grep, glob, or broad file reads only when Serena is not suitable, cannot find the required information, or when working with non-code files such as configs, documentation, templates, logs, or generated files.
+ - Do not use repeated grep + read operations to discover relationships between code symbols when Serena can resolve them symbolically.
+ - Once the relevant code has been located, normal read, edit, and other client tools may be used for implementation.
+
+### For code navigation, follow this priority:
+ - Serena symbolic search
+ - Serena pattern search
+ - Targeted file read
+ - grep / glob as fallback
+
 ## Tool usage
- - Use MCP Context7 if it is available.
  - Use built-in OpenCode LSP (gopls, typescript-language-server) for code navigation.
  - Don't use playwright unless explicitly asked to do so.
-
-## Project structure
- - cmd/firenet/      entry point (cobra CLI: version, validate, compile, serve)
- - internal/app/     core (business logic, unaware of CLI/HTTP)
- - internal/cli/     CLI adapter (cobra)
- - internal/config/  configuration from env (FIRENET_LOG_LEVEL, FIRENET_LOG_FORMAT)
- - internal/logger/  structured logging (log/slog)
- - internal/topology/ network model: devices, links, subnets, zones
- - internal/rules/    the filtering rules model
- - internal/graph/    building a routing graph, searching for paths
- - internal/compiler/ Placing rules by device, ipset/iptables model
- - internal/render/   Render DeviceRuleset into text iptables/ipset scripts
- - internal/httpapi/  web UI (`serve`): htmx+alpine pages under web/, embedded via go:embed
 
 ## Verification (run in this order after any change)
  1. `go build ./...`
@@ -34,8 +38,7 @@ No linter beyond `go vet` is configured — don't try golangci-lint.
 
 Web UI JS tests run outside a browser on node:test with DOM stubs:
  - `node --test 'internal/httpapi/web/*.test.js'` — glob is required;
-   running on the directory fails because plain .js files get loaded as tests.
-No package.json / node_modules — only node built-ins.
+   running on the directory fails because plain .js files get loaded as tests. No package.json / node_modules — only node built-ins.
 
 ## Gotchas
  - `internal/httpapi/web/` assets are embedded at build time (`go:embed`):
@@ -44,9 +47,7 @@ No package.json / node_modules — only node built-ins.
    data for `validate`/`compile`/`serve`; examples/ holds pristine samples,
    out/ is generated output.
  - Tests assert directly on structs/strings; there is no golden-file/-update infra.
-  - e2e/ has its own package.json (playwright) — the app itself doesn't depend
-    on node; editing e2e helpers doesn't require rebuilding the binary, but
-    make test-e2e rebuilds bin/firenet via its build dependency anyway.
+ - e2e/ has its own package.json (playwright) — the app itself doesn't depend on node; editing e2e helpers doesn't require rebuilding the binary, but make test-e2e rebuilds bin/firenet via its build dependency anyway.
 
 ## Общие правила
  - Отвечай в чате и задавай вопросы на русском языке

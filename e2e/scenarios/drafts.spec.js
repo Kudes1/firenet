@@ -59,7 +59,6 @@ test("admin подтверждает черновик в новую версию
   await login(request);
   const id = await createDraft(request, name);
   await op(request, id, { kind: "create-device", device: { name: "df-c-r1", kind: "router" } });
-  const before = await getVersions(request);
   await loginViaUI(page);
   await page.goto(env().baseURL + "/ui/drafts");
   await page.locator("#drafts-table tbody tr", { hasText: name })
@@ -67,8 +66,11 @@ test("admin подтверждает черновик в новую версию
   await expect(page.locator("#confirm-btn")).toBeVisible();
   await page.locator("#confirm-btn").click();
   await expect(page.locator("#error-banner")).toContainText(/Черновик подтверждён как версия \d+/);
-  await expect.poll(async () => (await getVersions(request)).length)
-    .toBe(before.length + 1);
+  // Ищем версию именно этого черновика: параллельные тесты подтверждают
+  // свои черновики, поэтому ни длина списка, ни последний ID не стабильны.
+  await expect.poll(async () =>
+    (await getVersions(request)).some((v) => v.draftId === id)
+  ).toBe(true);
 });
 
 test("не-admin: подтверждение недоступно", async ({ page, request }) => {

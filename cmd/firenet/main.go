@@ -14,6 +14,7 @@ import (
 	"github.com/kudes1/firenet/internal/logger"
 	"github.com/kudes1/firenet/internal/pgstore"
 	"github.com/kudes1/firenet/internal/projectdoc"
+	"github.com/kudes1/firenet/internal/rules"
 )
 
 func main() {
@@ -59,7 +60,17 @@ func run(ctx context.Context) error {
 	}
 
 	projects := pgstore.NewStore(pool)
-	if _, err := projects.SeedInitialVersion(ctx, projectdoc.ProjectDoc{}, actor); err != nil {
+	// A fresh install seeds an empty project that still carries the
+	// primary chain — the rules page (and compile) expect it, matching
+	// the pre-YAML defaultPolicyDoc fallback.
+	if _, err := projects.SeedInitialVersion(ctx, projectdoc.ProjectDoc{
+		Rules: projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+			Name:          rules.DefaultChainName,
+			DefaultAction: string(rules.ActionDeny),
+			ChainPosition: string(rules.ChainTop),
+			Rules:         []projectdoc.RuleDoc{},
+		}}},
+	}, actor); err != nil {
 		return fmt.Errorf("seed initial version: %w", err)
 	}
 
