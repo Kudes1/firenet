@@ -9,6 +9,7 @@ import (
 	"github.com/kudes1/firenet/internal/compiler"
 	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/graph"
+	"github.com/kudes1/firenet/internal/projectdoc"
 	"github.com/kudes1/firenet/internal/rules"
 	"github.com/kudes1/firenet/internal/topology"
 )
@@ -80,11 +81,31 @@ rules:
 
 func loadTopo(t *testing.T) (*topology.Topology, *graph.Graph) {
 	t.Helper()
-	topo, err := topology.Load(strings.NewReader(diagTopology))
+	tdoc := projectdoc.TopologyDoc{
+		Devices: []projectdoc.DeviceDoc{
+			{Name: "r1", Kind: "router"},
+			{Name: "r2", Kind: "router"},
+		},
+		Links: []projectdoc.LinkDoc{
+			{A: projectdoc.EndpointDoc{Device: "r1"}, B: projectdoc.EndpointDoc{Device: "r2"}},
+		},
+		Networks: []projectdoc.NetworkDoc{
+			{Name: "n-office", Subnets: []string{"office"}, Attach: []projectdoc.EndpointDoc{{Device: "r1"}}},
+			{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []projectdoc.EndpointDoc{{Device: "r2"}}},
+		},
+	}
+	sdoc := projectdoc.SubnetsDoc{
+		Subnets: []projectdoc.SubnetDoc{
+			{Name: "office", CIDR: "10.0.0.0/24"},
+			{Name: "dmz", CIDR: "10.0.1.0/24"},
+			{Name: "isolated", CIDR: "10.0.2.0/24"},
+		},
+	}
+	topo, err := tdoc.ToTopology()
 	if err != nil {
 		t.Fatalf("load topology: %v", err)
 	}
-	subs, err := topology.LoadSubnets(strings.NewReader(diagSubnets))
+	subs, err := sdoc.ToSubnets()
 	if err != nil {
 		t.Fatalf("load subnets: %v", err)
 	}
@@ -320,44 +341,44 @@ func TestRun_ReturnPathAllowed_FalseWhenFullyUnreachable(t *testing.T) {
 	}
 }
 
-const chainedReExportDiagTopology = `
-devices:
-  - {name: market, kind: router}
-  - {name: dc, kind: router}
-  - {name: office, kind: router}
-links:
-  - a: {device: market}
-    b: {device: dc}
-    filter: {a-exports: [MARKET], b-exports: [DC]}
-  - a: {device: office}
-    b: {device: dc}
-    filter: {a-exports: [OFFICE], b-exports: [DC, MARKET]}
-networks:
-  - {name: MARKET, subnets: [market-net], attach: [{device: market}]}
-  - {name: DC, subnets: [dc-net], attach: [{device: dc}]}
-  - {name: OFFICE, subnets: [office-net], attach: [{device: office}]}
-`
-
-const chainedReExportDiagSubnets = `
-subnets:
-  - {name: market-net, cidr: 10.9.0.0/24}
-  - {name: dc-net, cidr: 10.9.1.0/24}
-  - {name: office-net, cidr: 10.9.2.0/24}
-`
-
-// office learned a route to MARKET because dc re-exports it (b-exports on
-// the office-dc link includes MARKET); market never learned a route back
-// to OFFICE (b-exports on the market-dc link only has DC). This mirrors
-// the real-world scenario the diagnose UI is meant to surface: the request
-// physically arrives, the response has no route home — a routing gap, not
-// a firewall verdict, but ReturnPathAllowed reports the same false either
-// way (see internal/diagnose/diagnose.go's pathResults/returnPathAllowed).
-func TestRun_ChainedReExportRequestArrivesReturnHasNoRoute(t *testing.T) {
-	topo, err := topology.Load(strings.NewReader(chainedReExportDiagTopology))
+func chainedReExportTopo(t *testing.T) (*topology.Topology, *graph.Graph) {
+	t.Helper()
+	tdoc := projectdoc.TopologyDoc{
+		Devices: []projectdoc.DeviceDoc{
+			{Name: "market", Kind: "router"},
+			{Name: "dc", Kind: "router"},
+			{Name: "office", Kind: "router"},
+		},
+		Links: []projectdoc.LinkDoc{
+			{
+				A:      projectdoc.EndpointDoc{Device: "market"},
+				B:      projectdoc.EndpointDoc{Device: "dc"},
+				Filter: &projectdoc.LinkFilterDoc{AExports: []string{"MARKET"}, BExports: []string{"DC"}},
+			},
+			{
+				A:      projectdoc.EndpointDoc{Device: "office"},
+				B:      projectdoc.EndpointDoc{Device: "dc"},
+				Filter: &projectdoc.LinkFilterDoc{AExports: []string{"OFFICE"}, BExports: []string{"DC", "MARKET"}},
+			},
+		},
+		Networks: []projectdoc.NetworkDoc{
+			{Name: "MARKET", Subnets: []string{"market-net"}, Attach: []projectdoc.EndpointDoc{{Device: "market"}}},
+			{Name: "DC", Subnets: []string{"dc-net"}, Attach: []projectdoc.EndpointDoc{{Device: "dc"}}},
+			{Name: "OFFICE", Subnets: []string{"office-net"}, Attach: []projectdoc.EndpointDoc{{Device: "office"}}},
+		},
+	}
+	sdoc := projectdoc.SubnetsDoc{
+		Subnets: []projectdoc.SubnetDoc{
+			{Name: "market-net", CIDR: "10.9.0.0/24"},
+			{Name: "dc-net", CIDR: "10.9.1.0/24"},
+			{Name: "office-net", CIDR: "10.9.2.0/24"},
+		},
+	}
+	topo, err := tdoc.ToTopology()
 	if err != nil {
 		t.Fatalf("load topology: %v", err)
 	}
-	subs, err := topology.LoadSubnets(strings.NewReader(chainedReExportDiagSubnets))
+	subs, err := sdoc.ToSubnets()
 	if err != nil {
 		t.Fatalf("load subnets: %v", err)
 	}
@@ -369,6 +390,73 @@ func TestRun_ChainedReExportRequestArrivesReturnHasNoRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build graph: %v", err)
 	}
+	return topo, g
+}
+
+func switchFilterTopo(t *testing.T, withFilter bool) (*topology.Topology, *graph.Graph) {
+	t.Helper()
+	link := projectdoc.LinkDoc{
+		A: projectdoc.EndpointDoc{Device: "sw-a"},
+		B: projectdoc.EndpointDoc{Device: "sw-b"},
+	}
+	if withFilter {
+		link.Filter = &projectdoc.LinkFilterDoc{AExports: []string{"NA"}, BExports: []string{"NB"}}
+	}
+	tdoc := projectdoc.TopologyDoc{
+		Devices: []projectdoc.DeviceDoc{
+			{Name: "ra", Kind: "router"},
+			{Name: "rb", Kind: "router"},
+			{Name: "rc", Kind: "router"},
+			{Name: "sw-a", Kind: "switch"},
+			{Name: "sw-b", Kind: "switch"},
+		},
+		Links: []projectdoc.LinkDoc{
+			{A: projectdoc.EndpointDoc{Device: "ra"}, B: projectdoc.EndpointDoc{Device: "sw-a"}},
+			{A: projectdoc.EndpointDoc{Device: "rb"}, B: projectdoc.EndpointDoc{Device: "sw-b"}},
+			{A: projectdoc.EndpointDoc{Device: "rc"}, B: projectdoc.EndpointDoc{Device: "sw-b"}},
+			link,
+		},
+		Networks: []projectdoc.NetworkDoc{
+			{Name: "NA", Subnets: []string{"a"}, Attach: []projectdoc.EndpointDoc{{Device: "ra"}}},
+			{Name: "NB", Subnets: []string{"b"}, Attach: []projectdoc.EndpointDoc{{Device: "rb"}}},
+			{Name: "NC", Subnets: []string{"c"}, Attach: []projectdoc.EndpointDoc{{Device: "rc"}}},
+		},
+	}
+	sdoc := projectdoc.SubnetsDoc{
+		Subnets: []projectdoc.SubnetDoc{
+			{Name: "a", CIDR: "10.20.0.0/24"},
+			{Name: "b", CIDR: "10.20.1.0/24"},
+			{Name: "c", CIDR: "10.20.2.0/24"},
+		},
+	}
+	topo, err := tdoc.ToTopology()
+	if err != nil {
+		t.Fatalf("load topology: %v", err)
+	}
+	subs, err := sdoc.ToSubnets()
+	if err != nil {
+		t.Fatalf("load subnets: %v", err)
+	}
+	topo.Subnets = subs
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("validate topology: %v", err)
+	}
+	g, err := graph.Build(topo)
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	return topo, g
+}
+
+// office learned a route to MARKET because dc re-exports it (b-exports on
+// the office-dc link includes MARKET); market never learned a route back
+// to OFFICE (b-exports on the market-dc link only has DC). This mirrors
+// the real-world scenario the diagnose UI is meant to surface: the request
+// physically arrives, the response has no route home — a routing gap, not
+// a firewall verdict, but ReturnPathAllowed reports the same false either
+// way (see internal/diagnose/diagnose.go's pathResults/returnPathAllowed).
+func TestRun_ChainedReExportRequestArrivesReturnHasNoRoute(t *testing.T) {
+	topo, g := chainedReExportTopo(t)
 	rep, err := diagnose.Run(topo, nil, g, graph.DefaultLimits(), diagnose.Flow{
 		Src: netip.MustParseAddr("10.9.2.5"), Dst: netip.MustParseAddr("10.9.0.5"), Proto: rules.ProtoAny,
 	})
@@ -383,55 +471,13 @@ func TestRun_ChainedReExportRequestArrivesReturnHasNoRoute(t *testing.T) {
 	}
 }
 
-const switchFilterDiagTopology = `
-devices:
-  - {name: ra, kind: router}
-  - {name: rb, kind: router}
-  - {name: rc, kind: router}
-  - {name: sw-a, kind: switch}
-  - {name: sw-b, kind: switch}
-links:
-  - {a: {device: ra}, b: {device: sw-a}}
-  - {a: {device: rb}, b: {device: sw-b}}
-  - {a: {device: rc}, b: {device: sw-b}}
-  - a: {device: sw-a}
-    b: {device: sw-b}
-    filter: {a-exports: [NA], b-exports: [NB]}
-networks:
-  - {name: NA, subnets: [a], attach: [{device: ra}]}
-  - {name: NB, subnets: [b], attach: [{device: rb}]}
-  - {name: NC, subnets: [c], attach: [{device: rc}]}
-`
-
-const switchFilterDiagSubnets = `
-subnets:
-  - {name: a, cidr: 10.20.0.0/24}
-  - {name: b, cidr: 10.20.1.0/24}
-  - {name: c, cidr: 10.20.2.0/24}
-`
-
 // A filtered switch-switch link constrains route propagation across the
 // trunk exactly like a filtered router-router link: b is announced across
 // sw-a→sw-b (BExports) and stays reachable, c is not and becomes
 // unreachable at the network layer — not because of any firewall verdict
 // (sets is nil: every router allows unconditionally), a routing gap.
 func TestRun_FilteredSwitchLinkConstrainsPropagation(t *testing.T) {
-	topo, err := topology.Load(strings.NewReader(switchFilterDiagTopology))
-	if err != nil {
-		t.Fatalf("load topology: %v", err)
-	}
-	subs, err := topology.LoadSubnets(strings.NewReader(switchFilterDiagSubnets))
-	if err != nil {
-		t.Fatalf("load subnets: %v", err)
-	}
-	topo.Subnets = subs
-	if err := topo.Validate(); err != nil {
-		t.Fatalf("validate topology: %v", err)
-	}
-	g, err := graph.Build(topo)
-	if err != nil {
-		t.Fatalf("build graph: %v", err)
-	}
+	topo, g := switchFilterTopo(t, true)
 
 	repAB, err := diagnose.Run(topo, nil, g, graph.DefaultLimits(), diagnose.Flow{
 		Src: netip.MustParseAddr("10.20.0.5"), Dst: netip.MustParseAddr("10.20.1.5"), Proto: rules.ProtoAny,
@@ -474,23 +520,7 @@ func TestRun_FilteredSwitchLinkConstrainsPropagation(t *testing.T) {
 // sw-b like b) stays reachable from a in a single path. Nothing in Tasks
 // 1-4 should have changed this.
 func TestRun_PlainSwitchLinkStillMergesDomain(t *testing.T) {
-	topo, err := topology.Load(strings.NewReader(switchFilterDiagTopology))
-	if err != nil {
-		t.Fatalf("load topology: %v", err)
-	}
-	topo.Links[3].Filter = nil // same topology, plain sw-a/sw-b link
-	subs, err := topology.LoadSubnets(strings.NewReader(switchFilterDiagSubnets))
-	if err != nil {
-		t.Fatalf("load subnets: %v", err)
-	}
-	topo.Subnets = subs
-	if err := topo.Validate(); err != nil {
-		t.Fatalf("validate topology: %v", err)
-	}
-	g, err := graph.Build(topo)
-	if err != nil {
-		t.Fatalf("build graph: %v", err)
-	}
+	topo, g := switchFilterTopo(t, false)
 	rep, err := diagnose.Run(topo, nil, g, graph.DefaultLimits(), diagnose.Flow{
 		Src: netip.MustParseAddr("10.20.0.5"), Dst: netip.MustParseAddr("10.20.2.5"), Proto: rules.ProtoAny,
 	})

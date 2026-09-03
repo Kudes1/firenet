@@ -7,39 +7,47 @@ import (
 	"testing"
 
 	"github.com/kudes1/firenet/internal/diagnose"
+	"github.com/kudes1/firenet/internal/projectdoc"
 	"github.com/kudes1/firenet/internal/rules"
 )
 
-const diagAppTopology = `
-devices:
-  - {name: r1, kind: router}
-  - {name: r2, kind: router}
-links:
-  - {a: {device: r1}, b: {device: r2}}
-networks:
-  - {name: n-office, subnets: [office], attach: [{device: r1}]}
-  - {name: n-dmz, subnets: [dmz], attach: [{device: r2}]}
-`
-
-const diagAppSubnets = `
-subnets:
-  - {name: office, cidr: 10.0.0.0/24}
-  - {name: dmz, cidr: 10.0.1.0/24}
-`
-
-const diagAppRules = `
-defaultAction: deny
-chainName: FIRENET-FWD
-chainPosition: top
-rules:
-  - {name: office-to-dmz, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: allow}
-`
+func diagDocFixture() projectdoc.ProjectDoc {
+	return projectdoc.ProjectDoc{
+		Topology: projectdoc.TopologyDoc{
+			Devices: []projectdoc.DeviceDoc{
+				{Name: "r1", Kind: "router"},
+				{Name: "r2", Kind: "router"},
+			},
+			Links: []projectdoc.LinkDoc{
+				{A: projectdoc.EndpointDoc{Device: "r1"}, B: projectdoc.EndpointDoc{Device: "r2"}},
+			},
+			Networks: []projectdoc.NetworkDoc{
+				{Name: "n-office", Subnets: []string{"office"}, Attach: []projectdoc.EndpointDoc{{Device: "r1"}}},
+				{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []projectdoc.EndpointDoc{{Device: "r2"}}},
+			},
+		},
+		Subnets: projectdoc.SubnetsDoc{
+			Subnets: []projectdoc.SubnetDoc{
+				{Name: "office", CIDR: "10.0.0.0/24"},
+				{Name: "dmz", CIDR: "10.0.1.0/24"},
+			},
+		},
+		Rules: projectdoc.PolicyDoc{
+			Chains: []projectdoc.ChainDoc{{
+				Name:          "FIRENET-FWD",
+				DefaultAction: "deny",
+				ChainPosition: "top",
+				Rules: []projectdoc.RuleDoc{
+					{Name: "office-to-dmz", Src: []string{"office"}, Dst: []string{"dmz"}, Proto: "tcp", DstPorts: []string{"443"}, Action: "allow"},
+				},
+			}},
+		},
+	}
+}
 
 func TestDiagnose_MatchesCompileVerdicts(t *testing.T) {
 	rep, err := Diagnose(context.Background(), discardLogger(), DiagnoseOptions{
-		TopologyYAML: []byte(diagAppTopology),
-		SubnetsYAML:  []byte(diagAppSubnets),
-		RulesYAML:    []byte(diagAppRules),
+		Doc: diagDocFixture(),
 		Flow: diagnose.Flow{
 			Src:      netip.MustParseAddr("10.0.0.5"),
 			Dst:      netip.MustParseAddr("10.0.1.7"),
@@ -64,9 +72,7 @@ func TestDiagnose_MatchesCompileVerdicts(t *testing.T) {
 
 func TestDiagnose_UnknownIPErrors(t *testing.T) {
 	_, err := Diagnose(context.Background(), discardLogger(), DiagnoseOptions{
-		TopologyYAML: []byte(diagAppTopology),
-		SubnetsYAML:  []byte(diagAppSubnets),
-		RulesYAML:    []byte(diagAppRules),
+		Doc: diagDocFixture(),
 		Flow: diagnose.Flow{
 			Src: netip.MustParseAddr("10.0.0.5"),
 			Dst: netip.MustParseAddr("192.168.99.99"),

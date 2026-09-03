@@ -1,12 +1,9 @@
 package projectdoc
 
 import (
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/kudes1/firenet/internal/rules"
 	"github.com/kudes1/firenet/internal/topology"
@@ -164,62 +161,42 @@ func TestToRules_Defaults(t *testing.T) {
 	}
 }
 
-func TestConverters_MatchYAMLLoad(t *testing.T) {
-	topoYAML := `
-devices:
-  - {name: r1, kind: router}
-  - {name: s1, kind: switch}
-links:
-  - a: {device: r1}
-    b: {device: s1}
-networks:
-  - name: office
-    subnets: [lan]
-    attach: [{device: s1}]
-sets:
-  - name: hosts
-    subnets: [lan]
-    addresses: ["10.0.0.5"]
-unions:
-  - name: hq
-    devices: [r1]
-`
-	subnetsYAML := `
-subnets:
-  - {name: lan, cidr: 10.0.0.0/24}
-`
-	var tdoc TopologyDoc
-	if err := yaml.Unmarshal([]byte(topoYAML), &tdoc); err != nil {
-		t.Fatal(err)
+func TestConverters_ExpectedTopology(t *testing.T) {
+	tdoc := TopologyDoc{
+		Devices: []DeviceDoc{
+			{Name: "r1", Kind: "router"},
+			{Name: "s1", Kind: "switch"},
+		},
+		Links: []LinkDoc{
+			{A: EndpointDoc{Device: "r1"}, B: EndpointDoc{Device: "s1"}},
+		},
+		Networks: []NetworkDoc{
+			{Name: "office", Subnets: []string{"lan"}, Attach: []EndpointDoc{{Device: "s1"}}},
+		},
+		Sets: []SetDoc{
+			{Name: "hosts", Subnets: []string{"lan"}, Addresses: []string{"10.0.0.5"}},
+		},
+		Unions: []UnionDoc{
+			{Name: "hq", Devices: []string{"r1"}},
+		},
 	}
-	var sdoc SubnetsDoc
-	if err := yaml.Unmarshal([]byte(subnetsYAML), &sdoc); err != nil {
-		t.Fatal(err)
+	sdoc := SubnetsDoc{
+		Subnets: []SubnetDoc{
+			{Name: "lan", CIDR: "10.0.0.0/24"},
+		},
 	}
 
-	viaYAML, err := topology.Load(strings.NewReader(topoYAML))
+	topo, err := tdoc.ToTopology()
 	if err != nil {
 		t.Fatal(err)
 	}
-	subViaYAML, err := topology.LoadSubnets(strings.NewReader(subnetsYAML))
+	subnets, err := sdoc.ToSubnets()
 	if err != nil {
 		t.Fatal(err)
 	}
-	viaYAML.Subnets = subViaYAML
+	topo.Subnets = subnets
 
-	viaDoc, err := tdoc.ToTopology()
-	if err != nil {
-		t.Fatal(err)
-	}
-	subViaDoc, err := sdoc.ToSubnets()
-	if err != nil {
-		t.Fatal(err)
-	}
-	viaDoc.Subnets = subViaDoc
-
-	if !reflect.DeepEqual(viaYAML, viaDoc) {
-		t.Fatalf("converter mismatch:\nviaYAML=%+v\nviaDoc=%+v", viaYAML, viaDoc)
+	if len(topo.Devices) != 2 || len(topo.Links) != 1 || len(topo.Networks) != 1 || len(topo.Sets) != 1 || len(topo.Unions) != 1 || len(topo.Subnets) != 1 {
+		t.Fatalf("unexpected topology result: %+v", topo)
 	}
 }
-
-

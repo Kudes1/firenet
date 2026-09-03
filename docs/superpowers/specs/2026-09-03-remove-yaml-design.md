@@ -9,10 +9,9 @@
 переехало в PostgreSQL (`internal/pgstore`: версионирование + черновики),
 но YAML остался в четырёх ролях:
 
-1. **Legacy-импорт**: `firenet serve` при первом запуске читает корневые
-   YAML-файлы и сеет их как версию 1 (`internal/cli/legacy.go`,
-   `internal/cli/serve.go`, `internal/httpapi/store.go` →
-   `pgstore.SeedInitialVersion`).
+1. **Legacy-импорт**: при первом запуске читаются корневые YAML-файлы и
+   сеются как версия 1 (`internal/cli/legacy.go`, `internal/cli/serve.go`,
+   `internal/httpapi/store.go` → `pgstore.SeedInitialVersion`).
 2. **Вход CLI**: `firenet validate` и `firenet compile` принимают
    YAML-файлы флагами `--topology/--subnets/--rules`.
 3. **Внутренний формат-посредник**: httpapi конвертирует `ProjectDoc`
@@ -23,7 +22,11 @@
    yaml-теги в wire-типах.
 
 Решение: данные живут **только в PostgreSQL**. YAML удаляется полностью —
-включая внутренний конвейер.
+включая внутренний конвейер. Заодно удаляется CLI: все функции переехали
+в веб-интерфейс, headless-развёртывание скриптов не используется
+(в перспективе его заменит агент на устройствах, читающий данные из API).
+Бинарь превращается из CLI-приложения в сервер: `firenet` без подкоманд
+просто запускает веб-приложение.
 
 ## Решение
 
@@ -97,44 +100,63 @@
 - Тест-фикстуры: YAML-строки в `handlers_test.go` и `writeDraftRules`
   переводятся на конструирование `projectdoc`-структур напрямую.
 
-### 5. CLI — данные из БД
+### 5. CLI удаляется; бинарь = сервер
 
-- `internal/cli/legacy.go` и `legacy_test.go` — удаляются.
+Все функции CLI уже покрыты веб-интерфейсом (валидация и компиляция —
+страницы UI; скачивание скриптов — через браузер). Headless-развёртывание
+не используется; в перспективе его заменит агент на устройствах, читающий
+правила и ipset из API. Поэтому вместо перевода CLI на чтение из БД
+(изначальный замысел) пакет удаляется целиком:
+
+- `internal/cli/` — удаляется весь пакет (`root.go`, `serve.go`,
+  `validate.go`, `compile.go`, `version.go`, `legacy.go`, `legacy_test.go`);
+  `github.com/spf13/cobra` уходит из `go.mod`.
+- `cmd/firenet/main.go` сам делает то, что делал `serve` без legacy-части:
+  `config.Load()` → `logger.New` → `db.Open` → `db.Migrate` →
+  `BootstrapAdmin` → `SeedInitialVersion(ctx, projectdoc.ProjectDoc{},
+  actor)` → `httpapi.NewServer` → `http.ListenAndServe`.
 - `internal/httpapi/store.go` (`FileProjectStore`) — удаляется.
-- `serve`: флаги `--topology/--subnets/--rules` удаляются; вместо
-  legacy-импорта на пустой БД сеется пустой проект:
-  `projects.SeedInitialVersion(ctx, projectdoc.ProjectDoc{}, actor)`
-  (остаётся но-опом на непустой БД; UI не получает 404 `ErrNoVersions`).
-- `validate`: подключается к БД (`config.Load()` → `FIRENET_DATABASE_URL`
-  обязателен), читает текущую версию
-  (`pgstore.CurrentVersion` → `ReadAt`) → `app.LoadProject(doc)` +
-  `doc.ToRules()` + `pol.Validate(topo)`. Вывод `OK` / ошибки.
-- `compile`: тот же доступ к БД; `app.Compile(ctx, log,
-  CompileOptions{Doc: doc, MaxHops, MaxPaths})`; флаги `--out`,
-  `--stdout`, `--device`, `--max-hops`, `--max-paths` сохраняются.
-- Общий хелпер `openProjects(ctx, cfg) (*pgstore.Store, error)` в cli
-  для validate/compile/serve (открытие пула + миграции).
+- `app.Version()` из `cli/version.go` больше не вызывается — проверяется
+  использование и удаляется, если клиентов нет (тест `version_test.go`
+  при наличии).
+- Адрес слушателя: флаг `--addr` заменяется на переменную
+  `FIRENET_ADDR` в `config.Config` (дефолт `127.0.0.1:8787`);
+  Dockerfile ENTRYPOINT меняется на `["/firenet"]` с
+  `FIRENET_ADDR=0.0.0.0:8787` в ENV (или адрес задаётся в
+  docker-compose.yml).
+- Флаг `--open` (открыть браузер на старте) не переносится.
 
 ### 6. Файлы, документация, зависимости
 
 - Удаляются: `topology.yaml`, `subnets.yaml`, `rules.yaml` (корень),
   `examples/`.
-- `e2e/global-setup.js`: флаги `--topology/--subnets/--rules` и
-  `./.tmp/`-махинации убираются — сервер стартует просто с
+- `e2e/global-setup.js`: подкоманда `serve` и флаги
+  `--topology/--subnets/--rules`, `--addr` и `./.tmp/`-махинации
+  убираются — `bin/firenet` стартует с `FIRENET_ADDR` и
   `FIRENET_DATABASE_URL` (пустая БД → пустая версия 1, e2e-сценарии
   создают данные сами через UI/API).
+- `Dockerfile`: `ENTRYPOINT ["/firenet"]`; `serve --addr` больше не
+  существует.
 - `README.md`: раздел про импорт YAML при первом запуске заменяется на
   «данные хранятся в PostgreSQL; при первом запуске создаётся пустой
-  проект»; структура проекта — без `internal/topology` изменений.
-- `go.mod`: `go mod tidy` убирает `gopkg.in/yaml.v3`.
-- `.gitignore`, Makefile — без изменений.
+  проект»; из описания структуры проекта уходит `internal/cli`.
+- `go.mod`: `go mod tidy` убирает `gopkg.in/yaml.v3` и
+  `github.com/spf13/cobra`.
+- `.gitignore`, Makefile — без изменений (сборка `./cmd/firenet`
+  сохраняется).
 
 ## Риски / совместимость
 
-- Пользователи, запускавшие `validate`/`compile` с YAML-флагами, должны
-  будут поднять БД (serve/первичный импорт исчезает — у кого данные
-  только в YAML, теряют их; по договорённости с владельцем проекта это
-  принято).
+- Breaking change строже исходного замысла: исчезают команды
+  `validate`, `compile`, `serve`, `version`, а также флаги
+  `--out/--stdout/--device/--max-hops/--max-paths` у compile. Кто
+  держал cron/скрипты на `compile --out`, теряет эту возможность;
+  headless-компиляция не используется (владелец проекта подтвердил),
+  в перспективе её заменит агент на устройствах. Первичный импорт
+  YAML исчезает — у кого данные только в YAML, теряют их; по
+  договорённости с владельцем проекта это принято.
+- Адрес сервера теперь задаётся только переменной `FIRENET_ADDR` —
+  флага `--addr` больше нет (docker-compose/e2e обновляются).
 - Дефолты правил переносятся в `ToPolicy` — покрывается тестами на
   равенство с прежним `rules.Load` (задача 4).
 - e2e стартует с пустым проектом; сценарии уже создают данные сами
@@ -147,4 +169,5 @@
   app/httpapi-тесты.
 - Регресс: `go build ./...`, `go vet ./...`, `gofmt -l .`, `go test ./...`,
   `node --test internal/httpapi/web/*.test.js`, `make test-e2e`.
-- CLI вручную: `validate`/`compile` против запущенного Postgres.
+- Вручную: запуск `bin/firenet` против живого Postgres — сервер
+  поднимается, UI работает.

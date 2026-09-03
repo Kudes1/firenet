@@ -7,42 +7,48 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kudes1/firenet/internal/projectdoc"
 )
-
-const e2eTopology = `
-devices:
-  - {name: r1, kind: router}
-  - {name: r2, kind: router}
-networks:
-  - name: office
-    subnets: [office]
-    attach: [{device: r1}, {device: r2}]
-  - name: dmz
-    subnets: [dmz]
-    attach: [{device: r1}, {device: r2}]
-`
-
-const e2eSubnets = `
-subnets:
-  - {name: office, cidr: 10.0.0.0/24}
-  - {name: dmz, cidr: 10.0.1.0/24}
-`
-
-const e2eRules = `
-defaultAction: deny
-rules:
-  - {name: office-to-dmz-https, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: allow}
-`
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func e2eDoc() projectdoc.ProjectDoc {
+	return projectdoc.ProjectDoc{
+		Topology: projectdoc.TopologyDoc{
+			Devices: []projectdoc.DeviceDoc{
+				{Name: "r1", Kind: "router"},
+				{Name: "r2", Kind: "router"},
+			},
+			Networks: []projectdoc.NetworkDoc{
+				{Name: "office", Subnets: []string{"office"}, Attach: []projectdoc.EndpointDoc{{Device: "r1"}, {Device: "r2"}}},
+				{Name: "dmz", Subnets: []string{"dmz"}, Attach: []projectdoc.EndpointDoc{{Device: "r1"}, {Device: "r2"}}},
+			},
+		},
+		Subnets: projectdoc.SubnetsDoc{
+			Subnets: []projectdoc.SubnetDoc{
+				{Name: "office", CIDR: "10.0.0.0/24"},
+				{Name: "dmz", CIDR: "10.0.1.0/24"},
+			},
+		},
+		Rules: projectdoc.PolicyDoc{
+			Chains: []projectdoc.ChainDoc{{
+				Name:          "FIRENET-FWD",
+				DefaultAction: "deny",
+				ChainPosition: "top",
+				Rules: []projectdoc.RuleDoc{
+					{Name: "office-to-dmz-https", Src: []string{"office"}, Dst: []string{"dmz"}, Proto: "tcp", DstPorts: []string{"443"}, Action: "allow"},
+				},
+			}},
+		},
+	}
+}
+
 func TestCompile_EndToEnd(t *testing.T) {
 	out, err := Compile(context.Background(), discardLogger(), CompileOptions{
-		TopologyYAML: []byte(e2eTopology),
-		SubnetsYAML:  []byte(e2eSubnets),
-		RulesYAML:    []byte(e2eRules),
+		Doc: e2eDoc(),
 	})
 	if err != nil {
 		t.Fatalf("compile: %v", err)
@@ -64,10 +70,10 @@ func TestCompile_EndToEnd(t *testing.T) {
 }
 
 func TestCompile_InvalidTopologyFailsFast(t *testing.T) {
+	doc := e2eDoc()
+	doc.Topology.Devices = []projectdoc.DeviceDoc{{Name: "r1", Kind: "bogus"}}
 	_, err := Compile(context.Background(), discardLogger(), CompileOptions{
-		TopologyYAML: []byte("devices: [{name: r1, kind: bogus}]"),
-		SubnetsYAML:  []byte(e2eSubnets),
-		RulesYAML:    []byte(e2eRules),
+		Doc: doc,
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid device kind")
@@ -75,7 +81,7 @@ func TestCompile_InvalidTopologyFailsFast(t *testing.T) {
 }
 
 func TestLoadProject_OK(t *testing.T) {
-	topo, err := LoadProject([]byte(e2eTopology), []byte(e2eSubnets))
+	topo, err := LoadProject(e2eDoc())
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -85,68 +91,83 @@ func TestLoadProject_OK(t *testing.T) {
 }
 
 func TestLoadProject_SubnetInTwoNetworks(t *testing.T) {
-	bad := `
-devices:
-  - {name: r1, kind: router}
-networks:
-  - {name: n1, subnets: [a], attach: [{device: r1}]}
-  - {name: n2, subnets: [a], attach: [{device: r1}]}
-`
-	_, err := LoadProject([]byte(bad), []byte("subnets:\n  - {name: a, cidr: 10.0.0.0/24}\n"))
+	doc := projectdoc.ProjectDoc{
+		Topology: projectdoc.TopologyDoc{
+			Devices: []projectdoc.DeviceDoc{{Name: "r1", Kind: "router"}},
+			Networks: []projectdoc.NetworkDoc{
+				{Name: "n1", Subnets: []string{"a"}, Attach: []projectdoc.EndpointDoc{{Device: "r1"}}},
+				{Name: "n2", Subnets: []string{"a"}, Attach: []projectdoc.EndpointDoc{{Device: "r1"}}},
+			},
+		},
+		Subnets: projectdoc.SubnetsDoc{
+			Subnets: []projectdoc.SubnetDoc{{Name: "a", CIDR: "10.0.0.0/24"}},
+		},
+	}
+	_, err := LoadProject(doc)
 	if err == nil || !strings.Contains(err.Error(), "both network") {
 		t.Fatalf("expected cross-file ownership error, got: %v", err)
 	}
 }
 
 func TestLoadProject_UnknownNetworkSubnet(t *testing.T) {
-	bad := `
-devices:
-  - {name: r1, kind: router}
-networks:
-  - {name: n1, subnets: [ghost], attach: [{device: r1}]}
-`
-	_, err := LoadProject([]byte(bad), []byte(e2eSubnets))
+	doc := e2eDoc()
+	doc.Topology.Networks = []projectdoc.NetworkDoc{
+		{Name: "n1", Subnets: []string{"ghost"}, Attach: []projectdoc.EndpointDoc{{Device: "r1"}}},
+	}
+	_, err := LoadProject(doc)
 	if err == nil || !strings.Contains(err.Error(), "unknown subnet") {
 		t.Fatalf("expected unknown subnet error, got: %v", err)
 	}
 }
 
-const filteredChainTopology = `
-devices:
-  - {name: m, kind: router}
-  - {name: d, kind: router}
-  - {name: o, kind: router}
-links:
-  - a: {device: m}
-    b: {device: d}
-    filter:
-      a-exports: [NA]
-      b-exports: [NB]
-  - a: {device: d}
-    b: {device: o}
-networks:
-  - {name: NA, subnets: [a], attach: [{device: m}]}
-  - {name: NB, subnets: [b], attach: [{device: d}]}
-  - {name: NC, subnets: [c], attach: [{device: o}]}
-`
-
-const filteredChainSubnets = `
-subnets:
-  - {name: a, cidr: 10.0.10.0/24}
-  - {name: b, cidr: 10.0.11.0/24}
-  - {name: c, cidr: 10.0.12.0/24}
-`
+func filteredChainDocFixture() projectdoc.ProjectDoc {
+	return projectdoc.ProjectDoc{
+		Topology: projectdoc.TopologyDoc{
+			Devices: []projectdoc.DeviceDoc{
+				{Name: "m", Kind: "router"},
+				{Name: "d", Kind: "router"},
+				{Name: "o", Kind: "router"},
+			},
+			Links: []projectdoc.LinkDoc{
+				{
+					A:      projectdoc.EndpointDoc{Device: "m"},
+					B:      projectdoc.EndpointDoc{Device: "d"},
+					Filter: &projectdoc.LinkFilterDoc{AExports: []string{"NA"}, BExports: []string{"NB"}},
+				},
+				{
+					A: projectdoc.EndpointDoc{Device: "d"},
+					B: projectdoc.EndpointDoc{Device: "o"},
+				},
+			},
+			Networks: []projectdoc.NetworkDoc{
+				{Name: "NA", Subnets: []string{"a"}, Attach: []projectdoc.EndpointDoc{{Device: "m"}}},
+				{Name: "NB", Subnets: []string{"b"}, Attach: []projectdoc.EndpointDoc{{Device: "d"}}},
+				{Name: "NC", Subnets: []string{"c"}, Attach: []projectdoc.EndpointDoc{{Device: "o"}}},
+			},
+		},
+		Subnets: projectdoc.SubnetsDoc{
+			Subnets: []projectdoc.SubnetDoc{
+				{Name: "a", CIDR: "10.0.10.0/24"},
+				{Name: "b", CIDR: "10.0.11.0/24"},
+				{Name: "c", CIDR: "10.0.12.0/24"},
+			},
+		},
+	}
+}
 
 func TestCompile_FilteredLinkBlocksUnannouncedPair(t *testing.T) {
-	rules := `
-defaultAction: deny
-rules:
-  - {name: blocked, src: [NA], dst: [NC], action: allow}
-`
+	doc := filteredChainDocFixture()
+	doc.Rules = projectdoc.PolicyDoc{
+		Chains: []projectdoc.ChainDoc{{
+			Name:          "FIRENET-FWD",
+			DefaultAction: "deny",
+			Rules: []projectdoc.RuleDoc{
+				{Name: "blocked", Src: []string{"NA"}, Dst: []string{"NC"}, Action: "allow"},
+			},
+		}},
+	}
 	out, err := Compile(context.Background(), discardLogger(), CompileOptions{
-		TopologyYAML: []byte(filteredChainTopology),
-		SubnetsYAML:  []byte(filteredChainSubnets),
-		RulesYAML:    []byte(rules),
+		Doc: doc,
 	})
 	if err != nil {
 		t.Fatalf("compile: %v", err)
@@ -157,15 +178,18 @@ rules:
 }
 
 func TestCompile_FilteredLinkKeepsAnnouncedPair(t *testing.T) {
-	rules := `
-defaultAction: deny
-rules:
-  - {name: allowed, src: [NB], dst: [NC], action: allow}
-`
+	doc := filteredChainDocFixture()
+	doc.Rules = projectdoc.PolicyDoc{
+		Chains: []projectdoc.ChainDoc{{
+			Name:          "FIRENET-FWD",
+			DefaultAction: "deny",
+			Rules: []projectdoc.RuleDoc{
+				{Name: "allowed", Src: []string{"NB"}, Dst: []string{"NC"}, Action: "allow"},
+			},
+		}},
+	}
 	out, err := Compile(context.Background(), discardLogger(), CompileOptions{
-		TopologyYAML: []byte(filteredChainTopology),
-		SubnetsYAML:  []byte(filteredChainSubnets),
-		RulesYAML:    []byte(rules),
+		Doc: doc,
 	})
 	if err != nil {
 		t.Fatalf("compile: %v", err)
@@ -177,45 +201,59 @@ rules:
 	}
 }
 
-const chainedReExportTopology = `
-devices:
-  - {name: m, kind: router}
-  - {name: d, kind: router}
-  - {name: o, kind: router}
-links:
-  - a: {device: m}
-    b: {device: d}
-    filter: {a-exports: [NA], b-exports: [NB]}
-  - a: {device: o}
-    b: {device: d}
-    filter: {a-exports: [NC], b-exports: [NB, NA]}
-networks:
-  - {name: NA, subnets: [a], attach: [{device: m}]}
-  - {name: NB, subnets: [b], attach: [{device: d}]}
-  - {name: NC, subnets: [c], attach: [{device: o}]}
-`
-
-const chainedReExportSubnets = `
-subnets:
-  - {name: a, cidr: 10.0.20.0/24}
-  - {name: b, cidr: 10.0.21.0/24}
-  - {name: c, cidr: 10.0.22.0/24}
-`
+func chainedReExportDocFixture() projectdoc.ProjectDoc {
+	return projectdoc.ProjectDoc{
+		Topology: projectdoc.TopologyDoc{
+			Devices: []projectdoc.DeviceDoc{
+				{Name: "m", Kind: "router"},
+				{Name: "d", Kind: "router"},
+				{Name: "o", Kind: "router"},
+			},
+			Links: []projectdoc.LinkDoc{
+				{
+					A:      projectdoc.EndpointDoc{Device: "m"},
+					B:      projectdoc.EndpointDoc{Device: "d"},
+					Filter: &projectdoc.LinkFilterDoc{AExports: []string{"NA"}, BExports: []string{"NB"}},
+				},
+				{
+					A:      projectdoc.EndpointDoc{Device: "o"},
+					B:      projectdoc.EndpointDoc{Device: "d"},
+					Filter: &projectdoc.LinkFilterDoc{AExports: []string{"NC"}, BExports: []string{"NB", "NA"}},
+				},
+			},
+			Networks: []projectdoc.NetworkDoc{
+				{Name: "NA", Subnets: []string{"a"}, Attach: []projectdoc.EndpointDoc{{Device: "m"}}},
+				{Name: "NB", Subnets: []string{"b"}, Attach: []projectdoc.EndpointDoc{{Device: "d"}}},
+				{Name: "NC", Subnets: []string{"c"}, Attach: []projectdoc.EndpointDoc{{Device: "o"}}},
+			},
+		},
+		Subnets: projectdoc.SubnetsDoc{
+			Subnets: []projectdoc.SubnetDoc{
+				{Name: "a", CIDR: "10.0.20.0/24"},
+				{Name: "b", CIDR: "10.0.21.0/24"},
+				{Name: "c", CIDR: "10.0.22.0/24"},
+			},
+		},
+	}
+}
 
 // d re-exports NA (learned from m) toward o (b-exports includes NA on the
 // o-d link) — o can now reach m. Nothing announces NC back toward m on the
 // m-d link, so the reverse direction has no route at all: filtered links
 // model per-direction route advertisement, not a symmetric ACL pair.
 func TestCompile_ChainedReExportPlacesRuleForWorkingDirection(t *testing.T) {
-	rules := `
-defaultAction: deny
-rules:
-  - {name: office-to-market, src: [NC], dst: [NA], action: allow}
-`
+	doc := chainedReExportDocFixture()
+	doc.Rules = projectdoc.PolicyDoc{
+		Chains: []projectdoc.ChainDoc{{
+			Name:          "FIRENET-FWD",
+			DefaultAction: "deny",
+			Rules: []projectdoc.RuleDoc{
+				{Name: "office-to-market", Src: []string{"NC"}, Dst: []string{"NA"}, Action: "allow"},
+			},
+		}},
+	}
 	out, err := Compile(context.Background(), discardLogger(), CompileOptions{
-		TopologyYAML: []byte(chainedReExportTopology),
-		SubnetsYAML:  []byte(chainedReExportSubnets),
-		RulesYAML:    []byte(rules),
+		Doc: doc,
 	})
 	if err != nil {
 		t.Fatalf("compile: %v", err)
@@ -228,15 +266,18 @@ rules:
 }
 
 func TestCompile_ChainedReExportPlacesNoRuleWithoutSymmetricAnnouncement(t *testing.T) {
-	rules := `
-defaultAction: deny
-rules:
-  - {name: market-to-office, src: [NA], dst: [NC], action: allow}
-`
+	doc := chainedReExportDocFixture()
+	doc.Rules = projectdoc.PolicyDoc{
+		Chains: []projectdoc.ChainDoc{{
+			Name:          "FIRENET-FWD",
+			DefaultAction: "deny",
+			Rules: []projectdoc.RuleDoc{
+				{Name: "market-to-office", Src: []string{"NA"}, Dst: []string{"NC"}, Action: "allow"},
+			},
+		}},
+	}
 	out, err := Compile(context.Background(), discardLogger(), CompileOptions{
-		TopologyYAML: []byte(chainedReExportTopology),
-		SubnetsYAML:  []byte(chainedReExportSubnets),
-		RulesYAML:    []byte(rules),
+		Doc: doc,
 	})
 	if err != nil {
 		t.Fatalf("compile: %v", err)

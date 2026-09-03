@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -9,16 +8,15 @@ import (
 	"github.com/kudes1/firenet/internal/compiler"
 	"github.com/kudes1/firenet/internal/diagnose"
 	"github.com/kudes1/firenet/internal/graph"
+	"github.com/kudes1/firenet/internal/projectdoc"
 	"github.com/kudes1/firenet/internal/rules"
 )
 
 type DiagnoseOptions struct {
-	TopologyYAML []byte
-	SubnetsYAML  []byte
-	RulesYAML    []byte
-	MaxHops      int // 0 = use graph.DefaultLimits()
-	MaxPaths     int // 0 = use graph.DefaultLimits()
-	Flow         diagnose.Flow
+	Doc      projectdoc.ProjectDoc
+	MaxHops  int // 0 = use graph.DefaultLimits()
+	MaxPaths int // 0 = use graph.DefaultLimits()
+	Flow     diagnose.Flow
 }
 
 // Diagnose answers "how would traffic from opts.Flow.Src to opts.Flow.Dst
@@ -26,14 +24,11 @@ type DiagnoseOptions struct {
 // reports every simple path between the resolved endpoint subnets together
 // with a per-router verdict over the compiled rules.
 func Diagnose(_ context.Context, log *slog.Logger, opts DiagnoseOptions) (*diagnose.Report, error) {
-	topo, err := LoadProject(opts.TopologyYAML, opts.SubnetsYAML)
+	topo, err := LoadProject(opts.Doc)
 	if err != nil {
 		return nil, err
 	}
-	pol, err := rules.Load(bytes.NewReader(opts.RulesYAML))
-	if err != nil {
-		return nil, fmt.Errorf("load rules: %w", err)
-	}
+	pol := opts.Doc.ToRules()
 	if err := pol.Validate(topo); err != nil {
 		return nil, fmt.Errorf("invalid rules: %w", err)
 	}
@@ -59,16 +54,14 @@ func Diagnose(_ context.Context, log *slog.Logger, opts DiagnoseOptions) (*diagn
 	return diagnose.Run(topo, devices, g, limits, opts.Flow)
 }
 
-// SpreadOptions describes the network-propagation query over project YAML.
+// SpreadOptions describes the network-propagation query over project doc.
 type SpreadOptions struct {
-	TopologyYAML []byte
-	SubnetsYAML  []byte
-	RulesYAML    []byte
-	MaxHops      int // 0 = use graph.DefaultLimits()
-	MaxPaths     int // 0 = use graph.DefaultLimits()
-	Input        string
-	Proto        rules.Proto
-	DstPorts     []string
+	Doc      projectdoc.ProjectDoc
+	MaxHops  int // 0 = use graph.DefaultLimits()
+	MaxPaths int // 0 = use graph.DefaultLimits()
+	Input    string
+	Proto    rules.Proto
+	DstPorts []string
 }
 
 // Spread answers "where does this network already propagate to" over the
@@ -76,14 +69,11 @@ type SpreadOptions struct {
 // source, diagnoses every other subnet toward it, and merges the per-pair
 // map marks into one picture.
 func Spread(_ context.Context, log *slog.Logger, opts SpreadOptions) (*diagnose.SpreadResult, error) {
-	topo, err := LoadProject(opts.TopologyYAML, opts.SubnetsYAML)
+	topo, err := LoadProject(opts.Doc)
 	if err != nil {
 		return nil, err
 	}
-	pol, err := rules.Load(bytes.NewReader(opts.RulesYAML))
-	if err != nil {
-		return nil, fmt.Errorf("load rules: %w", err)
-	}
+	pol := opts.Doc.ToRules()
 	if err := pol.Validate(topo); err != nil {
 		return nil, fmt.Errorf("invalid rules: %w", err)
 	}

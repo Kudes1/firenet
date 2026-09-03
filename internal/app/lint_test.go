@@ -2,48 +2,54 @@ package app
 
 import (
 	"context"
-	"strings"
 	"testing"
 
+	"github.com/kudes1/firenet/internal/projectdoc"
 	"github.com/kudes1/firenet/internal/rules"
 )
 
-const lintAppTopology = `
-devices:
-  - {name: r1, kind: router}
-  - {name: r2, kind: router}
-links:
-  - {a: {device: r1}, b: {device: r2}}
-networks:
-  - {name: n-office, subnets: [office], attach: [{device: r1}]}
-  - {name: n-dmz, subnets: [dmz], attach: [{device: r2}]}
-`
-
-const lintAppSubnets = `
-subnets:
-  - {name: office, cidr: 10.0.0.0/24}
-  - {name: dmz, cidr: 10.0.1.0/24}
-`
-
-const lintAppRules = `
-chains:
-  - name: FIRENET-FWD
-    defaultAction: deny
-    chainPosition: top
-    rules:
-      - {name: allow-all, comment: "broad by design", src: [any], dst: [any], proto: any, action: allow}
-      - {name: shadowed, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: deny}
-`
+func lintDocFixture() projectdoc.ProjectDoc {
+	return projectdoc.ProjectDoc{
+		Topology: projectdoc.TopologyDoc{
+			Devices: []projectdoc.DeviceDoc{
+				{Name: "r1", Kind: "router"},
+				{Name: "r2", Kind: "router"},
+			},
+			Links: []projectdoc.LinkDoc{
+				{A: projectdoc.EndpointDoc{Device: "r1"}, B: projectdoc.EndpointDoc{Device: "r2"}},
+			},
+			Networks: []projectdoc.NetworkDoc{
+				{Name: "n-office", Subnets: []string{"office"}, Attach: []projectdoc.EndpointDoc{{Device: "r1"}}},
+				{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []projectdoc.EndpointDoc{{Device: "r2"}}},
+			},
+		},
+		Subnets: projectdoc.SubnetsDoc{
+			Subnets: []projectdoc.SubnetDoc{
+				{Name: "office", CIDR: "10.0.0.0/24"},
+				{Name: "dmz", CIDR: "10.0.1.0/24"},
+			},
+		},
+		Rules: projectdoc.PolicyDoc{
+			Chains: []projectdoc.ChainDoc{{
+				Name:          "FIRENET-FWD",
+				DefaultAction: "deny",
+				ChainPosition: "top",
+				Rules: []projectdoc.RuleDoc{
+					{Name: "allow-all", Comment: "broad by design", Src: []string{"any"}, Dst: []string{"any"}, Proto: "any", Action: "allow"},
+					{Name: "shadowed", Src: []string{"office"}, Dst: []string{"dmz"}, Proto: "tcp", DstPorts: []string{"443"}, Action: "deny"},
+				},
+			}},
+		},
+	}
+}
 
 func TestLint_ReturnsFindingsFromValidPolicy(t *testing.T) {
-	topo, err := LoadProject([]byte(lintAppTopology), []byte(lintAppSubnets))
+	doc := lintDocFixture()
+	topo, err := LoadProject(doc)
 	if err != nil {
 		t.Fatalf("load project: %v", err)
 	}
-	pol, err := rules.Load(strings.NewReader(lintAppRules))
-	if err != nil {
-		t.Fatalf("load rules: %v", err)
-	}
+	pol := doc.ToRules()
 	findings, err := Lint(context.Background(), discardLogger(), topo, pol)
 	if err != nil {
 		t.Fatalf("Lint: %v", err)
@@ -54,7 +60,8 @@ func TestLint_ReturnsFindingsFromValidPolicy(t *testing.T) {
 }
 
 func TestLint_InvalidPolicyErrors(t *testing.T) {
-	topo, err := LoadProject([]byte(lintAppTopology), []byte(lintAppSubnets))
+	doc := lintDocFixture()
+	topo, err := LoadProject(doc)
 	if err != nil {
 		t.Fatalf("load project: %v", err)
 	}
