@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/kudes1/firenet/internal/auth"
 	"github.com/kudes1/firenet/internal/db/dbtest"
 	"github.com/kudes1/firenet/internal/diagnose"
@@ -23,51 +21,36 @@ import (
 	"github.com/kudes1/firenet/internal/rules"
 )
 
-const fixtureTopology = `
-devices:
-  - {name: r1, kind: router}
-  - {name: r2, kind: router}
-links:
-  - {a: {device: r1}, b: {device: r2}}
-networks:
-  - {name: n-office, subnets: [office], attach: [{device: r1}]}
-  - {name: n-dmz, subnets: [dmz], attach: [{device: r2}]}
-`
-
-const fixtureSubnets = `
-subnets:
-  - {name: office, cidr: 10.0.0.0/24}
-  - {name: dmz, cidr: 10.0.1.0/24}
-`
-
-const fixtureRules = `
-defaultAction: deny
-rules:
-  - {name: office-to-dmz, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: allow}
-`
-
-func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
 // mustParseFixtureDoc builds the ProjectDoc newTestServer seeds as
-// version 1, from the same YAML fixtures the file used to write directly
-// to disk.
+// version 1.
 func mustParseFixtureDoc(t *testing.T) projectdoc.ProjectDoc {
 	t.Helper()
-	var doc projectdoc.ProjectDoc
-	if err := yaml.Unmarshal([]byte(fixtureTopology), &doc.Topology); err != nil {
-		t.Fatalf("parse fixture topology: %v", err)
+	return projectdoc.ProjectDoc{
+		Topology: projectdoc.TopologyDoc{
+			Devices: []projectdoc.DeviceDoc{{Name: "r1", Kind: "router"}, {Name: "r2", Kind: "router"}},
+			Links:   []projectdoc.LinkDoc{{A: projectdoc.EndpointDoc{Device: "r1"}, B: projectdoc.EndpointDoc{Device: "r2"}}},
+			Networks: []projectdoc.NetworkDoc{
+				{Name: "n-office", Subnets: []string{"office"}, Attach: []projectdoc.EndpointDoc{{Device: "r1"}}},
+				{Name: "n-dmz", Subnets: []string{"dmz"}, Attach: []projectdoc.EndpointDoc{{Device: "r2"}}},
+			},
+		},
+		Subnets: projectdoc.SubnetsDoc{Subnets: []projectdoc.SubnetDoc{
+			{Name: "office", CIDR: "10.0.0.0/24"}, {Name: "dmz", CIDR: "10.0.1.0/24"},
+		}},
+		Rules: projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+			Name: "FIRENET-FWD", DefaultAction: "deny", ChainPosition: "top",
+			Rules: []projectdoc.RuleDoc{{
+				Name: "office-to-dmz", Src: []string{"office"}, Dst: []string{"dmz"},
+				Proto: "tcp", DstPorts: []string{"443"}, Action: "allow",
+			}},
+		}}},
 	}
-	if err := yaml.Unmarshal([]byte(fixtureSubnets), &doc.Subnets); err != nil {
-		t.Fatalf("parse fixture subnets: %v", err)
-	}
-	pol, err := rules.Load(strings.NewReader(fixtureRules))
-	if err != nil {
-		t.Fatalf("parse fixture rules: %v", err)
-	}
-	doc.Rules = NewPolicyDoc(pol)
-	return doc
+}
+
+// discardLogger returns a logger that writes nothing, for handlers that
+// only use it for debug output.
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 // newTestServer seeds version 1 from the fixtures above and opens one
@@ -1377,13 +1360,9 @@ func TestSpreadHandler(t *testing.T) {
 // writeDraftRules bypasses the PUT handler's own validation, going
 // straight through pgstore — used to simulate rules content that
 // somehow already made it into storage without passing normal checks.
-func writeDraftRules(t *testing.T, projects *pgstore.Store, draftID string, rawYAML string) {
+func writeDraftRules(t *testing.T, projects *pgstore.Store, draftID string, policy projectdoc.PolicyDoc) {
 	t.Helper()
 	ctx := context.Background()
-	var policy projectdoc.PolicyDoc
-	if err := yaml.Unmarshal([]byte(rawYAML), &policy); err != nil {
-		t.Fatalf("parse rules yaml: %v", err)
-	}
 	doc, revision, err := projects.ReadDraft(ctx, draftID)
 	if err != nil {
 		t.Fatalf("ReadDraft: %v", err)
@@ -1415,15 +1394,13 @@ func TestLintEndpoint(t *testing.T) {
 	})
 
 	t.Run("unreachable rule is reported", func(t *testing.T) {
-		writeDraftRules(t, projects, draftID, `
-chains:
-  - name: FIRENET-FWD
-    defaultAction: deny
-    chainPosition: top
-    rules:
-      - {name: allow-all, comment: "broad by design", src: [any], dst: [any], proto: any, action: allow}
-      - {name: shadowed, src: [office], dst: [dmz], proto: tcp, dstPorts: ["443"], action: deny}
-`)
+		writeDraftRules(t, projects, draftID, projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+			Name: "FIRENET-FWD", DefaultAction: "deny", ChainPosition: "top",
+			Rules: []projectdoc.RuleDoc{
+				{Name: "allow-all", Comment: "broad by design", Src: []string{"any"}, Dst: []string{"any"}, Proto: "any", Action: "allow"},
+				{Name: "shadowed", Src: []string{"office"}, Dst: []string{"dmz"}, Proto: "tcp", DstPorts: []string{"443"}, Action: "deny"},
+			},
+		}}})
 		rec := doJSON(t, h, http.MethodGet, lintPath, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -1440,14 +1417,10 @@ chains:
 	})
 
 	t.Run("invalid rules file surfaces as client error", func(t *testing.T) {
-		writeDraftRules(t, projects, draftID, `
-chains:
-  - name: FIRENET-FWD
-    defaultAction: deny
-    chainPosition: top
-    rules:
-      - {name: bad, src: [no-such-subnet], dst: [any], proto: any, action: allow}
-`)
+		writeDraftRules(t, projects, draftID, projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
+			Name: "FIRENET-FWD", DefaultAction: "deny", ChainPosition: "top",
+			Rules: []projectdoc.RuleDoc{{Name: "bad", Src: []string{"no-such-subnet"}, Dst: []string{"any"}, Proto: "any", Action: "allow"}},
+		}}})
 		rec := doJSON(t, h, http.MethodGet, lintPath, nil)
 		if rec.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())

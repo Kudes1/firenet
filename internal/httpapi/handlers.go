@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,8 +10,6 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/kudes1/firenet/internal/app"
 	"github.com/kudes1/firenet/internal/auth"
@@ -95,40 +92,15 @@ func (h *handlers) resolveDraftForAccess(w http.ResponseWriter, r *http.Request)
 // prev/next or unparseable proposal yields no deletions here — full
 // validation reports those instead.
 func deletionErrorsFromDocs(prev, next projectdoc.ProjectDoc) []string {
-	prevTopoYAML, err := yaml.Marshal(prev.Topology)
+	prevTopo, err := app.LoadProject(prev)
 	if err != nil {
 		return nil
 	}
-	prevSubnetsYAML, err := yaml.Marshal(prev.Subnets)
+	nextTopo, err := app.ParseProject(next)
 	if err != nil {
 		return nil
 	}
-	prevTopo, err := app.LoadProject(prevTopoYAML, prevSubnetsYAML)
-	if err != nil {
-		return nil
-	}
-
-	nextTopoYAML, err := yaml.Marshal(next.Topology)
-	if err != nil {
-		return nil
-	}
-	nextSubnetsYAML, err := yaml.Marshal(next.Subnets)
-	if err != nil {
-		return nil
-	}
-	nextTopo, err := app.ParseProject(nextTopoYAML, nextSubnetsYAML)
-	if err != nil {
-		return nil
-	}
-
-	rulesYAML, err := yaml.Marshal(next.Rules)
-	if err != nil {
-		return nil
-	}
-	pol, err := rules.Load(bytes.NewReader(rulesYAML))
-	if err != nil {
-		pol = nil // broken rules: topology-only checks; rules load reports the breakage elsewhere
-	}
+	pol := next.ToRules()
 	return app.DeletionErrors(prevTopo, nextTopo, pol)
 }
 
@@ -136,15 +108,7 @@ func deletionErrorsFromDocs(prev, next projectdoc.ProjectDoc) []string {
 // cross-referenced topology.Topology (mirrors the old loadTopology, now
 // sourced from a ProjectDoc instead of the file store).
 func loadTopologyDoc(doc projectdoc.ProjectDoc) (*topology.Topology, error) {
-	topoYAML, err := yaml.Marshal(doc.Topology)
-	if err != nil {
-		return nil, err
-	}
-	subnetsYAML, err := yaml.Marshal(doc.Subnets)
-	if err != nil {
-		return nil, err
-	}
-	topo, err := app.LoadProject(topoYAML, subnetsYAML)
+	topo, err := app.LoadProject(doc)
 	if err != nil {
 		return nil, fmt.Errorf("project is invalid: %w", err)
 	}
@@ -611,19 +575,7 @@ func (h *handlers) validateDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) compileDoc(ctx context.Context, doc projectdoc.ProjectDoc) (any, error) {
-	topoYAML, err := yaml.Marshal(doc.Topology)
-	if err != nil {
-		return nil, err
-	}
-	subnetsYAML, err := yaml.Marshal(doc.Subnets)
-	if err != nil {
-		return nil, err
-	}
-	rulesYAML, err := yaml.Marshal(doc.Rules)
-	if err != nil {
-		return nil, err
-	}
-	return app.Compile(ctx, h.log, app.CompileOptions{TopologyYAML: topoYAML, SubnetsYAML: subnetsYAML, RulesYAML: rulesYAML})
+	return app.Compile(ctx, h.log, app.CompileOptions{Doc: doc})
 }
 
 func (h *handlers) compileCurrent(w http.ResponseWriter, r *http.Request) {
@@ -722,19 +674,7 @@ func parseDiagnoseRequest(r *http.Request) (diagnose.Flow, error) {
 }
 
 func (h *handlers) diagnoseDoc(ctx context.Context, doc projectdoc.ProjectDoc, flow diagnose.Flow) (any, error) {
-	topoYAML, err := yaml.Marshal(doc.Topology)
-	if err != nil {
-		return nil, err
-	}
-	subnetsYAML, err := yaml.Marshal(doc.Subnets)
-	if err != nil {
-		return nil, err
-	}
-	rulesYAML, err := yaml.Marshal(doc.Rules)
-	if err != nil {
-		return nil, err
-	}
-	return app.Diagnose(ctx, h.log, app.DiagnoseOptions{TopologyYAML: topoYAML, SubnetsYAML: subnetsYAML, RulesYAML: rulesYAML, Flow: flow})
+	return app.Diagnose(ctx, h.log, app.DiagnoseOptions{Doc: doc, Flow: flow})
 }
 
 func (h *handlers) diagnoseCurrent(w http.ResponseWriter, r *http.Request) {
@@ -791,25 +731,11 @@ type spreadRequest struct {
 // resolve the input into sources, diagnose every other subnet toward them,
 // and merge the per-pair map marks into one picture.
 func (h *handlers) spreadDoc(ctx context.Context, doc projectdoc.ProjectDoc, req spreadRequest) (*diagnose.SpreadResult, error) {
-	topoYAML, err := yaml.Marshal(doc.Topology)
-	if err != nil {
-		return nil, err
-	}
-	subnetsYAML, err := yaml.Marshal(doc.Subnets)
-	if err != nil {
-		return nil, err
-	}
-	rulesYAML, err := yaml.Marshal(doc.Rules)
-	if err != nil {
-		return nil, err
-	}
 	return app.Spread(ctx, h.log, app.SpreadOptions{
-		TopologyYAML: topoYAML,
-		SubnetsYAML:  subnetsYAML,
-		RulesYAML:    rulesYAML,
-		Input:        req.Src,
-		Proto:        rules.Proto(req.Proto),
-		DstPorts:     req.DstPorts,
+		Doc:      doc,
+		Input:    req.Src,
+		Proto:    rules.Proto(req.Proto),
+		DstPorts: req.DstPorts,
 	})
 }
 
