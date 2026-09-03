@@ -523,13 +523,13 @@ Rules: projectdoc.PolicyDoc{Chains: []projectdoc.ChainDoc{{
 
 **`internal/httpapi/store.go`** — удалить файл целиком (`FileProjectStore` нужен только legacy-импорту, который удаляется в Task 6; оба файла уходят в общем коммите Tasks 4–6).
 
-- [ ] **Step 1: Write the failing test** — существующие тесты httpapi и есть failing-тест: после смены сигнатур `app.*` (Task 3) пакет не компилируется.
+- [x] **Step 1: Write the failing test** — существующие тесты httpapi и есть failing-тест: после смены сигнатур `app.*` (Task 3) пакет не компилируется.
 
-- [ ] **Step 2: Implement** правки 1–6 выше, обновить тесты, удалить store.go.
+- [x] **Step 2: Implement** правки 1–6 выше, обновить тесты, удалить store.go.
 
-- [ ] **Step 3: Verify (совместно с Task 6, см. ниже)**
+- [x] **Step 3: Verify (совместно с Task 6, см. ниже)**
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A internal/httpapi
