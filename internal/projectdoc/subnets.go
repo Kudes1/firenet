@@ -8,7 +8,7 @@ type SubnetDoc struct {
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
-// SubnetsDoc is the full wire shape of subnets.yaml.
+// SubnetsDoc is the full wire shape of the subnets document.
 type SubnetsDoc struct {
 	Subnets []SubnetDoc `json:"subnets" yaml:"subnets"`
 }

@@ -7,5 +7,6 @@ RUN CGO_ENABLED=0 go build -o /out/firenet ./cmd/firenet
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/firenet /firenet
+ENV FIRENET_ADDR=0.0.0.0:8787
 EXPOSE 8787
-ENTRYPOINT ["/firenet", "serve", "--addr", "0.0.0.0:8787"]
+ENTRYPOINT ["/firenet"]

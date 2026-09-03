@@ -58,7 +58,7 @@ type UnionDoc struct {
 	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
-// TopologyDoc is the full wire shape of topology.yaml.
+// TopologyDoc is the full wire shape of the topology document.
 type TopologyDoc struct {
 	Devices  []DeviceDoc  `json:"devices" yaml:"devices"`
 	Links    []LinkDoc    `json:"links" yaml:"links"`
