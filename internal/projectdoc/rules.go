@@ -33,16 +33,31 @@ type PolicyDoc struct {
 // ToPolicy converts the wire doc to the domain model.
 func (d PolicyDoc) ToPolicy() rules.Policy {
 	pol := rules.Policy{}
-	for _, c := range d.Chains {
+	for i, c := range d.Chains {
 		ch := rules.Chain{
 			Name:          c.Name,
 			DefaultAction: rules.Action(c.DefaultAction),
 			ChainPosition: rules.ChainPosition(c.ChainPosition),
 		}
+		if ch.DefaultAction == "" {
+			ch.DefaultAction = rules.ActionDeny
+		}
+		if i == 0 {
+			if ch.Name == "" {
+				ch.Name = rules.DefaultChainName
+			}
+			if ch.ChainPosition == "" {
+				ch.ChainPosition = rules.ChainTop
+			}
+		}
 		for _, r := range c.Rules {
+			proto := rules.Proto(r.Proto)
+			if proto == "" {
+				proto = rules.ProtoAny
+			}
 			ch.Rules = append(ch.Rules, rules.Rule{
 				Name: r.Name, Comment: r.Comment, Src: r.Src, Dst: r.Dst,
-				Proto: rules.Proto(r.Proto), SrcPorts: r.SrcPorts, DstPorts: r.DstPorts,
+				Proto: proto, SrcPorts: r.SrcPorts, DstPorts: r.DstPorts,
 				Action: rules.Action(r.Action), JumpTo: r.JumpTo, Mirror: r.Mirror,
 			})
 		}
@@ -54,17 +69,32 @@ func (d PolicyDoc) ToPolicy() rules.Policy {
 // NewPolicyDoc converts the domain model to the wire doc.
 func NewPolicyDoc(pol *rules.Policy) PolicyDoc {
 	doc := PolicyDoc{}
-	for _, c := range pol.Chains {
+	for i, c := range pol.Chains {
 		ch := ChainDoc{
 			Name:          c.Name,
 			DefaultAction: string(c.DefaultAction),
 			ChainPosition: string(c.ChainPosition),
 			Rules:         []RuleDoc{},
 		}
+		if ch.DefaultAction == "" {
+			ch.DefaultAction = string(rules.ActionDeny)
+		}
+		if i == 0 {
+			if ch.Name == "" {
+				ch.Name = rules.DefaultChainName
+			}
+			if ch.ChainPosition == "" {
+				ch.ChainPosition = string(rules.ChainTop)
+			}
+		}
 		for _, r := range c.Rules {
+			proto := string(r.Proto)
+			if proto == "" {
+				proto = string(rules.ProtoAny)
+			}
 			ch.Rules = append(ch.Rules, RuleDoc{
 				Name: r.Name, Comment: r.Comment, Src: r.Src, Dst: r.Dst,
-				Proto: string(r.Proto), SrcPorts: r.SrcPorts, DstPorts: r.DstPorts,
+				Proto: proto, SrcPorts: r.SrcPorts, DstPorts: r.DstPorts,
 				Action: string(r.Action), JumpTo: r.JumpTo, Mirror: r.Mirror,
 			})
 		}
