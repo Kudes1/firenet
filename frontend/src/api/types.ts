@@ -7,6 +7,29 @@
 //  - DiagnoseReport.mapMark и SpreadResult.mark в Go — *MapMark, то есть
 //    могут прийти как null; поэтому они nullable, а не обязательные.
 //  - SpreadResult.reports[].report — *Report, тоже nullable.
+//  - Слайсы, которые Go собирает как `var x []T` + append (а не make(..., 0)),
+//    уходят в JSON как null, когда элементов нет:
+//      * ValidateResponse.errors — handlers.go:542 `var errs []string`,
+//        на валидном проекте ответ {"valid":true,"errors":null};
+//      * LintResponse.findings — lint.go:40 `var out []Finding`,
+//        на чистом линте {"findings":null};
+//      * TopologyDoc.* / SubnetsDoc.subnets / PolicyDoc.chains —
+//        internal/pgstore/entities.go:238-292 тоже append к нулевому
+//        значению, так что пустой проект даёт null.
+//    Проверено запуском encoding/json, не только чтением кода: nil → null.
+//    Слайсы, где Go гарантирует непустой конструктор, остались не-nullable:
+//    ChainDoc.rules (entities.go:287 make(..., len)), MapMark.* (mapmark.go:38
+//    инициализирует все поля), DiagnoseReport.paths (diagnose.go:105),
+//    LinkExportsResponse.entities (handlers.go:360 make(..., 0)).
+//  - Слайсы, которые Go собирает как `var x []T` + append (а не make(..., 0)),
+//    приходят как null, когда элементов нет: пустой проект даёт null в
+//    TopologyDoc.*, SubnetsDoc.subnets, PolicyDoc.chains, а также в
+//    ValidateResponse.errors (handlers.go:542) и LintResponse.findings
+//    (lint.go:40). Проверено запуском encoding/json, не только чтением кода.
+//    Поля, где Go гарантирует make/литерал (например ChainDoc.rules в
+//    entities.go:287, LinkExportsResponse.entities в handlers.go:360,
+//    DiagnoseReport.paths в diagnose.go:105), оставлены не-nullable.
+//    Вызывающий код обязан обрабатывать null там, где он достижим.
 
 export type ErrorResponse = { error: string };
 
@@ -38,16 +61,18 @@ export type UnionDoc = {
   description?: string;
 };
 
+// Пять слайсов ниже — nil на пустом проекте (pgstore.fromEntities собирает их
+// через append к нулевому значению, entities.go:238-271), приходит null.
 export type TopologyDoc = {
-  devices: DeviceDoc[];
-  links: LinkDoc[];
-  networks: NetworkDoc[];
-  sets: SetDoc[];
-  unions: UnionDoc[];
+  devices: DeviceDoc[] | null;
+  links: LinkDoc[] | null;
+  networks: NetworkDoc[] | null;
+  sets: SetDoc[] | null;
+  unions: UnionDoc[] | null;
 };
 
 export type SubnetDoc = { name: string; cidr: string; description?: string };
-export type SubnetsDoc = { subnets: SubnetDoc[] };
+export type SubnetsDoc = { subnets: SubnetDoc[] | null };
 
 export type RuleAction = "allow" | "deny" | "return" | "jump";
 export type RuleDoc = {
@@ -74,7 +99,10 @@ export type ChainDoc = {
   rules: RuleDoc[];
 };
 
-export type PolicyDoc = { chains: ChainDoc[] };
+// chains — nil, если ни одной цепочки нет в версии (append в
+// pgstore.fromEntities). На практике Seed всегда пишет первичную цепочку, а
+// rules.Validate требует хотя бы одну, но тип описывает wire, а не инвариант.
+export type PolicyDoc = { chains: ChainDoc[] | null };
 
 export type LayoutPoint = { x: number; y: number };
 export type LayoutCamera = { x: number; y: number; z: number };
@@ -241,8 +269,11 @@ export type SpreadResult = {
 };
 
 export type LinkExportsResponse = { entities: EntityDoc[] };
-export type LintResponse = { findings: LintFinding[] };
-export type ValidateResponse = { valid: boolean; errors: string[] };
+// errors/findings — nil-слайсы при пустом результате: {"errors":null} при
+// валидном проекте (handlers.go:542, 561) и {"findings":null} при чистом
+// линте (lint.go:40). Ловить .length без проверки на null нельзя.
+export type LintResponse = { findings: LintFinding[] | null };
+export type ValidateResponse = { valid: boolean; errors: string[] | null };
 export type RestoreResponse = { version: number };
 export type ConfirmResponse = { version: number } | { conflicts: Conflict[] };
 export type CreateUserResponse = { user: UserResponse; inviteUrl: string };
