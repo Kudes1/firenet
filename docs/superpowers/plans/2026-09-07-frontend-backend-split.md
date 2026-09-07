@@ -2058,7 +2058,7 @@ cd /root/repos/firenet && git add frontend/src/api frontend/src/test && git comm
 - Consumes: `useMe` (Task 6), `useDraft` (Task 5), `api` (Task 4).
 - Produces: `<Layout/>` — оболочка всех страниц; `notify()`, `<BannerHost/>`; `useTheme()`; `<Sidebar/>`; `<DraftBanner/>`.
 
-- [ ] **Step 1: Написать `frontend/src/components/Layout.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/components/Layout.test.tsx`**
 
 ```tsx
 import { render, screen } from "@testing-library/react";
@@ -2137,7 +2137,7 @@ describe("Layout", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -2145,7 +2145,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './Layout'`.
 
-- [ ] **Step 3: Создать `frontend/src/components/theme.ts`**
+- [x] **Step 3: Создать `frontend/src/components/theme.ts`**
 
 ```ts
 // Тема: сохранённый выбор, иначе системная. initialTheme ничего не пишет,
@@ -2168,7 +2168,7 @@ export function applyTheme(theme: "light" | "dark"): void {
 }
 ```
 
-- [ ] **Step 4: Создать `frontend/src/components/notify.ts`** (стор без React)
+- [x] **Step 4: Создать `frontend/src/components/notify.ts`** (стор без React)
 
 ```ts
 // Глобальные уведомления вместо Alpine-события notify: баннер показывается
@@ -2199,7 +2199,7 @@ export function subscribe(listener: () => void): () => void {
 export const getNotice = (): Notice | null => current;
 ```
 
-- [ ] **Step 4b: Создать `frontend/src/components/BannerHost.tsx`**
+- [x] **Step 4b: Создать `frontend/src/components/BannerHost.tsx`**
 
 ```tsx
 import { useSyncExternalStore } from "react";
@@ -2216,7 +2216,7 @@ export default function BannerHost() {
 }
 ```
 
-- [ ] **Step 5: Создать `frontend/src/components/ErrorBoundary.tsx`**
+- [x] **Step 5: Создать `frontend/src/components/ErrorBoundary.tsx`**
 
 ```tsx
 import { Component, type ErrorInfo, type ReactNode } from "react";
@@ -2254,7 +2254,7 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
 }
 ```
 
-- [ ] **Step 6: Создать `frontend/src/components/Sidebar.tsx`**
+- [x] **Step 6: Создать `frontend/src/components/Sidebar.tsx`**
 
 ```tsx
 import { useState } from "react";
@@ -2380,7 +2380,7 @@ function NavGroup({ group, active, onToggle }: {
 const isAdmin = (me: UserResponse | undefined) => me?.role === "admin";
 ```
 
-- [ ] **Step 7: Создать `frontend/src/components/DraftBanner.tsx`**
+- [x] **Step 7: Создать `frontend/src/components/DraftBanner.tsx`**
 
 ```tsx
 import { useEffect, useState } from "react";
@@ -2463,7 +2463,7 @@ function ReadonlyBanner({ onCreate }: { onCreate: ReturnType<typeof useCreateDra
 }
 ```
 
-- [ ] **Step 8: Создать `frontend/src/components/Layout.tsx`**
+- [x] **Step 8: Создать `frontend/src/components/Layout.tsx`**
 
 ```tsx
 import { Outlet, useLocation } from "react-router-dom";
@@ -2505,7 +2505,7 @@ export default function Layout() {
 ```
 
 
-- [ ] **Step 9: Подключить `Layout` в `App.tsx`**
+- [x] **Step 9: Подключить `Layout` в `App.tsx`**
 
 Заменить содержимое `frontend/src/App.tsx`:
 
@@ -2553,7 +2553,7 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 10: Запустить тесты**
+- [x] **Step 10: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -2561,7 +2561,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные (включая тесты `Layout`).
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): app shell with sidebar, theme, notifications and draft banner"
