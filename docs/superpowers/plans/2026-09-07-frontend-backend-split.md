@@ -2876,7 +2876,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 
 Эти компоненты закрывают повторяющуюся часть всех табличных страниц: модалка, таблица с фильтрами, список участников с комбобоксом, защита от потери правок.
 
-- [ ] **Step 1: Написать `frontend/src/components/ui/useDirtyGuard.test.ts`**
+- [x] **Step 1: Написать `frontend/src/components/ui/useDirtyGuard.test.ts`**
 
 ```ts
 import { renderHook } from "@testing-library/react";
@@ -2910,7 +2910,7 @@ describe("useDirtyGuard", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -2918,7 +2918,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './useDirtyGuard'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/components/ui/useDirtyGuard.ts`**
+- [x] **Step 3: Реализовать `frontend/src/components/ui/useDirtyGuard.ts`**
 
 ```ts
 import { useEffect, useRef } from "react";
@@ -2947,7 +2947,7 @@ export function useDirtyGuard<T>(getData: () => T) {
 }
 ```
 
-- [ ] **Step 4: Написать `frontend/src/components/ui/DataTable.test.tsx`**
+- [x] **Step 4: Написать `frontend/src/components/ui/DataTable.test.tsx`**
 
 ```tsx
 import { render, screen } from "@testing-library/react";
@@ -2996,7 +2996,7 @@ describe("DataTable", () => {
 });
 ```
 
-- [ ] **Step 5: Реализовать `frontend/src/components/ui/DataTable.tsx`**
+- [x] **Step 5: Реализовать `frontend/src/components/ui/DataTable.tsx`**
 
 ```tsx
 import { useMemo, useState } from "react";
@@ -3085,7 +3085,7 @@ export default function DataTable<T>({ columns, rows, rowKey, empty, actions, hi
 }
 ```
 
-- [ ] **Step 6: Создать `frontend/src/components/ui/Modal.tsx`**
+- [x] **Step 6: Создать `frontend/src/components/ui/Modal.tsx`**
 
 ```tsx
 import { useEffect, useRef } from "react";
@@ -3121,7 +3121,7 @@ export default function Modal({ open, title, onClose, children, footer, wide }: 
 }
 ```
 
-- [ ] **Step 7: Создать `frontend/src/components/ui/Combo.tsx`**
+- [x] **Step 7: Создать `frontend/src/components/ui/Combo.tsx`**
 
 ```tsx
 import { useState } from "react";
@@ -3184,7 +3184,7 @@ export default function Combo({ items, placeholder, onPick }: Props) {
 }
 ```
 
-- [ ] **Step 8: Создать `frontend/src/components/ui/MemberList.tsx`**
+- [x] **Step 8: Создать `frontend/src/components/ui/MemberList.tsx`**
 
 ```tsx
 import Combo from "./Combo";
@@ -3228,7 +3228,7 @@ export default function MemberList({
 }
 ```
 
-- [ ] **Step 9: Запустить тесты**
+- [x] **Step 9: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -3236,7 +3236,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): shared table, modal, combo and dirty-guard components"
