@@ -1525,7 +1525,7 @@ cd /root/repos/firenet && git add frontend/src/api && git commit -m "feat(fronte
 - Consumes: `api` (Task 4).
 - Produces: `DraftProvider`, `useDraft(): { draftId: string | null; setDraftId(id: string | null): void; isReadOnly: boolean; scope: string; apiPath(suffix: string): string }`.
 
-- [ ] **Step 1: Написать `frontend/src/draft/DraftContext.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/draft/DraftContext.test.tsx`**
 
 ```tsx
 import { act, render, renderHook, screen } from "@testing-library/react";
@@ -1590,7 +1590,7 @@ describe("DraftProvider", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -1598,7 +1598,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './DraftContext'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/draft/DraftContext.tsx`**
+- [x] **Step 3: Реализовать `frontend/src/draft/DraftContext.tsx`**
 
 ```tsx
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
@@ -1675,7 +1675,7 @@ export function useDraft(): DraftContextValue {
 }
 ```
 
-- [ ] **Step 4: Запустить тесты**
+- [x] **Step 4: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test
@@ -1683,7 +1683,7 @@ cd /root/repos/firenet/frontend && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src/draft && git commit -m "feat(frontend): draft context with storage-compatible keys"
