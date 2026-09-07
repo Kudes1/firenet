@@ -2,12 +2,12 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import InvitePage from "./pages/InvitePage";
 import LoginPage from "./pages/LoginPage";
+import SubnetsPage from "./pages/SubnetsPage";
 
 // Пути 1:1 с легаси-страницами Go. Страницы появляются в задачах 8–20;
 // до этого рендерятся заглушки с data-testid="page-<name>".
 const routes: Array<[string, string]> = [
   ["/ui/topology", "topology"],
-  ["/ui/subnets", "subnets"],
   ["/ui/networks", "networks"],
   ["/ui/devices", "devices"],
   ["/ui/sets", "sets"],
@@ -31,6 +31,7 @@ export default function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/ui/topology" replace />} />
+        <Route path="/ui/subnets" element={<SubnetsPage />} />
         {routes.map(([path, name]) => (
           <Route key={path} path={path} element={<Placeholder name={name} />} />
         ))}

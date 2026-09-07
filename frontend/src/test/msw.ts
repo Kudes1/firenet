@@ -6,6 +6,10 @@ import * as fx from "../api/fixtures";
 // server.use(...) там, где нужен нестандартный ответ.
 export const handlers = [
   http.get("/api/me", () => HttpResponse.json(fx.userFixture)),
+  // DraftBanner читает текущую версию и сам драфт; без этих обработчиков
+  // он считал бы активный драфт исчезнувшим и сбрасывал таб в read-only.
+  http.get("/api/versions", () => HttpResponse.json([fx.versionInfoFixture])),
+  http.get("/api/drafts/:id", () => HttpResponse.json(fx.draftFixture)),
   http.get("/api/versions/current/topology", () => HttpResponse.json(fx.topologyFixture)),
   http.get("/api/versions/current/subnets", () => HttpResponse.json(fx.subnetsFixture)),
   http.get("/api/versions/current/rules", () => HttpResponse.json(fx.policyFixture)),
