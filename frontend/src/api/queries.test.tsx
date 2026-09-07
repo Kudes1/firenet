@@ -7,7 +7,7 @@ import { server } from "../test/msw";
 import { DraftProvider } from "../draft/DraftContext";
 import * as fx from "./fixtures";
 import { projectKeys, useProjectResource, useTopologyOperations } from "./queries";
-import type { TopologyDoc } from "./types";
+import type { EditorSnapshot, LayoutDoc, TopologyDoc } from "./types";
 
 beforeAll(() => server.listen());
 afterEach(() => {
@@ -79,12 +79,26 @@ describe("useTopologyOperations", () => {
 
   it("writes the returned snapshot into topology and layout caches", async () => {
     withDraft("d1");
+    // Переопределяем мутацию ответом, ОТЛИЧНЫМ от GET-фикстур: иначе тест
+    // не отличил бы запись в кэш от простого совпадения данных по ссылке.
+    const snapshot: EditorSnapshot = {
+      topology: { ...fx.topologyFixture, devices: [{ name: "r9", kind: "router" }] },
+      layout: { ...fx.layoutFixture, camera: { x: 5, y: 6, z: 7 } },
+    };
+    server.use(http.post("/api/drafts/d1/topology/operations", () =>
+      HttpResponse.json(snapshot)));
     const { result } = renderHook(
-      () => ({ ops: useTopologyOperations(), topo: useProjectResource<TopologyDoc>("topology") }),
+      () => ({
+        ops: useTopologyOperations(),
+        topo: useProjectResource<TopologyDoc>("topology"),
+        layout: useProjectResource<LayoutDoc>("layout"),
+      }),
       { wrapper },
     );
     await waitFor(() => expect(result.current.topo.isSuccess).toBe(true));
-    await result.current.ops.mutateAsync([{ kind: "set-camera", camera: { x: 1, y: 2, z: 3 } }]);
-    await waitFor(() => expect(result.current.topo.data).toEqual(fx.topologyFixture));
+    await waitFor(() => expect(result.current.layout.isSuccess).toBe(true));
+    await result.current.ops.mutateAsync([{ kind: "set-camera", camera: { x: 5, y: 6, z: 7 } }]);
+    await waitFor(() => expect(result.current.topo.data).toEqual(snapshot.topology));
+    await waitFor(() => expect(result.current.layout.data).toEqual(snapshot.layout));
   });
 });
