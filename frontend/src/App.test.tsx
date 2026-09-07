@@ -1,13 +1,29 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { http, HttpResponse } from "msw";
+import { server } from "./test/msw";
+import * as fx from "./api/fixtures";
 import App from "./App";
 
+// App теперь рендерит Layout (сайдбар + баннер драфта), которому нужны
+// QueryClientProvider и MSW: Sidebar зовёт /api/me, ReadonlyBanner — /api/versions.
+beforeAll(() => server.listen());
+beforeEach(() => {
+  server.use(http.get("/api/versions", () => HttpResponse.json([fx.versionInfoFixture])));
+});
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
 function renderAt(path: string) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <App />
-    </MemoryRouter>,
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={[path]}>
+        <App />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
