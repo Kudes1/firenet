@@ -1,35 +1,29 @@
 // Wire-формат firenet API. Имена полей — точные копии JSON-тегов Go:
 // internal/projectdoc/{topology,subnets,rules,layout,project}.go и
 // DTO из internal/httpapi/{dto,handlers,draft_handlers,version_handlers,
-// user_handlers,search_index}.go. types.contract.test.ts ловит расхождение.
+// user_handlers,search_index}.go.
+// types.contract.test.ts ловит опечатки в именах полей и расхождение
+// фикстур с TS-типами; дрейф этих типов относительно Go он не ловит —
+// см. комментарий в шапке теста.
 //
-// Отклонения от брифа (Go — источник истины):
-//  - DiagnoseReport.mapMark и SpreadResult.mark в Go — *MapMark, то есть
-//    могут прийти как null; поэтому они nullable, а не обязательные.
-//  - SpreadResult.reports[].report — *Report, тоже nullable.
-//  - Слайсы, которые Go собирает как `var x []T` + append (а не make(..., 0)),
-//    уходят в JSON как null, когда элементов нет:
-//      * ValidateResponse.errors — handlers.go:542 `var errs []string`,
-//        на валидном проекте ответ {"valid":true,"errors":null};
-//      * LintResponse.findings — lint.go:40 `var out []Finding`,
-//        на чистом линте {"findings":null};
-//      * TopologyDoc.* / SubnetsDoc.subnets / PolicyDoc.chains —
-//        internal/pgstore/entities.go:238-292 тоже append к нулевому
-//        значению, так что пустой проект даёт null.
-//    Проверено запуском encoding/json, не только чтением кода: nil → null.
-//    Слайсы, где Go гарантирует непустой конструктор, остались не-nullable:
-//    ChainDoc.rules (entities.go:287 make(..., len)), MapMark.* (mapmark.go:38
-//    инициализирует все поля), DiagnoseReport.paths (diagnose.go:105),
-//    LinkExportsResponse.entities (handlers.go:360 make(..., 0)).
-//  - Слайсы, которые Go собирает как `var x []T` + append (а не make(..., 0)),
-//    приходят как null, когда элементов нет: пустой проект даёт null в
-//    TopologyDoc.*, SubnetsDoc.subnets, PolicyDoc.chains, а также в
-//    ValidateResponse.errors (handlers.go:542) и LintResponse.findings
-//    (lint.go:40). Проверено запуском encoding/json, не только чтением кода.
-//    Поля, где Go гарантирует make/литерал (например ChainDoc.rules в
-//    entities.go:287, LinkExportsResponse.entities в handlers.go:360,
-//    DiagnoseReport.paths в diagnose.go:105), оставлены не-nullable.
-//    Вызывающий код обязан обрабатывать null там, где он достижим.
+// Отклонения от брифа (Go — источник истины). Правило для nullable-слайсов:
+// Go кодирует nil-слайс в null, а пустой — в []. Поэтому слайс nullable там,
+// где Go собирает его как `var x []T` + append, и не nullable там, где
+// гарантирован make/литерал. Правило проверено запуском encoding/json.
+// Nullable (var + append):
+//  - ValidateResponse.errors — handlers.go:542, на валидном проекте
+//    {"valid":true,"errors":null};
+//  - LintResponse.findings — lint.go:40, на чистом линте {"findings":null};
+//  - TopologyDoc.* / SubnetsDoc.subnets / PolicyDoc.chains —
+//    pgstore/entities.go:238-292, пустой проект даёт null.
+// Не nullable (Go гарантирует конструктор):
+//  - ChainDoc.rules — entities.go:287 make(..., len): на чтении цепочка
+//    всегда реконструируется из БД; см. комментарий к типу про PUT;
+//  - DiagnoseReport.paths — diagnose.go:105 литерал []PathResult{};
+//  - MapMark.* — mapmark.go:38-45 инициализирует все семь полей;
+//  - LinkExportsResponse.entities — handlers.go:360 make(..., 0, len).
+// Плюс указатели: DiagnoseReport.mapMark, SpreadResult.mark (*MapMark) и
+// SpreadResult.reports[].report (*Report) — nullable, приходят как null.
 
 export type ErrorResponse = { error: string };
 
