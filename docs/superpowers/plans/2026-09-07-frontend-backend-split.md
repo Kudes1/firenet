@@ -1270,7 +1270,7 @@ cd /root/repos/firenet && git add frontend/src/lib && git commit -m "feat(fronte
 - Produces: `ApiError`, `api.get/post/put/patch/del`, `loginRedirectURL`, `redirectToLogin`, `resetApiState()`; `getRevision`, `setRevision`, `resetRevision`, `revisionHeaders`.
 - Consumes: типы из Task 2.
 
-- [ ] **Step 1: Написать `frontend/src/api/revision.test.ts`**
+- [x] **Step 1: Написать `frontend/src/api/revision.test.ts`**
 
 ```ts
 import { beforeEach, describe, expect, it } from "vitest";
@@ -1297,7 +1297,7 @@ describe("revision", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -1305,7 +1305,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './revision'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/api/revision.ts`**
+- [x] **Step 3: Реализовать `frontend/src/api/revision.ts`**
 
 ```ts
 // CAS-токен драфта: бэкенд выдаёт X-Draft-Revision на каждом чтении и
@@ -1330,7 +1330,7 @@ export function revisionHeaders(): Record<string, string> {
 }
 ```
 
-- [ ] **Step 4: Написать `frontend/src/api/client.test.ts`**
+- [x] **Step 4: Написать `frontend/src/api/client.test.ts`**
 
 ```ts
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1415,7 +1415,7 @@ describe("api", () => {
 });
 ```
 
-- [ ] **Step 5: Реализовать `frontend/src/api/client.ts`**
+- [x] **Step 5: Реализовать `frontend/src/api/client.ts`**
 
 ```ts
 import { resetRevision, revisionHeaders, setRevision } from "./revision";
@@ -1496,7 +1496,7 @@ export const api = {
 };
 ```
 
-- [ ] **Step 6: Запустить тесты**
+- [x] **Step 6: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test
@@ -1504,7 +1504,11 @@ cd /root/repos/firenet/frontend && npm test
 
 Expected: все зелёные (5 тестов `api` + 3 теста `loginRedirectURL` + 3 теста `revision`).
 
-- [ ] **Step 7: Commit**
+> **Правки относительно кода из плана (выявлены при реализации).**
+> 1. Тест «sends X-Draft-Revision on mutations» использовал `mockResolvedValue` с одним `Response` на два запроса — тело `Response` читается один раз, тест падал с «Body is unusable». Заменён на `mockImplementation`, создающий свежий `Response`; в мок добавлен заголовок `X-Draft-Revision: "5"` (без него мутации неоткуда взять токен).
+> 2. `client.ts` из плана делал безусловный `setRevision(res.headers.get(...))` — ответ без заголовка (не-драфтовый API) стирал бы CAS-токен драфта. Легаси `common.js` обновляет токен только когда заголовок пришёл (`if (rev) lastDraftRevision = rev`); реализация выровнена с легаси и добавлен тест «keeps the stored revision when a response has no header».
+
+- [x] **Step 7: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src/api && git commit -m "feat(frontend): HTTP client with 401 redirect and draft revision CAS"
