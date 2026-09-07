@@ -42,8 +42,6 @@ const pages = [
   ["/ui/drafts", "drafts"],
   ["/ui/history", "history"],
   ["/ui/search", "search"],
-  ["/login", "login"],
-  ["/invite/abc123", "invite"],
   ["/ui/unknown", "notfound"],
 ] as const;
 
@@ -51,6 +49,16 @@ describe("App routing", () => {
   it.each(pages)("renders placeholder for %s", (path, name) => {
     renderAt(path);
     expect(screen.getByTestId(`page-${name}`)).toHaveTextContent(name);
+  });
+
+  // Задача 8: /login и /invite/:token больше не заглушки — реальные страницы
+  // с теми же data-testid.
+  it.each([
+    ["/login", "page-login"],
+    ["/invite/abc123", "page-invite"],
+  ] as const)("renders the real page at %s", (path, testId) => {
+    renderAt(path);
+    expect(screen.getByTestId(testId)).toBeInTheDocument();
   });
 
   it("redirects / to topology page", () => {

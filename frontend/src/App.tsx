@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import InvitePage from "./pages/InvitePage";
+import LoginPage from "./pages/LoginPage";
 
 // Пути 1:1 с легаси-страницами Go. Страницы появляются в задачах 8–20;
 // до этого рендерятся заглушки с data-testid="page-<name>".
@@ -34,8 +36,8 @@ export default function App() {
         ))}
         <Route path="*" element={<Placeholder name="notfound" />} />
       </Route>
-      <Route path="/login" element={<Placeholder name="login" />} />
-      <Route path="/invite/:token" element={<Placeholder name="invite" />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/invite/:token" element={<InvitePage />} />
     </Routes>
   );
 }
