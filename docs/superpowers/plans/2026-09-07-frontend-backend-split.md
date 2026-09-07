@@ -2579,7 +2579,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 - Consumes: `api` (Task 4).
 - Produces: `<LoginPage/>`, `<InvitePage/>`.
 
-- [ ] **Step 1: Написать `frontend/src/pages/LoginPage.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/pages/LoginPage.test.tsx`**
 
 ```tsx
 import { render, screen } from "@testing-library/react";
@@ -2634,7 +2634,7 @@ describe("LoginPage", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -2642,7 +2642,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './LoginPage'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/pages/LoginPage.tsx`**
+- [x] **Step 3: Реализовать `frontend/src/pages/LoginPage.tsx`**
 
 ```tsx
 import { useState, type FormEvent } from "react";
@@ -2704,7 +2704,7 @@ export default function LoginPage() {
 }
 ```
 
-- [ ] **Step 4: Написать `frontend/src/pages/InvitePage.test.tsx`**
+- [x] **Step 4: Написать `frontend/src/pages/InvitePage.test.tsx`**
 
 ```tsx
 import { render, screen } from "@testing-library/react";
@@ -2765,7 +2765,7 @@ describe("InvitePage", () => {
 });
 ```
 
-- [ ] **Step 5: Реализовать `frontend/src/pages/InvitePage.tsx`**
+- [x] **Step 5: Реализовать `frontend/src/pages/InvitePage.tsx`**
 
 ```tsx
 import { useEffect, useState, type FormEvent } from "react";
@@ -2837,7 +2837,7 @@ export default function InvitePage() {
 }
 ```
 
-- [ ] **Step 6: Зарегистрировать страницы в `App.tsx`**
+- [x] **Step 6: Зарегистрировать страницы в `App.tsx`**
 
 Добавить импорты и заменить два маршрута вне `Layout`:
 
@@ -2849,7 +2849,7 @@ import LoginPage from "./pages/LoginPage";
       <Route path="/invite/:token" element={<InvitePage />} />
 ```
 
-- [ ] **Step 7: Запустить тесты**
+- [x] **Step 7: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -2857,7 +2857,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): login and invite pages"
