@@ -3254,7 +3254,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 - Consumes: `useProjectResource`, `useProjectSave` (Task 6), `DataTable`/`Modal` (Task 9), `ipv4CidrOverlap`/`containsFold` (Task 3), `uniqueNameHint` (Task 3).
 - Produces: `renderPage()` (используется всеми следующими тестами страниц), `<SubnetsPage/>`.
 
-- [ ] **Step 1: Создать `frontend/src/test/renderPage.tsx`**
+- [x] **Step 1: Создать `frontend/src/test/renderPage.tsx`**
 
 ```tsx
 import { render, type RenderResult } from "@testing-library/react";
@@ -3299,7 +3299,7 @@ export function renderPage(ui: ReactNode, path = "/ui/subnets", draftId?: string
 
 > **Порядок задач и зависимость от Task 7/13:** `renderPage` монтирует `BannerHost` и `DraftBanner` из `frontend/src/components/` (задача 7). Поэтому Task 13 (который определяет `renderPage`) можно выполнять **только после Task 7** — иначе импорты `../components/BannerHost` и `../components/DraftBanner` не найдутся. Если по какой-то причине Task 7 ещё не готов, а тестировать страницы нужно раньше, баннеры временно не включаются, а тесты, ищущие `data-testid="banner"`/`draft-banner`, пропускаются и возвращаются после готовности Task 7. Самый надёжный путь — придерживаться исходной нумерации: Task 7 (`components`) → Task 13 (`renderPage`) → страницы.
 
-- [ ] **Step 2: Написать `frontend/src/pages/SubnetsPage.test.tsx`**
+- [x] **Step 2: Написать `frontend/src/pages/SubnetsPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -3377,7 +3377,7 @@ describe("SubnetsPage", () => {
 });
 ```
 
-- [ ] **Step 3: Запустить — тест падает**
+- [x] **Step 3: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -3385,7 +3385,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './SubnetsPage'`.
 
-- [ ] **Step 4: Реализовать `frontend/src/pages/SubnetsPage.tsx`**
+- [x] **Step 4: Реализовать `frontend/src/pages/SubnetsPage.tsx`**
 
 ```tsx
 import { useMemo, useState } from "react";
@@ -3542,7 +3542,7 @@ function subnetHint(draft: Draft, rows: SubnetDoc[]): string {
 }
 ```
 
-- [ ] **Step 5: Зарегистрировать маршрут в `App.tsx`**
+- [x] **Step 5: Зарегистрировать маршрут в `App.tsx`**
 
 Добавить импорт `SubnetsPage` и заменить в `routes.map` элемент для `/ui/subnets`: проще всего убрать `["/ui/subnets", "subnets"]` из массива `routes` и добавить явный маршрут рядом:
 
@@ -3554,7 +3554,7 @@ import SubnetsPage from "./pages/SubnetsPage";
 
 Остальные пути пока остаются на `Placeholder`.
 
-- [ ] **Step 6: Запустить тесты**
+- [x] **Step 6: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -3562,7 +3562,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): subnets page and shared page test helper"
