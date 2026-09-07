@@ -1700,7 +1700,7 @@ cd /root/repos/firenet && git add frontend/src/draft && git commit -m "feat(fron
 - Consumes: `api` (Task 4), `useDraft` (Task 5), типы (Task 2).
 - Produces: `projectKeys`, `useProjectResource`, `useProjectSave`, `useTopologyOperations`, `useDrafts`, `useMe`, `useVersions`, `useUsers`, `queryKeys`.
 
-- [ ] **Step 1: Создать `frontend/src/test/msw.ts`**
+- [x] **Step 1: Создать `frontend/src/test/msw.ts`**
 
 ```ts
 import { http, HttpResponse } from "msw";
@@ -1729,7 +1729,7 @@ export const handlers = [
 export const server = setupServer(...handlers);
 ```
 
-- [ ] **Step 2: Написать `frontend/src/api/queries.test.tsx`**
+- [x] **Step 2: Написать `frontend/src/api/queries.test.tsx`**
 
 ```tsx
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -1824,7 +1824,7 @@ describe("useTopologyOperations", () => {
 });
 ```
 
-- [ ] **Step 3: Запустить — тест падает**
+- [x] **Step 3: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -1832,7 +1832,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './queries'`.
 
-- [ ] **Step 4: Реализовать `frontend/src/api/queries.ts`**
+- [x] **Step 4: Реализовать `frontend/src/api/queries.ts`**
 
 ```ts
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
@@ -2032,7 +2032,7 @@ export function useSearchIndex() {
 }
 ```
 
-- [ ] **Step 5: Запустить тесты**
+- [x] **Step 5: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test
@@ -2040,7 +2040,7 @@ cd /root/repos/firenet/frontend && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src/api frontend/src/test && git commit -m "feat(frontend): TanStack Query hooks for project resources and mutations"
