@@ -28,7 +28,6 @@ function renderAt(path: string) {
 }
 
 const pages = [
-  ["/ui/topology", "topology"],
   ["/ui/diagnose", "diagnose"],
   ["/ui/unknown", "notfound"],
 ] as const;
@@ -38,6 +37,9 @@ describe("App routing", () => {
     renderAt(path);
     expect(screen.getByTestId(`page-${name}`)).toHaveTextContent(name);
   });
+
+  // Задача 19: /ui/topology — реальная страница (React Flow canvas),
+  // data-testid="page-topology" сохранён.
 
   // Задача 8: /login и /invite/:token больше не заглушки — реальные страницы
   // с теми же data-testid. Задачи 10–14: /ui/subnets, /ui/networks,

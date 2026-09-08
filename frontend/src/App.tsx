@@ -12,6 +12,7 @@ import RulesPage from "./pages/RulesPage";
 import SearchPage from "./pages/SearchPage";
 import SetsPage from "./pages/SetsPage";
 import SubnetsPage from "./pages/SubnetsPage";
+import TopologyPage from "./pages/TopologyPage";
 import UnionsPage from "./pages/UnionsPage";
 import UsersPage from "./pages/UsersPage";
 
@@ -37,6 +38,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/ui/topology" replace />} />
         <Route path="/ui/subnets" element={<SubnetsPage />} />
+        <Route path="/ui/topology" element={<TopologyPage />} />
         <Route path="/ui/networks" element={<NetworksPage />} />
         <Route path="/ui/devices" element={<DevicesPage />} />
         <Route path="/ui/sets" element={<SetsPage />} />
