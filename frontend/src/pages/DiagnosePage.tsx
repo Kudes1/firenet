@@ -5,8 +5,9 @@ import { layoutLinkKey } from "../lib/links";
 import TopologyCanvas from "../topology/TopologyCanvas";
 import { notify } from "../components/notify";
 import { ResetIcon } from "../components/icons";
+import { storageKeys } from "../lib/storage";
 
-const FORM_KEY = "firenet-diag-form-v1";
+const FORM_KEY = storageKeys.diagForm;
 const EMPTY_TOPOLOGY: TopologyDoc = { devices: [], links: [], networks: [], sets: [], unions: [] };
 
 type Form = { src: string; dst: string; proto: string; dstPorts: string };

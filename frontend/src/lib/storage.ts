@@ -7,4 +7,5 @@ export const storageKeys = {
   draftId: "ui.draft.id", // sessionStorage — активный драфт таба
   lastDraftId: "ui.draft.lastId", // localStorage — последний драфт для нового таба
   draftReadonly: "ui.draft.readonly", // sessionStorage — таб сознательно на текущей версии
+  diagForm: "ui.diag.form", // localStorage — сохранённая форма диагностики
 } as const;

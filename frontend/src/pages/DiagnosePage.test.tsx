@@ -3,6 +3,7 @@ import { http, HttpResponse } from "msw";
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { server } from "../test/msw";
 import { renderPage } from "../test/renderPage";
+import { storageKeys } from "../lib/storage";
 import DiagnosePage from "./DiagnosePage";
 
 const REPORT = {
@@ -91,7 +92,7 @@ describe("DiagnosePage", () => {
   });
 
   it("restores the form from localStorage", async () => {
-    localStorage.setItem("firenet-diag-form-v1", JSON.stringify({ src: "10.0.0.5", dst: "10.0.1.5", proto: "tcp", dstPorts: "80" }));
+    localStorage.setItem(storageKeys.diagForm, JSON.stringify({ src: "10.0.0.5", dst: "10.0.1.5", proto: "tcp", dstPorts: "80" }));
     renderPage(<DiagnosePage />, "/ui/diagnose");
     expect(await screen.findByLabelText("Источник")).toHaveValue("10.0.0.5");
     expect(screen.getByLabelText("Порты назначения")).toHaveValue("80");

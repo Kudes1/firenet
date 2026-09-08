@@ -78,7 +78,7 @@ function prefixOverlap(a: Prefix, b: Prefix): boolean {
 
 // matchPrefixQuery: адресный запрос ищет по вхождению/пересечению префиксов,
 // всё остальное — обычная подстрока (имя подсети, сети, набора).
-// Семантика 1:1 с common.js: запрос /32 проверяется вхождением в значение,
+// Запрос /32 проверяется вхождением в значение,
 // более широкая маска — пересечением префиксов.
 export function matchPrefixQuery(value: string, query: string): boolean {
   if (!query) return true;

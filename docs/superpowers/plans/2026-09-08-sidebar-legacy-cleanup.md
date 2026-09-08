@@ -32,7 +32,7 @@
 - Consumes: ничего.
 - Produces: `storageKeys` — константа с полями `sidebar`, `navGroup(id: string)`, `theme`, `draftId`, `lastDraftId`, `draftReadonly`. Значения: `"ui.sidebar"`, `` `ui.nav.${id}` ``, `"ui.theme"`, `"ui.draft.id"`, `"ui.draft.lastId"`, `"ui.draft.readonly"`. Tasks 3–4 импортируют отсюда; e2e-хелпер (Task 4) дублирует строки — тест ниже фиксирует контракт.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // frontend/src/lib/storage.test.ts
@@ -52,12 +52,12 @@ describe("storageKeys", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd frontend && npx vitest --run src/lib/storage.test.ts`
 Expected: FAIL — `Cannot find module './storage'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```ts
 // frontend/src/lib/storage.ts
@@ -74,12 +74,12 @@ export const storageKeys = {
 } as const;
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd frontend && npx vitest --run src/lib/storage.test.ts`
 Expected: PASS (1 test)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/lib/storage.ts frontend/src/lib/storage.test.ts
@@ -88,7 +88,7 @@ git commit -m "refactor(frontend): centralize web-storage keys under ui.*"
 
 ---
 
-### Task 2: Подсветка через NavLink, Sidebar без пропа active
+### ~~Task 2: Подсветка через NavLink, Sidebar без пропа active~~ ✅ DONE
 
 **Files:**
 - Modify: `frontend/src/components/Sidebar.tsx`
@@ -99,11 +99,11 @@ git commit -m "refactor(frontend): centralize web-storage keys under ui.*"
 - Consumes: react-router-dom `NavLink`, `useLocation`.
 - Produces: `Sidebar` без пропов: `export default function Sidebar()`. `NavGroup({ group })` — тоже без пропов. `Layout` без изменений в интерфейсе (export default, children через `Outlet`).
 
-- [ ] **Step 1: Адаптировать тесты**
+- [x] **Step 1: Адаптировать тесты**
 
 В `Layout.test.tsx` тесты «renders the sidebar», «marks the active page», «hides Пользователи» остаются как есть — они проверяют DOM, а не реализацию. Ничего менять не нужно, но прогнать до рефакторинга: `cd frontend && npx vitest --run src/components/Layout.test.tsx` → PASS (базовая линия).
 
-- [ ] **Step 2: Переписать Sidebar.tsx**
+- [x] **Step 2: Переписать Sidebar.tsx**
 
 ```tsx
 import { useState } from "react";
@@ -239,7 +239,7 @@ const isAdmin = (me: UserResponse | undefined) => me?.role === "admin";
 - logout-кнопка получает комментарий «почему не navigate()»;
 - `id="theme-toggle"` удалён.
 
-- [ ] **Step 3: Упростить Layout.tsx**
+- [x] **Step 3: Упростить Layout.tsx**
 
 ```tsx
 import { Outlet, useLocation } from "react-router-dom";
@@ -276,12 +276,12 @@ export default function Layout() {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cd frontend && npm run typecheck && npx vitest --run src/components/Layout.test.tsx`
 Expected: typecheck OK, все тесты PASS (подсветка `.active` теперь от NavLink, проверки DOM не меняются).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/components/Sidebar.tsx frontend/src/components/Layout.tsx
@@ -290,7 +290,7 @@ git commit -m "refactor(frontend): nav highlighting via NavLink instead of manua
 
 ---
 
-### Task 3: Sidebar — ключи ui.*, aria-полировка, index.html
+### ~~Task 3: Sidebar — ключи ui.*, aria-полировка, index.html~~ ✅ DONE
 
 **Files:**
 - Modify: `frontend/src/components/Sidebar.tsx`
@@ -302,7 +302,7 @@ git commit -m "refactor(frontend): nav highlighting via NavLink instead of manua
 - Consumes: `storageKeys.sidebar`, `storageKeys.navGroup`, `storageKeys.theme` из Task 1.
 - Produces: ничего нового для других задач.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Добавить в `Layout.test.tsx` (импорты: `userEvent` из `@testing-library/user-event`; `beforeEach` уже стабит `matchMedia`). В существующий `afterEach` добавить `localStorage.clear()` рядом с `sessionStorage.clear()` — новые тесты пишут `ui.*` ключи в localStorage, без очистки будет утечка состояния между тестами:
 
@@ -343,12 +343,12 @@ describe("Sidebar collapse and theme", () => {
 
 Примечание: реализация пишет `window.location.href = "/login"` (не `assign`). В jsdom (vitest ≥ 2) запись в `href` работает с дефолтным `window.location`; если прогон покажет обратное — временно замокать через `vi.stubGlobal("location", { href: "" })`, но ассерт остаётся на `href`.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd frontend && npx vitest --run src/components/Layout.test.tsx`
 Expected: FAIL — ключи пишутся старые (`firenet-sidebar`/`firenet-theme`), `aria-expanded` отсутствует.
 
-- [ ] **Step 3: Обновить Sidebar.tsx (диффы поверх Task 2)**
+- [x] **Step 3: Обновить Sidebar.tsx (диффы поверх Task 2)**
 
 ```tsx
 import { storageKeys } from "../lib/storage";
@@ -382,7 +382,7 @@ const setNavGroupOpen = (id: string, open: boolean) => {
 ```
 Комментарий про «1:1 с common.js» и про «open» удалить; семантика: absent = раскрыта, `"closed"` = свернута.
 
-- [ ] **Step 4: Обновить theme.ts**
+- [x] **Step 4: Обновить theme.ts**
 
 ```ts
 import { storageKeys } from "../lib/storage";
@@ -402,7 +402,7 @@ export function applyTheme(theme: "light" | "dark"): void {
 }
 ```
 
-- [ ] **Step 5: Обновить index.html**
+- [x] **Step 5: Обновить index.html**
 
 Inline-скрипт в `<head>` (защита от мигания темы до монтирования React):
 
@@ -415,12 +415,12 @@ Inline-скрипт в `<head>` (защита от мигания темы до 
 </script>
 ```
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `cd frontend && npm run typecheck && npm test -- --run`
 Expected: все PASS, включая новые 4.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/components/Sidebar.tsx frontend/src/components/theme.ts frontend/index.html frontend/src/components/Layout.test.tsx
@@ -429,7 +429,7 @@ git commit -m "refactor(frontend): sidebar storage keys to ui.*, aria-expanded o
 
 ---
 
-### Task 4: Переименование draft-ключей (фронт + e2e-хелпер)
+### ~~Task 4: Переименование draft-ключей (фронт + e2e-хелпер)~~ ✅ DONE
 
 **Files:**
 - Modify: `frontend/src/draft/DraftContext.tsx:6-8` (константы ключей)
@@ -445,7 +445,7 @@ git commit -m "refactor(frontend): sidebar storage keys to ui.*, aria-expanded o
 - Consumes: `storageKeys.draftId`, `storageKeys.lastDraftId`, `storageKeys.draftReadonly` из Task 1.
 - Produces: e2e-хелпер `openWithDraft`/`openTablePage` пишут новые ключи — контракт зафиксирован тестом из Task 1.
 
-- [ ] **Step 1: Заменить ключи в DraftContext.tsx**
+- [x] **Step 1: Заменить ключи в DraftContext.tsx**
 
 ```tsx
 import { storageKeys } from "../lib/storage";
@@ -458,7 +458,7 @@ import { storageKeys } from "../lib/storage";
 
 Удалить три константы `DRAFT_ID_KEY`/`LAST_DRAFT_ID_KEY`/`READONLY_KEY`; все использования заменить на `storageKeys.draftId` / `storageKeys.lastDraftId` / `storageKeys.draftReadonly`. Комментарий «Ключи совпадают с common.js…» удалить.
 
-- [ ] **Step 2: Заменить литералы в DraftBanner.tsx**
+- [x] **Step 2: Заменить литералы в DraftBanner.tsx**
 
 Строки 57–58:
 ```tsx
@@ -467,14 +467,14 @@ localStorage.setItem(storageKeys.lastDraftId, draft.id);
 ```
 (добавить `import { storageKeys } from "../lib/storage";`)
 
-- [ ] **Step 3: Заменить литералы в тестах и renderPage.tsx**
+- [x] **Step 3: Заменить литералы в тестах и renderPage.tsx**
 
 Механическая замена во всех перечисленных файлах:
 - `"firenet-draft-id"` → `storageKeys.draftId` (в .tsx) / `"ui.draft.id"` (в renderPage.tsx, если он не импортирует — импортировать `storageKeys` предпочтительнее);
 - `"firenet-last-draft-id"` → `storageKeys.lastDraftId`;
 - комментарий в `queries.test.tsx:29` («поэтому firenet-draft-id…») — перефразировать под `ui.draft.id`.
 
-- [ ] **Step 4: Обновить e2e-хелпер ui.js**
+- [x] **Step 4: Обновить e2e-хелпер ui.js**
 
 ```js
 export async function openWithDraft(page, draftId, path) {
@@ -494,12 +494,12 @@ export async function openTablePage(page, draftId, path) {
 }
 ```
 
-- [ ] **Step 5: Run unit tests**
+- [x] **Step 5: Run unit tests**
 
 Run: `cd frontend && npm run typecheck && npm test -- --run`
 Expected: все PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src frontend/src/test e2e/helpers/ui.js
@@ -508,7 +508,7 @@ git commit -m "refactor(frontend): rename draft storage keys to ui.*, update e2e
 
 ---
 
-### Task 5: Мёртвый CSS → удалить, user-box → токены, комментарии → актуализировать
+### ~~Task 5: Мёртвый CSS → удалить, user-box → токены, комментарии → актуализировать~~ ✅ DONE
 
 **Files:**
 - Modify: `frontend/src/styles.css`
@@ -517,7 +517,7 @@ git commit -m "refactor(frontend): rename draft storage keys to ui.*, update e2e
 - Consumes: ничего.
 - Produces: без визуальных изменений (проверка глазами на dev-сервере не требуется — токены дают те же значения).
 
-- [ ] **Step 1: Удалить мёртвые правила**
+- [x] **Step 1: Удалить мёртвые правила**
 
 1. Строка 86: `[hidden], [x-cloak] { display: none !important; }` → `[hidden] { display: none !important; }` (`x-cloak` — атрибут Alpine.js, легаси).
 2. Строки 121–130: убрать `.sidebar > strong` из группового селектора и правило `.sidebar > strong { font-size: … }`.
@@ -531,7 +531,7 @@ git commit -m "refactor(frontend): rename draft storage keys to ui.*, update e2e
       обычный поток, без fixed-позиционирования и компенсирующих паддингов. */
    ```
 
-- [ ] **Step 2: Актуализировать легаси-комментарии**
+- [x] **Step 2: Актуализировать легаси-комментарии**
 
 1. Строки 88–89 (`#root`): заменить на
    ```css
@@ -545,7 +545,7 @@ git commit -m "refactor(frontend): rename draft storage keys to ui.*, update e2e
    ```
    (Сам блок `.submenu`/`.ctx-*` не трогать — вне скоупа, потенциально мёртвый; отмечено как отдельное расследование.)
 
-- [ ] **Step 3: Перевести user-box/logout-btn на токены**
+- [x] **Step 3: Перевести user-box/logout-btn на токены**
 
 ```css
 .user-box {
@@ -575,19 +575,20 @@ git commit -m "refactor(frontend): rename draft storage keys to ui.*, update e2e
 }
 ```
 
-- [ ] **Step 4: Удалить алиас --text**
+- [x] **Step 4: Удалить алиас --text**
 
 1. Строка 6: `--text: var(--fg);` — удалить из `:root`.
 2. Заменить все оставшиеся `var(--text)` → `var(--fg)` (проверенные места: строки 565, 1138, 1155, 1182, 1232, 1237 — точные номера сместятся после удалений, искать grep'ом).
 
 Run: `grep -n "var(--text)\|--text:" frontend/src/styles.css` → пусто.
 
-- [ ] **Step 5: Run tests + typecheck**
+- [x] **Step 5: Run tests + typecheck**
 
 Run: `cd frontend && npm run typecheck && npm test -- --run`
 Expected: PASS (CSS в jsdom не участвует, это регрессионная проверка).
+Выполнено: typecheck OK, 181/181 PASS (32 файла), коммит `b63865d`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/styles.css
@@ -600,22 +601,31 @@ git commit -m "refactor(frontend): drop dead legacy CSS, user-box on design toke
 
 **Files:** без изменений (только проверки).
 
-- [ ] **Step 1: Полный юнит-прогон**
+- [x] **Step 1: Полный юнит-прогон**
 
 Run: `cd frontend && npm run typecheck && npm test -- --run`
 Expected: typecheck OK, все тест-файлы PASS.
+Выполнено: typecheck OK, 181/181 PASS (32 файла).
 
-- [ ] **Step 2: E2E (обязательно — Task 4 менял e2e-хелпер)**
+- [x] **Step 2: E2E (обязательно — Task 4 менял e2e-хелпер)**
 
 Run: `make test-e2e`
 Expected: все сценарии PASS. Если падают сценарии с драфтами — первым подозреваемым несоответствие ключей в `e2e/helpers/ui.js` и `storageKeys`.
+Выполнено: 47 passed, 1 skipped (skip был и до Task 6 — `rename.spec.js:104`). После этого был ещё переименован diag-ключ (см. Step 4) и точечно перепрогнан `scenarios/diagnose.spec.js` — 4/4 PASS. Драфт-сценарии зелёные — ключи в `e2e/helpers/ui.js` и `storageKeys` совпадают.
 
-- [ ] **Step 3: Go-сторона не тронута — контрольная проверка**
+- [x] **Step 3: Go-сторона не тронута — контрольная проверка**
 
 Run: `go build ./... && go vet ./...`
 Expected: OK.
+Выполнено: OK, без предупреждений.
 
-- [ ] **Step 4: Остаточный grep на легаси**
+- [x] **Step 4: Остаточный grep на легаси**
 
 Run: `grep -rn "firenet-\|common\.js\|x-cloak\|brand-\|chevron" frontend/src frontend/index.html e2e/helpers`
 Expected: только упоминания `firenet-*` в легитимных местах (e2e-контейнер `firenet-e2e-pg-*`, название приложения) — ни одного storage-ключа и ни одного «1:1 с common.js».
+Выполнено, с доработкой сверх скоупа (согласовано с пользователем в чате): первый прогон нашёл storage-ключ `firenet-diag-form-v1` (DiagnosePage) и фразу «Семантика 1:1 с common.js» (lib/search.ts). Исправлено:
+  - `storageKeys.diagForm = "ui.diag.form"` добавлен в `lib/storage.ts` (TDD: тест контракта → RED → реализация → GREEN), `DiagnosePage.tsx` и его тест переведены на новый ключ;
+  - формулировка «1:1 с common.js» из `lib/search.ts:81` удалена.
+  Повторный grep чист: storage-ключей `firenet-*` нет; `brand-`/`x-cloak` отсутствуют; упоминания `common.js` остались только как легитимные пометки «порт common.js» (документируют происхождение кода); `.diag-chevron` — класс страницы диагностики, к удалённому сайдбар-`.chevron` отношения не имеет.
+
+Итог: typecheck OK, юнит 181/181 PASS, e2e зелёные, Go OK. Задача завершена.

@@ -10,5 +10,6 @@ describe("storageKeys", () => {
     expect(storageKeys.draftId).toBe("ui.draft.id");
     expect(storageKeys.lastDraftId).toBe("ui.draft.lastId");
     expect(storageKeys.draftReadonly).toBe("ui.draft.readonly");
+    expect(storageKeys.diagForm).toBe("ui.diag.form");
   });
 });
