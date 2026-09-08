@@ -8318,15 +8318,10 @@ services:
     volumes:
       # В dev подменяем собранный dist работающим Vite: правки видны сразу.
       - ./frontend/src:/src/src:ro
-    # ВАЖНО: дефолт тут null, а не пустая строка. `${VAR:-null}` при не заданной
-    # переменной даёт compose-значение `null` → CMD наследуется из Dockerfile
-    # (в runtime — nginx; в dev — заменяется на FRONTEND_CMD=npm run dev).
-    # Если поставить `${FRONTEND_CMD:-}`, compose распарсит пустую строку как
-    # НЕПУСТОЙ пустой массив `command: []`, который ПЕРЕКРЫВАЕТ CMD образа.
-    # Для nginx это работает лишь по случайности (entrypoint сам запускает
-    # nginx) и хрупко при изменении образа. Проверено на compose v5.5.1:
-    # `command: ${VAR:-}` → `command: []`, `command: ${VAR:-null}` → `command: null`.
-    command: ${FRONTEND_CMD:-null}
+    # command здесь не задаётся: CMD берётся из целевого стейджа Dockerfile —
+    # dev-стейдж запускает Vite, runtime — nginx из базового образа.
+    # Проверено на compose v5.5.1 (см. правку ниже в Step 1): вариант
+    # `command: ${FRONTEND_CMD:-null}` из исходного черновика не работает.
     ports:
       # dev слушает 5173 (CMD в Dockerfile), runtime — 80. Оба проброшены,
       # иначе в dev-режиме «8080 → 80» некуда стучаться: nginx там нет.
@@ -8336,6 +8331,8 @@ services:
 volumes:
   firenet-db:
 ```
+
+> **Правка относительно исходного черновика (выявлена проверкой Step 6).** Ключ `command: ${FRONTEND_CMD:-null}` на compose v5.5.1 интерполируется в **строку** `"null"`, которую compose превращает в `command: ["null"]` — контейнер падает с `exec: null: not found` (entrypoint nginx исполняет строку как бинарь). Пустой дефолт `${FRONTEND_CMD:-}` дал бы `command: []`, тоже перекрывающий CMD. Поэтому `command:` из compose убран вовсе: целевой стейдж Dockerfile и так несёт правильный CMD (dev — Vite, runtime — nginx), а `FRONTEND_TARGET` через `build.target` выбирает стейдж. Замечание к Step 5 про явную передачу `FRONTEND_CMD` утратило силу — в dev достаточно `FRONTEND_TARGET=dev`, CMD поднимает Vite.
 
 - [x] **Step 2: Добавить dev-стейдж в `frontend/Dockerfile`**
 
@@ -8373,7 +8370,7 @@ EXPOSE 80
 
 `COPY . .` в dev-стейдже — не дубль build-стейджа: `deps` кладёт только `package*.json`, а Vite для dev требует `index.html` (точка входа) и `vite.config.ts`. Проверено: без этой строки контейнер поднимается, но `curl http://127.0.0.1:5199/` отвечает `404`.
 
-**Связка с compose `command:` из Step 1:** CMD dev-стейджа (`npm run dev -- --host 0.0.0.0 --port 5173`) используется только когда compose **не** перекрывает его `command:`. Для dev-режима переменная `FRONTEND_CMD` в compose задаётся как `npm run dev -- --host 0.0.0.0 --port 5173` — она приходит **снаружи** (команда запуска), а не из Dockerfile, поэтому dev-стейдж здесь фактически не обязан нести CMD, но несёт его как страховку на случай запуска образа напрямую (`docker run` без compose). Не дублировать CMD в двух местах нельзя обойтись: compose `command:` перекрывает Dockerfile CMD, а вне compose CMD берётся из образа.
+**Связка с compose (Step 1):** CMD каждого стейджа используется напрямую — compose не перекрывает `command:` (см. правку в Step 1). Dev-режим запускается `FRONTEND_TARGET=dev`, и CMD dev-стейджа поднимает Vite; вне compose CMD тоже берётся из образа, так что `docker run` работает без переменных.
 
 - [x] **Step 3: Создать `nginx/firenet.conf`** — образец для nginx на хосте
 
@@ -8416,24 +8413,24 @@ FRONTEND_TARGET=dev
 VITE_API_TARGET=http://backend:8787
 ```
 
-`FRONTEND_CMD` в `.env.example` **не** добавлять: dev-стейдж уже несёт свой `CMD`, а переменная в `.env` подставляется в compose как `command:`. Её нужно задавать **только при запуске dev-режима** (`FRONTEND_TARGET=dev`), где она подменяет `CMD` на Vite. При `target: runtime` переменная не задаётся, и дефолт `:-null` из compose (см. Step 1) оставляет CMD nginx-образа нетронутым. Важно: НЕ использовать `${FRONTEND_CMD:-}` с пустым дефолтом — пустая строка даёт `command: []`, который перекрывает CMD (подробности в Step 1). Хостовый порт Vite задан `ports:` в compose.
+`FRONTEND_CMD` в `.env.example` **не** добавлять: команда берётся из CMD целевого стейджа Dockerfile (см. правку в Step 1 — compose не задаёт `command:`). В `.env` достаточно `FRONTEND_TARGET=dev` для dev-режима; при `target: runtime` переменная игнорируется. Хостовый порт Vite задан `ports:` в compose.
 
 - [x] **Step 5: Проверить dev-режим**
 
 ```bash
-cd /root/repos/firenet && FRONTEND_TARGET=dev FRONTEND_CMD="npm run dev -- --host 0.0.0.0 --port 5173" docker compose up -d --build && sleep 20 && curl -sf -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5173/ && curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5173/api/login -X POST
+cd /root/repos/firenet && FRONTEND_TARGET=dev docker compose up -d --build && sleep 20 && curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5173/ && curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5173/api/login -X POST
 ```
 
 Expected: `200` для `/` у Vite и `400`/`401` от `/api/login` — то есть прокси до бэкенда работает.
 
-Замечание: в dev-команде переменную `FRONTEND_CMD` **нужно задавать явно** — она приходит в compose как `command:` и подменяет CMD dev-стейджа на запуск Vite. Без неё compose подставит дефолт `null`, и запустится CMD из Dockerfile (`npm run dev ...` тоже) — результат тот же, но явная передача делает намерение прозрачным. В prod (Step 6) `FRONTEND_CMD` не задаётся вовсе..
+> **Правка:** `FRONTEND_CMD` из исходной команды убран (compose больше не перекрывает CMD, см. Step 1); добавлен `--build` — без него `docker compose up -d` при смене `FRONTEND_TARGET` переиспользует образ прежнего таргета (проверено: после runtime-проверки dev-запуск без `--build` поднял nginx вместо Vite).
 
 Проверять именно через `:5173/api/login`, а не `:8787/api/login`: второй вариант стучится в бэкенд напрямую и прокси не проверяет (это была ошибка в предыдущей версии шага). `curl -sf` тоже не годится — на 4xx она молча вернёт 22 и шаг упадёт на несуществующей проблеме.
 
 - [x] **Step 6: Проверить prod-режим**
 
 ```bash
-cd /root/repos/firenet && FRONTEND_TARGET=runtime docker compose up -d --build && sleep 15 && curl -sf -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/ && curl -sf -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/ui/rules
+cd /root/repos/firenet && FRONTEND_TARGET=runtime docker compose up -d --build && sleep 15 && curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/ && curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/ui/rules
 ```
 
 Expected: `200` на обоих — fallback nginx отдаёт `index.html` для глубоких ссылок.
@@ -8445,6 +8442,8 @@ Expected: `200` на обоих — fallback nginx отдаёт `index.html` д�
 ```bash
 cd /root/repos/firenet && docker compose down && git add docker-compose.yml frontend/Dockerfile nginx .env.example && git commit -m "build: split compose into db, backend and frontend with host nginx example"
 ```
+
+> Реализовано (коммит 931a4c0). Итог проверен на compose v5.5.1: dev (`FRONTEND_TARGET=dev docker compose up -d --build`) — `200` на `:5173/` и `400` от `:5173/api/login`; prod (`FRONTEND_TARGET=runtime ... --build`) — `200` на `:8080/` и `:8080/ui/rules`. Изменения относительно черновика сведены в правку к Step 1 (убран `command: ${FRONTEND_CMD:-null}`) и Step 5 (добавлен `--build`, убран `FRONTEND_CMD`).
 
 ---
 
