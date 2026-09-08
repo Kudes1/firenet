@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import DevicesPage from "./pages/DevicesPage";
 import InvitePage from "./pages/InvitePage";
+import LinksPage from "./pages/LinksPage";
 import LoginPage from "./pages/LoginPage";
 import NetworksPage from "./pages/NetworksPage";
 import SetsPage from "./pages/SetsPage";
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/ui/devices" element={<DevicesPage />} />
         <Route path="/ui/sets" element={<SetsPage />} />
         <Route path="/ui/unions" element={<UnionsPage />} />
+        <Route path="/ui/links" element={<LinksPage />} />
         {routes.map(([path, name]) => (
           <Route key={path} path={path} element={<Placeholder name={name} />} />
         ))}
