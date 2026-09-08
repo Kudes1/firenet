@@ -5,8 +5,7 @@ import DraftBanner from "./DraftBanner";
 import ErrorBoundary from "./ErrorBoundary";
 import Sidebar from "./Sidebar";
 
-// active = второй сегмент пути (/ui/rules -> rules). Страницы users и search
-// работают с данными вне драфта, поэтому баннер им не нужен.
+// Страницы users и search работают с данными вне драфта, поэтому баннер им не нужен.
 const NO_DRAFT_BANNER = new Set(["users", "search"]);
 
 function activeFromPath(pathname: string): string {
@@ -15,17 +14,14 @@ function activeFromPath(pathname: string): string {
 }
 
 export default function Layout() {
-  const { pathname } = useLocation();
-  const active = activeFromPath(pathname);
-  const showBanner = !NO_DRAFT_BANNER.has(active);
-
+  const active = activeFromPath(useLocation().pathname);
   return (
     <DraftProvider>
       <div className="app-shell">
-        <Sidebar active={active} />
+        <Sidebar />
         <main>
           <BannerHost />
-          {showBanner && <DraftBanner />}
+          {!NO_DRAFT_BANNER.has(active) && <DraftBanner />}
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>

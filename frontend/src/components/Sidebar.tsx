@@ -1,13 +1,11 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import { useMe } from "../api/queries";
 import type { UserResponse } from "../api/types";
 import { initialTheme, applyTheme } from "./theme";
 import { CollapseIcon, MoonIcon, SunIcon } from "./icons";
 
-// Группы 1:1 с NAV_GROUPS из common.js; состояние раскрытия — в localStorage
-// под теми же ключами firenet-nav-<id>.
 const NAV_GROUPS = [
   { id: "topology", title: "Топология", links: [
     { id: "topology", href: "/ui/topology", label: "Схема" },
@@ -34,14 +32,17 @@ const STANDALONE = [
   { id: "users", href: "/ui/users", label: "Пользователи", adminOnly: true },
 ];
 
-export default function Sidebar({ active }: { active: string }) {
+const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? "active" : undefined);
+
+const setNavGroupOpen = (id: string, open: boolean) => {
+  localStorage.setItem("firenet-nav-" + id, open ? "open" : "closed");
+};
+// (Task 3 заменит тело на storageKeys.navGroup: open → removeItem, closed → setItem)
+
+export default function Sidebar() {
   const { data: me } = useMe();
   const [theme, setTheme] = useState(initialTheme);
   const [collapsed, setCollapsed] = useState(localStorage.getItem("firenet-sidebar") === "collapsed");
-
-  const toggleGroup = (id: string, open: boolean) => {
-    localStorage.setItem("firenet-nav-" + id, open ? "open" : "closed");
-  };
 
   const toggleSidebar = () => {
     const next = !collapsed;
@@ -57,11 +58,11 @@ export default function Sidebar({ active }: { active: string }) {
         <CollapseIcon />
       </button>
       {NAV_GROUPS.map((group) => (
-        <NavGroup key={group.id} group={group} active={active} onToggle={toggleGroup} />
+        <NavGroup key={group.id} group={group} />
       ))}
       <nav className="side-nav">
         {STANDALONE.filter((l) => !l.adminOnly || isAdmin(me)).map((link) => (
-          <NavLink key={link.id} to={link.href} data-testid={`nav-${link.id}`}>
+          <NavLink key={link.id} to={link.href} end className={navClass} data-testid={`nav-${link.id}`}>
             <span className="label">{link.label}</span>
           </NavLink>
         ))}
@@ -70,7 +71,6 @@ export default function Sidebar({ active }: { active: string }) {
         <span className="user-name">{me?.username ?? ""}</span>
         <button
           type="button"
-          id="theme-toggle"
           className="theme-toggle"
           onClick={() => { const next = theme === "dark" ? "light" : "dark"; setTheme(next); applyTheme(next); }}
           aria-label="Сменить тему"
@@ -78,6 +78,9 @@ export default function Sidebar({ active }: { active: string }) {
           <span className="icon-sun"><SunIcon /></span>
           <span className="icon-moon"><MoonIcon /></span>
         </button>
+        {/* Полная перезагрузка — осознанно: logout должен гарантированно
+            сбросить всё состояние (react-query, модули, storage), navigate()
+            этого не даёт. */}
         <button
           type="button"
           className="logout-btn"
@@ -90,12 +93,9 @@ export default function Sidebar({ active }: { active: string }) {
   );
 }
 
-function NavGroup({ group, active, onToggle }: {
-  group: (typeof NAV_GROUPS)[number];
-  active: string;
-  onToggle: (id: string, open: boolean) => void;
-}) {
-  const isActive = group.links.some((l) => l.id === active);
+function NavGroup({ group }: { group: (typeof NAV_GROUPS)[number] }) {
+  const { pathname } = useLocation();
+  const isActive = group.links.some((l) => pathname.startsWith(l.href));
   // Группы по умолчанию раскрыты — иначе в свежем браузере без localStorage
   // пользователь не видит ни одной ссылки (закрытой становится только та,
   // что явно свернули: «closed» в firenet-nav-<id>).
@@ -105,19 +105,14 @@ function NavGroup({ group, active, onToggle }: {
       <button
         type="button"
         className="nav-group-header"
-        onClick={() => { onToggle(group.id, !open); setOpen(!open); }}
+        onClick={() => { setNavGroupOpen(group.id, !open); setOpen(!open); }}
       >
         {group.title}
       </button>
       {open && (
         <nav className="side-nav nav-group-links">
           {group.links.map((link) => (
-            <NavLink
-              key={link.id}
-              to={link.href}
-              className={link.id === active ? "active" : undefined}
-              data-testid={`nav-${link.id}`}
-            >
+            <NavLink key={link.id} to={link.href} end className={navClass} data-testid={`nav-${link.id}`}>
               <span className="label">{link.label}</span>
             </NavLink>
           ))}
