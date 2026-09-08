@@ -17,3 +17,23 @@ if (typeof HTMLDialogElement !== "undefined" && !HTMLDialogElement.prototype.sho
     this.removeAttribute("open");
   };
 }
+
+// React Flow измеряет контейнер через ResizeObserver, которого в jsdom нет.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
+
+// DOMMatrix нужен для расчёта трансформаций вьюпорта.
+if (!("DOMMatrixReadOnly" in globalThis)) {
+  // @ts-expect-error минимальная заглушка для React Flow
+  globalThis.DOMMatrixReadOnly = class {
+    m22 = 1;
+    constructor(transform?: string) {
+      const scale = transform?.match(/scale\(([\d.]+)\)/);
+      if (scale) this.m22 = Number(scale[1]);
+    }
+  };
+}
