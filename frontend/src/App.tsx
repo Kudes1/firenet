@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import CompilePage from "./pages/CompilePage";
 import DevicesPage from "./pages/DevicesPage";
+import DraftsPage from "./pages/DraftsPage";
 import HistoryPage from "./pages/HistoryPage";
 import InvitePage from "./pages/InvitePage";
 import LinksPage from "./pages/LinksPage";
@@ -12,6 +13,7 @@ import SearchPage from "./pages/SearchPage";
 import SetsPage from "./pages/SetsPage";
 import SubnetsPage from "./pages/SubnetsPage";
 import UnionsPage from "./pages/UnionsPage";
+import UsersPage from "./pages/UsersPage";
 
 // Пути 1:1 с легаси-страницами Go. Страницы появляются в задачах 8–20;
 // до этого рендерятся заглушки с data-testid="page-<name>".
@@ -23,8 +25,6 @@ const routes: Array<[string, string]> = [
   ["/ui/unions", "unions"],
   ["/ui/links", "links"],
   ["/ui/diagnose", "diagnose"],
-  ["/ui/users", "users"],
-  ["/ui/drafts", "drafts"],
 ];
 
 function Placeholder({ name }: { name: string }) {
@@ -46,6 +46,8 @@ export default function App() {
         <Route path="/ui/compile" element={<CompilePage />} />
         <Route path="/ui/search" element={<SearchPage />} />
         <Route path="/ui/history" element={<HistoryPage />} />
+        <Route path="/ui/drafts" element={<DraftsPage />} />
+        <Route path="/ui/users" element={<UsersPage />} />
         {routes.map(([path, name]) => (
           <Route key={path} path={path} element={<Placeholder name={name} />} />
         ))}
