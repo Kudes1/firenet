@@ -2,8 +2,6 @@
   color-scheme: light dark;
   --bg: #ffffff;
   --fg: #1a1a1a;
-  /* псевдоним для CanvasTheme/тултипов: цвет текста на канве следует теме */
-  --text: var(--fg);
   --muted: #6b6b6b;
   --border: #d8d8dc;
   --accent: #2563eb;
@@ -83,10 +81,10 @@
 }
 
 * { box-sizing: border-box; }
-[hidden], [x-cloak] { display: none !important; }
+[hidden] { display: none !important; }
 html, body { height: 100%; }
-/* React монтируется в #root; легаси клал разметку прямо в flex-body, поэтому
-   без явного размера #root сжимается по контенту и ломает всю раскладку. */
+/* React монтируется в #root; без явного размера он сжимается по контенту
+   и ломает flex-раскладку body. */
 #root { width: 100%; height: 100%; }
 body {
   margin: 0;
@@ -118,7 +116,6 @@ button, input, select, th, td, .banner {
 }
 /* Единая геометрия ряда: одинаковые паддинги, иконка всегда в одной и той
    же левой колонке. Сворачивание только прячет подписи — значки не сдвигаются. */
-.sidebar > strong,
 nav.side-nav a,
 .sidebar-toggle,
 .theme-toggle {
@@ -127,8 +124,6 @@ nav.side-nav a,
   gap: var(--space-2);
   padding: var(--space-2);
 }
-.sidebar > strong { font-size: 1.05rem; letter-spacing: 0.01em; white-space: nowrap; line-height: var(--icon); }
-.brand-short { display: none; width: var(--icon); text-align: center; }
 
 nav.side-nav { display: flex; flex-direction: column; gap: var(--space-1); }
 /* Collapsible section: header button + indented links. .closed hides the body. */
@@ -151,8 +146,6 @@ nav.side-nav > * + * { border-top: 1px solid var(--border); padding-top: var(--s
   border-radius: var(--radius-sm);
 }
 .nav-group-header:hover { background: var(--panel-bg-hover); color: var(--fg); }
-.nav-group-header .chevron svg { transition: transform .15s ease; }
-.nav-group.closed .nav-group-header .chevron svg { transform: rotate(90deg); }
 .nav-group-links { display: flex; flex-direction: column; gap: var(--space-1); }
 .nav-group.closed .nav-group-links { display: none; }
 nav.side-nav a {
@@ -165,8 +158,6 @@ nav.side-nav a {
 }
 nav.side-nav a:hover { background: var(--panel-bg-hover); color: var(--fg); }
 nav.side-nav a.active { color: var(--fg); background: var(--panel-bg); font-weight: 600; }
-nav.side-nav .icon { display: inline-flex; width: var(--icon); height: var(--icon); flex-shrink: 0; }
-nav.side-nav .icon svg { width: 100%; height: 100%; }
 
 .sidebar-toggle {
   margin-top: auto;
@@ -183,8 +174,6 @@ nav.side-nav .icon svg { width: 100%; height: 100%; }
 /* 56px: ось иконок левая и от ширины не зависит; запас справа нужен,
    чтобы иконка (18.4px) помещалась в кнопки с их паддингом 8px */
 .sidebar.collapsed { width: 56px; }
-.sidebar.collapsed .brand-full { display: none; }
-.sidebar.collapsed .brand-short { display: inline-block; }
 .sidebar.collapsed .label { display: none; }
 /* Collapsed rail: hide group headers, keep the links as an icon list. */
 .sidebar.collapsed .nav-group-header { display: none; }
@@ -549,9 +538,8 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 }
 .ctx-search:focus { outline: none; border-color: var(--accent); }
 .ctx-sub:hover .submenu, .ctx-sub:focus-within .submenu { display: flex; }
-/* при нехватке места справа (см. flipIfClipped в topology.js) подменю
-   открывается в другую сторону, чтобы не обрезаться overflow: hidden
-   у .canvas-wrap */
+/* Подменю контекстного меню при нехватке места справа открывается
+   влево, чтобы не обрезаться overflow: hidden у .canvas-wrap. */
 .submenu.submenu-left { left: auto; right: 100%; }
 
 /* canvas tooltip (filtered wire exports, diagnostic deny point) */
@@ -562,7 +550,7 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   pointer-events: none;
   max-width: 320px;
   background: var(--panel-bg);
-  color: var(--text);
+  color: var(--fg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 2px 8px;
@@ -1106,8 +1094,8 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .user-box {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--border);
 }
 .user-name {
@@ -1123,7 +1111,7 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 }
 .sidebar.collapsed .user-box {
   flex-direction: column;
-  padding: 8px 0;
+  padding: var(--space-2) 0;
 }
 .sidebar.collapsed .logout-btn {
   display: none;
@@ -1135,10 +1123,10 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   height: 2.1rem;
   border: 1px solid var(--border);
   background: var(--bg);
-  color: var(--text);
-  border-radius: 4px;
-  padding: 0 8px;
-  font-size: 0.8em;
+  color: var(--fg);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+  font-size: 0.8rem;
   cursor: pointer;
 }
 .logout-btn:hover {
@@ -1152,7 +1140,7 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   justify-content: center;
   min-height: 100vh;
   background: var(--bg);
-  color: var(--text);
+  color: var(--fg);
 }
 .login-card {
   flex: none;
@@ -1179,7 +1167,7 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
-  color: var(--text);
+  color: var(--fg);
 }
 .login-card button {
   width: 100%;
@@ -1210,9 +1198,8 @@ dialog.modal .multiselect-panel { max-height: 320px; }
   text-align: left;
 }
 
-/* Prepended to <main> by common.js's renderDraftBanner(), so it's the
-   first item in main's flex column — normal flow, no fixed positioning
-   or compensating padding needed. */
+/* DraftBanner.tsx рендерит баннер первым элементом flex-колонки <main> —
+   обычный поток, без fixed-позиционирования и компенсирующих паддингов. */
 .draft-banner {
   display: flex;
   align-items: center;
@@ -1229,12 +1216,12 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 }
 .draft-banner-editing {
   background: color-mix(in srgb, var(--accent) 12%, var(--bg));
-  color: var(--text);
+  color: var(--fg);
 }
 .draft-banner button {
   border: 1px solid var(--border);
   background: var(--bg);
-  color: var(--text);
+  color: var(--fg);
   border-radius: 4px;
   padding: 4px 10px;
   font-size: 0.9em;
