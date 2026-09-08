@@ -3582,7 +3582,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 
 Обе страницы правят топологию операциями, а не `PUT` всего документа: сети — `update-network`/`delete-network`, устройства — батч `update-device` + `union-remove-device` + `union-add-device`.
 
-- [ ] **Step 1: Написать `frontend/src/pages/NetworksPage.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/pages/NetworksPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -3641,7 +3641,7 @@ describe("NetworksPage", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -3649,7 +3649,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './NetworksPage'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/pages/NetworksPage.tsx`**
+- [x] **Step 3: Реализовать `frontend/src/pages/NetworksPage.tsx`**
 
 ```tsx
 import { useMemo, useState } from "react";
@@ -3806,7 +3806,7 @@ export default function NetworksPage() {
 }
 ```
 
-- [ ] **Step 4: Написать `frontend/src/pages/DevicesPage.test.tsx`**
+- [x] **Step 4: Написать `frontend/src/pages/DevicesPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -3891,7 +3891,7 @@ describe("DevicesPage", () => {
 });
 ```
 
-- [ ] **Step 5: Запустить — тест падает**
+- [x] **Step 5: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -3899,7 +3899,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './DevicesPage'`.
 
-- [ ] **Step 6: Реализовать `frontend/src/pages/DevicesPage.tsx`**
+- [x] **Step 6: Реализовать `frontend/src/pages/DevicesPage.tsx`**
 
 ```tsx
 import { useMemo, useState } from "react";
@@ -4062,7 +4062,7 @@ export default function DevicesPage() {
 }
 ```
 
-- [ ] **Step 7: Зарегистрировать оба маршрута в `App.tsx`**
+- [x] **Step 7: Зарегистрировать оба маршрута в `App.tsx`**
 
 ```tsx
 import DevicesPage from "./pages/DevicesPage";
@@ -4072,7 +4072,7 @@ import NetworksPage from "./pages/NetworksPage";
         <Route path="/ui/devices" element={<DevicesPage />} />
 ```
 
-- [ ] **Step 8: Запустить тесты**
+- [x] **Step 8: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -4080,7 +4080,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): networks and devices pages"
