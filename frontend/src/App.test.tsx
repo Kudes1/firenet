@@ -29,12 +29,9 @@ function renderAt(path: string) {
 
 const pages = [
   ["/ui/topology", "topology"],
-  ["/ui/compile", "compile"],
   ["/ui/diagnose", "diagnose"],
   ["/ui/users", "users"],
   ["/ui/drafts", "drafts"],
-  ["/ui/history", "history"],
-  ["/ui/search", "search"],
   ["/ui/unknown", "notfound"],
 ] as const;
 
@@ -47,12 +44,18 @@ describe("App routing", () => {
   // Задача 8: /login и /invite/:token больше не заглушки — реальные страницы
   // с теми же data-testid. Задачи 10–14: /ui/subnets, /ui/networks,
   // /ui/devices, /ui/sets, /ui/unions, /ui/links, /ui/rules — реальные страницы.
+  // Задача 15: /ui/compile, /ui/search, /ui/history — реальные страницы.
   it.each([
     ["/login", "page-login"],
     ["/invite/abc123", "page-invite"],
   ] as const)("renders the real page at %s", (path, testId) => {
     renderAt(path);
     expect(screen.getByTestId(testId)).toBeInTheDocument();
+  });
+
+  it.each(["/ui/compile", "/ui/search", "/ui/history"] as const)("renders the real page at %s", async (path) => {
+    renderAt(path);
+    expect(await screen.findByTestId(`page-${path.replace("/ui/", "")}`)).toBeInTheDocument();
   });
 
   it("renders the real subnets page at /ui/subnets", async () => {
