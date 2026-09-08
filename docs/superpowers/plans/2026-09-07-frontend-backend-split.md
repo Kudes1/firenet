@@ -4100,7 +4100,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 
 Обе страницы пишут весь документ топологии через `PUT` (`sets` / `unions`), как в легаси.
 
-- [ ] **Step 1: Написать `frontend/src/pages/SetsPage.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/pages/SetsPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -4163,7 +4163,7 @@ describe("SetsPage", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -4171,7 +4171,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './SetsPage'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/pages/SetsPage.tsx`**
+- [x] **Step 3: Реализовать `frontend/src/pages/SetsPage.tsx`**
 
 ```tsx
 import { useMemo, useState } from "react";
@@ -4372,7 +4372,7 @@ function setHint(draft: Draft, rows: SetDoc[]): string {
 }
 ```
 
-- [ ] **Step 4: Написать `frontend/src/pages/UnionsPage.test.tsx`**
+- [x] **Step 4: Написать `frontend/src/pages/UnionsPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -4418,7 +4418,7 @@ describe("UnionsPage", () => {
 });
 ```
 
-- [ ] **Step 5: Запустить — тест падает**
+- [x] **Step 5: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -4426,7 +4426,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './UnionsPage'`.
 
-- [ ] **Step 6: Реализовать `frontend/src/pages/UnionsPage.tsx`**
+- [x] **Step 6: Реализовать `frontend/src/pages/UnionsPage.tsx`**
 
 ```tsx
 import { useState } from "react";
@@ -4572,7 +4572,7 @@ export default function UnionsPage() {
 }
 ```
 
-- [ ] **Step 7: Зарегистрировать маршруты**
+- [x] **Step 7: Зарегистрировать маршруты**
 
 ```tsx
 import SetsPage from "./pages/SetsPage";
@@ -4582,7 +4582,7 @@ import UnionsPage from "./pages/UnionsPage";
         <Route path="/ui/unions" element={<UnionsPage />} />
 ```
 
-- [ ] **Step 8: Запустить тесты**
+- [x] **Step 8: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -4590,7 +4590,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): sets and unions pages"
