@@ -8077,6 +8077,11 @@ Expected: зелёные.
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): diagnose page with read-only map and spread"
 ```
 
+> **Правки относительно кода из плана (выявлены при реализации, Task 20 исполнена 2026-09-08).**
+> 1. Типы `SpreadResult.reports[].report` в `api/types.ts` — nullable (`DiagnoseReport | null`, см. комментарий к wire-формату), а в коде плана `r.report.paths.length` разыменовывает их без проверки. Заменено на `r.report?.paths.length ?? 0`.
+> 2. Код плана создавал неиспользуемый запрос `useProjectResource<SubnetsDoc>("subnets")` — `noUnusedLocals` в `tsc` на нём падает. Удалён (подсети странице не нужны: подсветка приходит из `report.mapMark`).
+> 3. После регистрации маршрута `/ui/diagnose` тест `App.test.tsx` «renders placeholder for /ui/diagnose» стал падать: там теперь реальная страница, а не заглушка. Из списка заглушек App.test.tsx пункт убран, страница добавлена в список реальных; beforeEach App.test.tsx теперь стабит `getBoundingClientRect` (канва React Flow требует ненулевой размер контейнера, см. Task 18).
+
 ---
 
 ### Task 21: Очистка Go-бэкенда до pure API
