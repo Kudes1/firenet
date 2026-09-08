@@ -14,7 +14,7 @@ services:
       timeout: 3s
       retries: 10
 
-  app:
+  backend:
     build: .
     restart: unless-stopped
     depends_on:
@@ -25,7 +25,31 @@ services:
       FIRENET_ADMIN_USER: ${FIRENET_ADMIN_USER:?set FIRENET_ADMIN_USER in .env}
       FIRENET_ADMIN_PASSWORD: ${FIRENET_ADMIN_PASSWORD:?set FIRENET_ADMIN_PASSWORD in .env}
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
+
+  frontend:
+    build:
+      context: ./frontend
+      target: ${FRONTEND_TARGET:-runtime}
+    restart: unless-stopped
+    environment:
+      # Таргет прокси /api для Vite (читается в vite.config.ts).
+      # В runtime-стейдже не используется — там /api проксирует nginx на хосте.
+      VITE_API_TARGET: ${VITE_API_TARGET:-http://backend:8787}
+    volumes:
+      # В dev подменяем собранный dist работающим Vite: правки видны сразу.
+      - ./frontend/src:/src/src:ro
+    # command здесь не задаётся: CMD берётся из целевого стейджа Dockerfile —
+    # dev-стейдж запускает Vite, runtime — nginx из базового образа.
+    # Перекрытие через `command: ${FRONTEND_CMD:-null}` не работает: compose
+    # интерполирует переменную в СТРОКУ "null" и получает `command: ["null"]`
+    # (entrypoint падает: "null: not found"); пустой дефолт даёт `command: []`,
+    # который тоже перекрывает CMD. Проверено на compose v5.5.1.
+    ports:
+      # dev слушает 5173 (CMD в Dockerfile), runtime — 80. Оба проброшены,
+      # иначе в dev-режиме «8080 → 80» некуда стучаться: nginx там нет.
+      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:8080:80"
 
 volumes:
   firenet-db:
