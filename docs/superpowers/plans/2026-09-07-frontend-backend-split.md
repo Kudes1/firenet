@@ -4610,7 +4610,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 
 Кандидаты экспортов читаются с сервера: `GET {apiPath}link-exports?side=a&a=…&b=…`. Легаси использовало `?link=<index>`; новая страница шлёт пару устройств — бэкенд принимает оба варианта, но пара устойчива к переупорядочиванию массива.
 
-- [ ] **Step 1: Написать `frontend/src/pages/LinksPage.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/pages/LinksPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -4665,7 +4665,7 @@ describe("LinksPage", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -4673,7 +4673,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './LinksPage'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/pages/LinksPage.tsx`**
+- [x] **Step 3: Реализовать `frontend/src/pages/LinksPage.tsx`**
 
 ```tsx
 import { useEffect, useState } from "react";
@@ -4862,7 +4862,7 @@ const badges = (list: string[] | undefined) =>
   list?.length ? list.map((n) => <span className="owner-badge" key={n}>{n}</span>) : <span className="hint">—</span>;
 ```
 
-- [ ] **Step 4: Зарегистрировать маршрут**
+- [x] **Step 4: Зарегистрировать маршрут**
 
 ```tsx
 import LinksPage from "./pages/LinksPage";
@@ -4870,7 +4870,7 @@ import LinksPage from "./pages/LinksPage";
         <Route path="/ui/links" element={<LinksPage />} />
 ```
 
-- [ ] **Step 5: Запустить тесты**
+- [x] **Step 5: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -4878,7 +4878,13 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 6: Commit**
+> **Правки относительно кода из плана (выявлены при реализации).**
+> 1. Тест «loads export candidates…» из плана падал: PUT-мок возвращал исходную нефильтрованную фикстуру, `onSuccess` клал её в кэш, и кнопка «Изменить фильтр» в строке так и не появлялась. PUT-мок заменён на ответ с уже фильтрованной связью (`filter: { aExports: [], bExports: [] }`) — так же, как это сделано в тесте «makes a link filtered».
+> 2. Ассерт `findByText("Экспорт")` падал с «Found multiple elements»: заголовок «Экспорт» рендерится по одному на каждую сторону связи. Заменён на `findAllByText("Экспорт")` с проверкой, что их две.
+> 3. В `LinksPage.tsx` доступ к подсетям ужесточён до `subnets.data?.subnets?.find(...)` — `SubnetsDoc.subnets` под `strict` может быть `null`.
+> 4. `App.test.tsx`: `/ui/links` убран из списка заглушек и добавлен в тест реальных страниц (по образцу задач 10–12).
+
+- [x] **Step 6: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): links page with filter editor"
