@@ -5,6 +5,7 @@ import InvitePage from "./pages/InvitePage";
 import LinksPage from "./pages/LinksPage";
 import LoginPage from "./pages/LoginPage";
 import NetworksPage from "./pages/NetworksPage";
+import RulesPage from "./pages/RulesPage";
 import SetsPage from "./pages/SetsPage";
 import SubnetsPage from "./pages/SubnetsPage";
 import UnionsPage from "./pages/UnionsPage";
@@ -18,7 +19,6 @@ const routes: Array<[string, string]> = [
   ["/ui/sets", "sets"],
   ["/ui/unions", "unions"],
   ["/ui/links", "links"],
-  ["/ui/rules", "rules"],
   ["/ui/compile", "compile"],
   ["/ui/diagnose", "diagnose"],
   ["/ui/users", "users"],
@@ -42,6 +42,7 @@ export default function App() {
         <Route path="/ui/sets" element={<SetsPage />} />
         <Route path="/ui/unions" element={<UnionsPage />} />
         <Route path="/ui/links" element={<LinksPage />} />
+        <Route path="/ui/rules" element={<RulesPage />} />
         {routes.map(([path, name]) => (
           <Route key={path} path={path} element={<Placeholder name={name} />} />
         ))}
