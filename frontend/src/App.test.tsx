@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -12,6 +12,10 @@ import App from "./App";
 beforeAll(() => server.listen());
 beforeEach(() => {
   server.use(http.get("/api/versions", () => HttpResponse.json([fx.versionInfoFixture])));
+  // Канва React Flow требует ненулевой размер контейнера (см. Task 18).
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    x: 0, y: 0, width: 800, height: 600, top: 0, left: 0, right: 800, bottom: 600, toJSON: () => ({}),
+  });
 });
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
@@ -28,7 +32,6 @@ function renderAt(path: string) {
 }
 
 const pages = [
-  ["/ui/diagnose", "diagnose"],
   ["/ui/unknown", "notfound"],
 ] as const;
 
@@ -46,6 +49,7 @@ describe("App routing", () => {
   // /ui/devices, /ui/sets, /ui/unions, /ui/links, /ui/rules — реальные страницы.
   // Задача 15: /ui/compile, /ui/search, /ui/history — реальные страницы.
   // Задача 16: /ui/drafts, /ui/users — реальные страницы.
+  // Задача 20: /ui/diagnose — реальная страница.
   it.each([
     ["/login", "page-login"],
     ["/invite/abc123", "page-invite"],
@@ -65,7 +69,7 @@ describe("App routing", () => {
     expect(await screen.findByText("lan")).toBeInTheDocument();
   });
 
-  it.each(["/ui/networks", "/ui/devices", "/ui/sets", "/ui/unions", "/ui/links", "/ui/rules", "/ui/drafts", "/ui/users"] as const)("renders the real page at %s", async (path) => {
+  it.each(["/ui/networks", "/ui/devices", "/ui/sets", "/ui/unions", "/ui/links", "/ui/rules", "/ui/drafts", "/ui/users", "/ui/diagnose"] as const)("renders the real page at %s", async (path) => {
     renderAt(path);
     expect(await screen.findByTestId(`page-${path.replace("/ui/", "")}`)).toBeInTheDocument();
   });

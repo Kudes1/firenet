@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import CompilePage from "./pages/CompilePage";
 import DevicesPage from "./pages/DevicesPage";
+import DiagnosePage from "./pages/DiagnosePage";
 import DraftsPage from "./pages/DraftsPage";
 import HistoryPage from "./pages/HistoryPage";
 import InvitePage from "./pages/InvitePage";
@@ -25,7 +26,6 @@ const routes: Array<[string, string]> = [
   ["/ui/sets", "sets"],
   ["/ui/unions", "unions"],
   ["/ui/links", "links"],
-  ["/ui/diagnose", "diagnose"],
 ];
 
 function Placeholder({ name }: { name: string }) {
@@ -44,6 +44,7 @@ export default function App() {
         <Route path="/ui/sets" element={<SetsPage />} />
         <Route path="/ui/unions" element={<UnionsPage />} />
         <Route path="/ui/links" element={<LinksPage />} />
+        <Route path="/ui/diagnose" element={<DiagnosePage />} />
         <Route path="/ui/rules" element={<RulesPage />} />
         <Route path="/ui/compile" element={<CompilePage />} />
         <Route path="/ui/search" element={<SearchPage />} />
