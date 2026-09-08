@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
@@ -16,6 +17,7 @@ beforeEach(() => {
 afterEach(() => {
   server.resetHandlers();
   sessionStorage.clear();
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 afterAll(() => server.close());
@@ -69,5 +71,42 @@ describe("Layout", () => {
     server.use(http.get("/api/drafts/d1", () => HttpResponse.json(fx.draftFixture)));
     renderLayout();
     expect(await screen.findByText(/Черновик «правки»/)).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar collapse and theme", () => {
+  it("collapses via toggle, persists and toggles aria state", async () => {
+    renderLayout();
+    const btn = screen.getByRole("button", { name: "Свернуть меню" });
+    expect(btn).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(btn);
+    expect(btn).toHaveAttribute("aria-expanded", "false");
+    expect(localStorage.getItem("ui.sidebar")).toBe("collapsed");
+    expect(document.querySelector(".sidebar")).toHaveClass("collapsed");
+  });
+
+  it("starts collapsed from stored state", () => {
+    localStorage.setItem("ui.sidebar", "collapsed");
+    renderLayout();
+    expect(document.querySelector(".sidebar")).toHaveClass("collapsed");
+    expect(screen.getByRole("button", { name: "Развернуть меню" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("toggles theme, sets data-theme and persists", async () => {
+    localStorage.setItem("ui.theme", "light");
+    renderLayout();
+    await userEvent.click(screen.getByRole("button", { name: "Сменить тему" }));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("ui.theme")).toBe("dark");
+  });
+
+  it("logs out via full reload to /login", async () => {
+    server.use(http.post("/api/logout", () => HttpResponse.json({ ok: true })));
+    // jsdom не умеет навигацию по location.href — стабим с валидным base URL
+    // (пустой ломает fetch в MSW); присвоение href просто перезапишет строку.
+    vi.stubGlobal("location", { href: "http://localhost/" });
+    renderLayout();
+    await userEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    await vi.waitFor(() => expect(window.location.href).toBe("/login"));
   });
 });

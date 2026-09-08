@@ -3,6 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import { useMe } from "../api/queries";
 import type { UserResponse } from "../api/types";
+import { storageKeys } from "../lib/storage";
 import { initialTheme, applyTheme } from "./theme";
 import { CollapseIcon, MoonIcon, SunIcon } from "./icons";
 
@@ -35,26 +36,31 @@ const STANDALONE = [
 const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? "active" : undefined);
 
 const setNavGroupOpen = (id: string, open: boolean) => {
-  localStorage.setItem("firenet-nav-" + id, open ? "open" : "closed");
+  if (open) localStorage.removeItem(storageKeys.navGroup(id));
+  else localStorage.setItem(storageKeys.navGroup(id), "closed");
 };
-// (Task 3 заменит тело на storageKeys.navGroup: open → removeItem, closed → setItem)
 
 export default function Sidebar() {
   const { data: me } = useMe();
   const [theme, setTheme] = useState(initialTheme);
-  const [collapsed, setCollapsed] = useState(localStorage.getItem("firenet-sidebar") === "collapsed");
+  const [collapsed, setCollapsed] = useState(localStorage.getItem(storageKeys.sidebar) === "collapsed");
 
   const toggleSidebar = () => {
     const next = !collapsed;
     setCollapsed(next);
-    // «open» — ровно как легаси (common.js): развёрнутое состояние пишется
-    // этим значением, чтобы ключ firenet-sidebar остался 1:1.
-    localStorage.setItem("firenet-sidebar", next ? "collapsed" : "open");
+    if (next) localStorage.setItem(storageKeys.sidebar, "collapsed");
+    else localStorage.removeItem(storageKeys.sidebar);
   };
 
   return (
     <aside className={`sidebar${collapsed ? " collapsed" : ""}`} data-testid="sidebar">
-      <button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label="Свернуть меню">
+      <button
+        type="button"
+        className="sidebar-toggle"
+        onClick={toggleSidebar}
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
+      >
         <CollapseIcon />
       </button>
       {NAV_GROUPS.map((group) => (
@@ -98,8 +104,8 @@ function NavGroup({ group }: { group: (typeof NAV_GROUPS)[number] }) {
   const isActive = group.links.some((l) => pathname.startsWith(l.href));
   // Группы по умолчанию раскрыты — иначе в свежем браузере без localStorage
   // пользователь не видит ни одной ссылки (закрытой становится только та,
-  // что явно свернули: «closed» в firenet-nav-<id>).
-  const [open, setOpen] = useState(isActive || localStorage.getItem("firenet-nav-" + group.id) !== "closed");
+  // что явно свернули: «closed» в ui.nav.<id>).
+  const [open, setOpen] = useState(isActive || localStorage.getItem(storageKeys.navGroup(group.id)) !== "closed");
   return (
     <div className={`nav-group${open ? "" : " closed"}`}>
       <button
