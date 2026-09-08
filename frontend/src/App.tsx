@@ -4,7 +4,9 @@ import DevicesPage from "./pages/DevicesPage";
 import InvitePage from "./pages/InvitePage";
 import LoginPage from "./pages/LoginPage";
 import NetworksPage from "./pages/NetworksPage";
+import SetsPage from "./pages/SetsPage";
 import SubnetsPage from "./pages/SubnetsPage";
+import UnionsPage from "./pages/UnionsPage";
 
 // Пути 1:1 с легаси-страницами Go. Страницы появляются в задачах 8–20;
 // до этого рендерятся заглушки с data-testid="page-<name>".
@@ -36,6 +38,8 @@ export default function App() {
         <Route path="/ui/subnets" element={<SubnetsPage />} />
         <Route path="/ui/networks" element={<NetworksPage />} />
         <Route path="/ui/devices" element={<DevicesPage />} />
+        <Route path="/ui/sets" element={<SetsPage />} />
+        <Route path="/ui/unions" element={<UnionsPage />} />
         {routes.map(([path, name]) => (
           <Route key={path} path={path} element={<Placeholder name={name} />} />
         ))}
