@@ -8754,6 +8754,32 @@ cd /root/repos/firenet && git add -A && git status --short && git commit -m "doc
 
 ---
 
+## Выполнение Task 24 (фактические результаты, 2026-09-08)
+
+Все шаги пройдены на чистом дереве после Task 23 (commit f5d0000):
+
+1. **Step 1 (Go):** `go build/vet/gofmt` чисто, `go test ./...` — все пакеты ok.
+2. **Step 2 (frontend):** `tsc -b` молчит, Vitest — 31 файл, 176 тестов зелёные,
+   `vite build` собрал `dist/` (476 kB JS, 45 kB CSS).
+3. **Step 3 (легаси):** в `internal/httpapi` нет `web/`, `templates/`, `embed.go`;
+   grep на `alpine|x-data` пуст. Единственный оставшийся `go:embed` —
+   `internal/db/db.go:15` (SQL-миграции, коммит 5da9cfe — не легаси-фронтенд).
+4. **Step 4 (e2e):** 47 passed, 1 skipped. Первый запуск завис из-за залипшего
+   контейнера `firenet-e2e-pg-*` от прерванного прогона (`docker rm -f` решил);
+   после этого чистый прогон зелёный за 21s. В Note: `make test-e2e` сам не
+   чистит контейнеры после таймаута — при зависании проверять `docker ps`.
+5. **Step 5 (доки):** AGENTS.md обновлён по нюансу (раздел «Web UI JS tests…»
+   удалён целиком, в Verification добавлены пункты 5–6, gotcha про `go:embed`
+   заменён на про `frontend/dist/`). README потребовал правок сверх плана:
+   - точка входа теперь frontend-контейнер **:8080** (не :8787 — это API),
+   - сервис в compose называется `backend` (логи: `docker compose logs -f backend`),
+   - добавлен раздел «Архитектура» (backend JSON API + frontend nginx/Vite),
+   - в таблицу конфигурации добавлен `FRONTEND_TARGET`,
+   - в «Разработка» добавлен `make test-e2e`.
+6. **Step 6:** коммит `docs: update AGENTS and README for the split frontend`.
+
+---
+
 ## Проблемы и нюансы (Task 24)
 
 Что проверить / где обычно спотыкаются при выполнении:
