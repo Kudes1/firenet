@@ -1,7 +1,9 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import DevicesPage from "./pages/DevicesPage";
 import InvitePage from "./pages/InvitePage";
 import LoginPage from "./pages/LoginPage";
+import NetworksPage from "./pages/NetworksPage";
 import SubnetsPage from "./pages/SubnetsPage";
 
 // Пути 1:1 с легаси-страницами Go. Страницы появляются в задачах 8–20;
@@ -32,6 +34,8 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/ui/topology" replace />} />
         <Route path="/ui/subnets" element={<SubnetsPage />} />
+        <Route path="/ui/networks" element={<NetworksPage />} />
+        <Route path="/ui/devices" element={<DevicesPage />} />
         {routes.map(([path, name]) => (
           <Route key={path} path={path} element={<Placeholder name={name} />} />
         ))}
