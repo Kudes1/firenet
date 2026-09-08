@@ -7159,6 +7159,11 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 
 - [x] **Step 1: Написать `frontend/src/topology/useTopologyEditor.test.ts`**
 
+> **Правки относительно кода из плана (выявлены при реализации, Task 19 исполнена 2026-09-08).**
+> 1. Файл назван `useTopologyEditor.test.tsx`, а не `.ts`: тест содержит JSX (`<QueryClientProvider>…` в wrapper), esbuild отказывается транслировать JSX в `.ts` («Expected ">" but found "client"»).
+> 2. Обновления хука (`status`) завёрнуты в `act()`: без него состояние после `moveDevice`/`flush` не флашится и тест видит устаревший `saved`.
+> 3. Тест «batches several operations» недосчитал операции: `createDevice` кладёт `create-device` **и** `set-device-position`, затем `moveDevice("r1")` добавляет ещё одну позицию — итого три операции (`["create-device", "set-device-position", "set-device-position"]`), а не две.
+
 ```ts
 import { renderHook } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
@@ -7354,6 +7359,8 @@ export function useTopologyEditor() {
 ```
 
 - [x] **Step 4: Написать `frontend/src/pages/TopologyPage.test.tsx`**
+
+> **Правки относительно кода из плана (выявлены при реализации).** Черновик теста дважды звал `renderPage` в одном тесте (получалось два смонтированных дерева и гонка за одинаковые testid) — каждый тест теперь монтирует страницу один раз, а `user` берёт из возврата `renderPage`. Прочие правки: тест «filters nodes» подменяет layout через `server.use` (фикстура layout содержит только `r1`, а нужны ещё `sw1` и сеть `office`); клик по узлу в тесте «deletes the selection» делается `fireEvent.click`, потому что `user.click` уводит mousedown в d3-drag, который в jsdom падает на `event.view === null`; удаление дебаунсится на 400 мс — отправка операции ждётся через `waitFor`; тест «warns instead of creating» убрал двойной рендер и кликает по единственному `tool-device`.
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -7612,6 +7619,10 @@ export default function TopologyPage() {
 
 и повесить их на контейнер: `<div className="canvas-wrap" onClick={handlePaneClick} onKeyDown={handleKeyDown} tabIndex={0}>`. Импортировать `useReactFlow` из `@xyflow/react`.
 
+> **Правки относительно кода из плана (выявлены при реализации).**
+> 1. `useReactFlow` требует предка `ReactFlowProvider` — без него рендер падает с ошибкой #001. `TopologyCanvas` обёрнут: внешний компонент возвращает `<ReactFlowProvider><TopologyCanvasInner …/></ReactFlowProvider>`, вся логика переехала во внутренний.
+> 2. Выделение узлов сделано контролируемым: без `onNodesChange` клик по узлу не выставляет `selected` (узлы управляемые), и Del не знает, что удалять. Добавлены `useState<Node[]>` + `applyNodeChanges` + `onNodesChange` на `<ReactFlow>`; стор хранит RF-тип `Node` (проверка `noUnusedLocals`/строгая типизация не пропускала `SceneNode[]`), классы подсветки навешиваются как раньше.
+
 - [x] **Step 7: Передать новые пропсы из страницы**
 
 В `TopologyPage.tsx` добавить к `<TopologyCanvas>`:
@@ -7629,13 +7640,15 @@ import TopologyPage from "./pages/TopologyPage";
         <Route path="/ui/topology" element={<TopologyPage />} />
 ```
 
+> Дополнительно (Task 19, при реализации): тест `App.test.tsx` «renders placeholder for /ui/topology» убран из `it.each` по заглушкам — `/ui/topology` теперь реальная страница, а `page-topology` проверяется существующим тестом «redirects / to topology page». В `TopologyPage.tsx` поля `doc.devices`/`doc.networks` читаются через локальные `devices`/`networks` с `?? []` — типы API допускают `null` (TS18047).
+
 - [x] **Step 9: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
 ```
 
-Expected: зелёные.
+Expected: зелёные. Факт (2026-09-08): `tsc -b` молчит, 170 тестов зелёные (30 файлов), `vite build` собирается.
 
 - [x] **Step 10: Commit**
 
