@@ -5453,7 +5453,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 - Consumes: `useCompile`, `useSearchIndex`, `useVersions`, `useVersionDiff`, `useRestoreVersion` (Task 6).
 - Produces: `<CompilePage/>`, `<SearchPage/>`, `<HistoryPage/>`.
 
-- [ ] **Step 1: Написать `frontend/src/pages/CompilePage.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/pages/CompilePage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -5490,7 +5490,7 @@ describe("CompilePage", () => {
 });
 ```
 
-- [ ] **Step 2: Реализовать `frontend/src/pages/CompilePage.tsx`**
+- [x] **Step 2: Реализовать `frontend/src/pages/CompilePage.tsx`**
 
 ```tsx
 import { useCompile } from "../api/queries";
@@ -5546,7 +5546,7 @@ function objectURL(text: string): string {
 }
 ```
 
-- [ ] **Step 3: Написать `frontend/src/pages/SearchPage.test.tsx`**
+- [x] **Step 3: Написать `frontend/src/pages/SearchPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -5586,7 +5586,7 @@ describe("SearchPage", () => {
 });
 ```
 
-- [ ] **Step 4: Реализовать `frontend/src/pages/SearchPage.tsx`**
+- [x] **Step 4: Реализовать `frontend/src/pages/SearchPage.tsx`**
 
 ```tsx
 import { useMemo, useState } from "react";
@@ -5665,7 +5665,7 @@ function SearchRow({ entry }: { entry: SearchEntry }) {
 }
 ```
 
-- [ ] **Step 5: Написать `frontend/src/pages/HistoryPage.test.tsx`**
+- [x] **Step 5: Написать `frontend/src/pages/HistoryPage.test.tsx`**
 
 ```tsx
 import { screen, waitFor } from "@testing-library/react";
@@ -5724,7 +5724,7 @@ describe("HistoryPage", () => {
 });
 ```
 
-- [ ] **Step 6: Реализовать `frontend/src/pages/HistoryPage.tsx`**
+- [x] **Step 6: Реализовать `frontend/src/pages/HistoryPage.tsx`**
 
 > **Внимание:** тест "restores after confirmation" ждёт `data-testid="banner"`, который рендерит `BannerHost`, а не эта страница. Он появляется только потому, что `renderPage` (Task 13) монтирует `BannerHost`. Если `renderPage` ещё не обновлён (импорты `../components/BannerHost`/`../components/DraftBanner`), тест с `getByTestId("banner")` зависнет в `waitFor` — вернись к Task 13 и убедись, что баннеры подключены.
 
@@ -5829,7 +5829,7 @@ export default function HistoryPage() {
 }
 ```
 
-- [ ] **Step 7: Зарегистрировать маршруты**
+- [x] **Step 7: Зарегистрировать маршруты**
 
 ```tsx
 import CompilePage from "./pages/CompilePage";
@@ -5841,7 +5841,7 @@ import SearchPage from "./pages/SearchPage";
         <Route path="/ui/history" element={<HistoryPage />} />
 ```
 
-- [ ] **Step 8: Запустить тесты**
+- [x] **Step 8: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -5849,7 +5849,11 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 9: Commit**
+> **Правки относительно кода из плана (выявлены при реализации).**
+> 1. jsdom не реализует `URL.createObjectURL` — первый тест CompilePage падал с `TypeError: URL.createObjectURL is not a function` (страница рендерит Blob-ссылки для скачивания скриптов). В `frontend/src/test/setup.ts` добавлена заглушка `URL.createObjectURL`/`URL.revokeObjectURL` (в духе уже существующего там стаба `<dialog>`).
+> 2. `App.test.tsx` проверял заглушки `page-compile`/`page-search`/`page-history` по содержимому имени (`toHaveTextContent(name)`) — эти маршруты убраны из списка заглушек и перенесены в it.each «renders the real page» (проверка по `data-testid`), как уже сделано для страниц задач 10–14.
+
+- [x] **Step 9: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): compile, search and history pages"
