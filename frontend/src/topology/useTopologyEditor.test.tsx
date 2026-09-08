@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { beforeAll, afterAll, afterEach, describe, expect, it } from "vitest";
 import { server } from "../test/msw";
 import { DraftProvider } from "../draft/DraftContext";
+import { storageKeys } from "../lib/storage";
 import * as fx from "../api/fixtures";
 import { useTopologyEditor } from "./useTopologyEditor";
 
@@ -24,7 +25,7 @@ describe("useTopologyEditor", () => {
       body = await request.json();
       return HttpResponse.json(fx.editorSnapshotFixture);
     }));
-    sessionStorage.setItem("firenet-draft-id", "d1");
+    sessionStorage.setItem(storageKeys.draftId, "d1");
     const { result } = renderHook(() => useTopologyEditor(), { wrapper });
 
     act(() => { result.current.moveDevice("r1", { x: 120, y: 80 }); });
@@ -43,7 +44,7 @@ describe("useTopologyEditor", () => {
       body = await request.json();
       return HttpResponse.json(fx.editorSnapshotFixture);
     }));
-    sessionStorage.setItem("firenet-draft-id", "d1");
+    sessionStorage.setItem(storageKeys.draftId, "d1");
     const { result } = renderHook(() => useTopologyEditor(), { wrapper });
 
     act(() => {
@@ -71,7 +72,7 @@ describe("useTopologyEditor", () => {
   it("reports a failed flush", async () => {
     server.use(http.post("/api/drafts/d1/topology/operations", () =>
       HttpResponse.json({ error: "unknown topology operation kind \"x\"" }, { status: 422 })));
-    sessionStorage.setItem("firenet-draft-id", "d1");
+    sessionStorage.setItem(storageKeys.draftId, "d1");
     const { result } = renderHook(() => useTopologyEditor(), { wrapper });
     act(() => { result.current.moveDevice("r1", { x: 1, y: 1 }); });
     await act(async () => { await result.current.flush(); });

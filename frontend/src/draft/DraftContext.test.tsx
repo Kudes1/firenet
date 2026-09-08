@@ -1,6 +1,7 @@
 import { act, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DraftProvider, useDraft } from "./DraftContext";
+import { storageKeys } from "../lib/storage";
 
 function Probe() {
   const { draftId, isReadOnly, apiPath, setDraftId } = useDraft();
@@ -36,7 +37,7 @@ describe("DraftProvider", () => {
     await act(async () => { screen.getByText("set").click(); });
     expect(screen.getByTestId("draftId").textContent).toBe("d9");
     expect(screen.getByTestId("path").textContent).toBe("/api/drafts/d9/topology");
-    expect(localStorage.getItem("firenet-last-draft-id")).toBe("d9");
+    expect(localStorage.getItem(storageKeys.lastDraftId)).toBe("d9");
   });
 
   it("keeps read-only explicit for the tab and forgets the last draft", async () => {
@@ -44,12 +45,12 @@ describe("DraftProvider", () => {
     await act(async () => { screen.getByText("set").click(); });
     await act(async () => { screen.getByText("clear").click(); });
     expect(screen.getByTestId("readOnly").textContent).toBe("true");
-    expect(sessionStorage.getItem("firenet-draft-readonly")).toBe("1");
-    expect(localStorage.getItem("firenet-last-draft-id")).toBeNull();
+    expect(sessionStorage.getItem(storageKeys.draftReadonly)).toBe("1");
+    expect(localStorage.getItem(storageKeys.lastDraftId)).toBeNull();
   });
 
   it("restores the last draft from localStorage in a new tab", () => {
-    localStorage.setItem("firenet-last-draft-id", "d5");
+    localStorage.setItem(storageKeys.lastDraftId, "d5");
     render(<DraftProvider><Probe /></DraftProvider>);
     expect(screen.getByTestId("draftId").textContent).toBe("d5");
   });

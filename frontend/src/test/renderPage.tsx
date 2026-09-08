@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import BannerHost from "../components/BannerHost";
 import DraftBanner from "../components/DraftBanner";
 import { DraftProvider } from "../draft/DraftContext";
+import { storageKeys } from "../lib/storage";
 
 // Одна обёртка на все тесты страниц: QueryClient без ретраев (иначе падение
 // превращается в три попытки и таймаут), DraftProvider и роутер на нужном
@@ -20,7 +21,7 @@ import { DraftProvider } from "../draft/DraftContext";
 export function renderPage(ui: ReactNode, path = "/ui/subnets", draftId?: string): RenderResult & {
   user: ReturnType<typeof userEvent.setup>;
 } {
-  if (draftId) sessionStorage.setItem("firenet-draft-id", draftId);
+  if (draftId) sessionStorage.setItem(storageKeys.draftId, draftId);
   else sessionStorage.clear();
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(

@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useCreateDraft, useVersions } from "../api/queries";
 import type { DraftResponse } from "../api/types";
 import { useDraft } from "../draft/DraftContext";
+import { storageKeys } from "../lib/storage";
 import { notify } from "./notify";
 
 // Плашка контекста: что сейчас редактируется и как из этого выйти. Если
@@ -54,8 +55,8 @@ function ReadonlyBanner({ onCreate }: { onCreate: ReturnType<typeof useCreateDra
     setBusy(true);
     try {
       const draft = await onCreate.mutateAsync(name);
-      sessionStorage.setItem("firenet-draft-id", draft.id);
-      localStorage.setItem("firenet-last-draft-id", draft.id);
+      sessionStorage.setItem(storageKeys.draftId, draft.id);
+      localStorage.setItem(storageKeys.lastDraftId, draft.id);
       window.location.reload();
     } catch (error) {
       notify(`Не удалось создать черновик: ${(error as Error).message}`);

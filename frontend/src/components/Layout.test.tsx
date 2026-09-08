@@ -6,6 +6,7 @@ import { http, HttpResponse } from "msw";
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { server } from "../test/msw";
 import * as fx from "../api/fixtures";
+import { storageKeys } from "../lib/storage";
 import Layout from "./Layout";
 
 beforeAll(() => server.listen());
@@ -67,7 +68,7 @@ describe("Layout", () => {
   });
 
   it("shows the editing banner for an active draft", async () => {
-    sessionStorage.setItem("firenet-draft-id", "d1");
+    sessionStorage.setItem(storageKeys.draftId, "d1");
     server.use(http.get("/api/drafts/d1", () => HttpResponse.json(fx.draftFixture)));
     renderLayout();
     expect(await screen.findByText(/Черновик «правки»/)).toBeInTheDocument();

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { beforeAll, afterAll, afterEach, describe, expect, it } from "vitest";
 import { server } from "../test/msw";
 import { DraftProvider } from "../draft/DraftContext";
+import { storageKeys } from "../lib/storage";
 import * as fx from "./fixtures";
 import { projectKeys, useProjectResource, useTopologyOperations } from "./queries";
 import type { EditorSnapshot, LayoutDoc, TopologyDoc } from "./types";
@@ -26,11 +27,11 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 // DraftProvider читает драфт один раз при монтировании (useState +
-// readInitialDraft) и на sessionStorage не подписан, поэтому firenet-draft-id
+// readInitialDraft) и на sessionStorage не подписан, поэтому ui.draft.id
 // нужно выставить ДО renderHook — иначе useDraft() останется на current и
 // apiPath не поведёт на /api/drafts/d1/....
 function withDraft(id: string) {
-  sessionStorage.setItem("firenet-draft-id", id);
+  sessionStorage.setItem(storageKeys.draftId, id);
 }
 
 describe("useProjectResource", () => {

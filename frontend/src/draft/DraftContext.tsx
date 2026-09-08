@@ -1,22 +1,17 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { resetRevision } from "../api/revision";
-
-// Ключи совпадают с common.js: e2e-хелпер openWithDraft пишет их напрямую
-// через addInitScript, поэтому менять их нельзя.
-const DRAFT_ID_KEY = "firenet-draft-id";
-const LAST_DRAFT_ID_KEY = "firenet-last-draft-id";
-const READONLY_KEY = "firenet-draft-readonly";
+import { storageKeys } from "../lib/storage";
 
 // Активный драфт живёт в sessionStorage (у каждого таба свой), последний —
-// в localStorage, чтобы новый таб продолжил в нём же. READONLY_KEY —
+// в localStorage, чтобы новый таб продолжил в нём же. draftReadonly —
 // «этот таб сознательно вернулся к текущей версии», иначе sessionStorage
 // пуст и мы бы снова подхватили последний драфт.
 function readInitialDraft(): string | null {
-  const active = sessionStorage.getItem(DRAFT_ID_KEY);
+  const active = sessionStorage.getItem(storageKeys.draftId);
   if (active) return active;
-  if (sessionStorage.getItem(READONLY_KEY)) return null;
-  const last = localStorage.getItem(LAST_DRAFT_ID_KEY);
-  if (last) sessionStorage.setItem(DRAFT_ID_KEY, last);
+  if (sessionStorage.getItem(storageKeys.draftReadonly)) return null;
+  const last = localStorage.getItem(storageKeys.lastDraftId);
+  if (last) sessionStorage.setItem(storageKeys.draftId, last);
   return last || null;
 }
 
@@ -37,14 +32,14 @@ export function DraftProvider({ children }: { children: ReactNode }) {
     const previous = draftId; // активный драфт на момент вызова
     resetRevision(); // ревизия принадлежит драфту, к другому она не относится
     if (id) {
-      sessionStorage.setItem(DRAFT_ID_KEY, id);
-      sessionStorage.removeItem(READONLY_KEY);
-      localStorage.setItem(LAST_DRAFT_ID_KEY, id);
+      sessionStorage.setItem(storageKeys.draftId, id);
+      sessionStorage.removeItem(storageKeys.draftReadonly);
+      localStorage.setItem(storageKeys.lastDraftId, id);
     } else {
-      sessionStorage.removeItem(DRAFT_ID_KEY);
-      sessionStorage.setItem(READONLY_KEY, "1");
-      if (localStorage.getItem(LAST_DRAFT_ID_KEY) === previous) {
-        localStorage.removeItem(LAST_DRAFT_ID_KEY);
+      sessionStorage.removeItem(storageKeys.draftId);
+      sessionStorage.setItem(storageKeys.draftReadonly, "1");
+      if (localStorage.getItem(storageKeys.lastDraftId) === previous) {
+        localStorage.removeItem(storageKeys.lastDraftId);
       }
     }
     setDraftIdState(id);

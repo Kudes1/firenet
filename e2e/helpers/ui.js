@@ -12,8 +12,8 @@ export async function loginViaUI(page, creds) {
 
 export async function openWithDraft(page, draftId, path) {
   await page.addInitScript((id) => {
-    localStorage.setItem("firenet-last-draft-id", id);
-    sessionStorage.setItem("firenet-draft-id", id);
+    localStorage.setItem("ui.draft.lastId", id);
+    sessionStorage.setItem("ui.draft.id", id);
   }, draftId);
   await page.goto(env().baseURL + path);
   await expect(page.locator('[data-testid="draft-banner"].draft-banner-editing')).toBeVisible();
@@ -21,8 +21,8 @@ export async function openWithDraft(page, draftId, path) {
 
 export async function openTablePage(page, draftId, path) {
   await page.addInitScript((id) => {
-    localStorage.setItem("firenet-last-draft-id", id);
-    sessionStorage.setItem("firenet-draft-id", id);
+    localStorage.setItem("ui.draft.lastId", id);
+    sessionStorage.setItem("ui.draft.id", id);
   }, draftId);
   await page.goto(env().baseURL + path);
 }
