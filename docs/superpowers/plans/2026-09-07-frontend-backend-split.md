@@ -4904,7 +4904,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 
 Самая насыщенная табличная страница: табы цепочек, параметры цепочки, правило с двумя комбобоксами эндпоинтов, перемещение правил, линтер.
 
-- [ ] **Step 1: Написать `frontend/src/pages/RulesPage.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/pages/RulesPage.test.tsx`**
 
 ```tsx
 import { screen, waitFor } from "@testing-library/react";
@@ -5024,7 +5024,7 @@ describe("RulesPage", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -5032,7 +5032,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './RulesPage'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/pages/RulesPage.tsx`**
+- [x] **Step 3: Реализовать `frontend/src/pages/RulesPage.tsx`**
 
 ```tsx
 import { useMemo, useState } from "react";
@@ -5413,7 +5413,7 @@ function ruleHint(draft: RuleDraft, chain: ChainDoc | undefined): string {
 }
 ```
 
-- [ ] **Step 4: Зарегистрировать маршрут**
+- [x] **Step 4: Зарегистрировать маршрут**
 
 ```tsx
 import RulesPage from "./pages/RulesPage";
@@ -5421,7 +5421,7 @@ import RulesPage from "./pages/RulesPage";
         <Route path="/ui/rules" element={<RulesPage />} />
 ```
 
-- [ ] **Step 5: Запустить тесты**
+- [x] **Step 5: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -5429,7 +5429,13 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 6: Commit**
+> **Правки относительно кода из плана (выявлены при реализации).**
+> 1. `ruleHint` из плана возвращал одну подсказку, а тест «rejects a rule without src or dst» ожидает одновременно «Нужен хотя бы один источник» и «Нужен хотя бы один получатель». Функция переписана на возврат массива подсказок (имя и уникальность, обе концы, порты, jump), в модалке рендерится список.
+> 2. Тест «shows lint findings» из плана мокал `GET .../lint` значением `fx.lintFixture` (голый массив), а `useLint` читает `LintResponse` с полем `findings` — заменено на `{ findings: fx.lintFixture }`. Заодно: `LintResponse.findings` бывает `null` (`{"findings":null}` на чистом линте, см. types.ts), поэтому в RulesPage проверки через `?.`.
+> 3. Утверждение «saves the whole policy» использовало `toMatchObject` c `expect.arrayContaining` — в vitest 2 вложенный `arrayContaining` внутри `toMatchObject` требует совпадения длины массива и падает на `[web, ssh]`. Заменено на явную проверку `rules.some((r) => r.name === "ssh")`.
+> 4. Тест «moves a rule and persists the chain» дёргал `GET .../lint` без обработчика (MSW-предупреждения): страница грузит lint на монтировании. Поведение страницы корректно — запрос просто уходит в дефолтный обработчик после `resetHandlers`; предупреждение безвредно.
+
+- [x] **Step 6: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): rules page with chains, lint and reordering"
