@@ -31,18 +31,16 @@ When locating or analyzing code:
  2. `go vet ./...`
  3. `gofmt -l .` — must print nothing (`make fmt` to fix)
  4. `go test ./...`
- 5. `make test-e2e` — E2E-сценарии Playwright (нужны docker и chromium;
+ 5. `cd frontend && npm test` — юнит-тесты React (Vitest + RTL)
+ 6. `make test-e2e` — E2E-сценарии Playwright (нужны docker и chromium;
     первый запуск: `cd e2e && npm install && npx playwright install chromium`).
 
 No linter beyond `go vet` is configured — don't try golangci-lint.
 
-Web UI JS tests run outside a browser on node:test with DOM stubs:
- - `node --test 'internal/httpapi/web/*.test.js'` — glob is required;
-   running on the directory fails because plain .js files get loaded as tests. No package.json / node_modules — only node built-ins.
-
 ## Gotchas
- - `internal/httpapi/web/` assets are embedded at build time (`go:embed`):
-   rebuild the binary (`make build`) after editing them, or `serve` shows stale UI.
+ - `frontend/dist/` собирается в контейнер nginx; после правки `frontend/src`
+   в prod-режиме нужен `docker compose up -d --build frontend`, в dev
+   (`FRONTEND_TARGET=dev`) Vite подхватывает правки сам.
  - topology.yaml / subnets.yaml / rules.yaml at repo root are the live working
    data for `validate`/`compile`/`serve`; examples/ holds pristine samples,
    out/ is generated output.

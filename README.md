@@ -20,7 +20,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-После запуска откройте [http://localhost:8787](http://localhost:8787) и
+После запуска откройте [http://localhost:8080](http://localhost:8080) и
 войдите с логином и паролем из `FIRENET_ADMIN_USER` и
 `FIRENET_ADMIN_PASSWORD` в `.env`. Этот пользователь создаётся как
 администратор только при первом запуске с пустой базой данных.
@@ -45,15 +45,31 @@ docker compose up -d --build
 ## Обслуживание
 
 ```sh
-docker compose ps              # состояние сервисов
-docker compose logs -f app     # логи приложения
-docker compose up -d --build   # пересобрать и применить обновление
-docker compose down            # остановить и удалить контейнеры
+docker compose ps                    # состояние сервисов
+docker compose logs -f backend       # логи Go-бэкенда (JSON API)
+docker compose up -d --build         # пересобрать и применить обновление
+docker compose down                  # остановить и удалить контейнеры
 ```
 
 Команда `docker compose down` не удаляет именованный том `firenet-db`,
 поэтому данные PostgreSQL сохраняются. Чтобы удалить приложение вместе с
 данными, выполните `docker compose down --volumes`.
+
+## Архитектура
+
+Приложение разделено на два рантайма:
+
+- **backend** (`cmd/firenet`) — Go-сервис, отдающий только JSON API
+  (`/api/*`). Порт на хосте — `8787`, напрямую наружу не нужен.
+- **frontend** (`frontend/`) — React-приложение (Vite + TypeScript +
+  React Flow), общается с API по cookie-сессии. Собирается в контейнер
+  nginx, порт на хосте — `8080`.
+
+По умолчанию (`FRONTEND_TARGET=runtime` в `.env`) nginx отдаёт
+собранный `dist/`. Для разработки задайте `FRONTEND_TARGET=dev` — тогда
+контейнер запускает Vite dev-сервер на
+[http://localhost:5173](http://localhost:5173) с горячей перезагрузкой,
+проксируя `/api` на бэкенд.
 
 ## Конфигурация
 
@@ -64,10 +80,11 @@ Docker Compose считывает следующие значения из `.env
 | `POSTGRES_PASSWORD` | пароль пользователя PostgreSQL `firenet` |
 | `FIRENET_ADMIN_USER` | логин первого администратора |
 | `FIRENET_ADMIN_PASSWORD` | пароль первого администратора |
-| `FIRENET_ADDR` | адрес, на котором приложение слушает HTTP-запросы |
+| `FIRENET_ADDR` | адрес, на котором бэкенд слушает HTTP-запросы |
+| `FRONTEND_TARGET` | стейдж сборки frontend-контейнера: `runtime` (nginx) или `dev` (Vite) |
 
-Порт интерфейса на хосте — `8787`. При необходимости изменить его поменяйте
-публикацию порта в `docker-compose.yml`.
+Порт интерфейса на хосте — `8080`, JSON API — `8787`. При необходимости
+изменить их поменяйте публикацию портов в `docker-compose.yml`.
 
 ## Разработка
 
@@ -79,15 +96,16 @@ go vet ./...
 gofmt -l .
 go test ./...
 cd frontend && npm test
+make test-e2e
 ```
 
 ## Структура проекта
 
 ```
-cmd/firenet/       точка входа приложения
+cmd/firenet/       точка входа Go-бэкенда (JSON API)
 internal/app/      ядро бизнес-логики
 internal/httpapi/  HTTP API (JSON)
-frontend/          веб-интерфейс: React + TypeScript + Vite
+frontend/          веб-интерфейс: React + TypeScript + Vite, сборка в nginx
 internal/pgstore/  хранение проектов и версий в PostgreSQL
 internal/auth/     аутентификация и пользователи
 internal/topology/ модель сети: устройства, связи, подсети и зоны
