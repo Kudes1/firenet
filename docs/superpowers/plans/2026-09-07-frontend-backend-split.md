@@ -6430,7 +6430,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 
 Это перенос `topo_scene.js` без тем и твинов: только геометрия и данные. Тестируется без DOM — самая ценная часть топологии.
 
-- [ ] **Step 1: Создать `frontend/src/topology/icons.ts`**
+- [x] **Step 1: Создать `frontend/src/topology/icons.ts`**
 
 ```ts
 import type { DeviceKind } from "../api/types";
@@ -6457,7 +6457,7 @@ export const KINDS: Record<DeviceKind, KindStyle> = {
 export const kindStyle = (kind: string): KindStyle => KINDS[kind as DeviceKind] ?? { rx: 4 };
 ```
 
-- [ ] **Step 2: Написать `frontend/src/topology/scene.test.ts`**
+- [x] **Step 2: Написать `frontend/src/topology/scene.test.ts`**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -6580,7 +6580,7 @@ describe("node sizes", () => {
 });
 ```
 
-- [ ] **Step 3: Запустить — тест падает**
+- [x] **Step 3: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -6588,7 +6588,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './scene'`.
 
-- [ ] **Step 4: Реализовать `frontend/src/topology/scene.ts`**
+- [x] **Step 4: Реализовать `frontend/src/topology/scene.ts`**
 
 ```ts
 import type { LayoutDoc, LayoutPoint, LinkDoc, TopologyDoc } from "../api/types";
@@ -6746,7 +6746,7 @@ export function buildScene(topology: TopologyDoc, layout: LayoutDoc): Scene {
 }
 ```
 
-- [ ] **Step 5: Запустить тесты**
+- [x] **Step 5: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -6754,7 +6754,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные. Правило, закреплённое тестами: в сцену попадают только объекты с позицией в layout, `defaultPoint` страница вызывает сама при создании нового объекта.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): pure topology scene builder"
