@@ -8260,6 +8260,8 @@ cd /root/repos/firenet && git add -A -- internal README.md Makefile && git statu
 
 В `git status` не должно быть файлов из `frontend/` (они остаются непроиндексированными `M`/`??` и попадут в свои коммиты задач 1–20).
 
+> **Примечание (Task 21 исполнена 2026-09-08).** Выполнена по плану без отступлений: удалены `internal/httpapi/templates/` (15 файлов), `internal/httpapi/web/` (все файлы), `embed.go` и `server_test.go` целиком; `server.go` сокращён до `NewServer` + `withLogging` с сохранением всех apiMux-регистраций 1:1 (мёртвые импорты `crypto/sha256`, `encoding/hex`, `html/template`, `io`, `io/fs`, `path`, `strings` убраны вместе с кодом); комментарии в `handlers.go` (про `/ui/links`) и `search_index.go` (про `/ui/search`) переписаны; grep по удаляемым символам пуст; `go build ./... && go vet ./... && gofmt -l . && go test ./...` — зелёные; Makefile получил цели `dev`/`fe-test`/`fe-build`, README — `cd frontend && npm test` вместо `node --test` и строку `frontend/` в структуре. Коммит `2bd1087`, в индекс вошли только `internal/`, `README.md` и `Makefile` — `frontend/` остался непроиндексированным.
+
 ---
 
 ### Task 22: Инфраструктура — compose, nginx, dev-режим
