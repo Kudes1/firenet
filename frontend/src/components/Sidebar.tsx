@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { useMe } from "../api/queries";
 import type { UserResponse } from "../api/types";
 import { initialTheme, applyTheme } from "./theme";
+import { CollapseIcon, MoonIcon, SunIcon } from "./icons";
 
 // Группы 1:1 с NAV_GROUPS из common.js; состояние раскрытия — в localStorage
 // под теми же ключами firenet-nav-<id>.
@@ -52,7 +53,9 @@ export default function Sidebar({ active }: { active: string }) {
 
   return (
     <aside className={`sidebar${collapsed ? " collapsed" : ""}`} data-testid="sidebar">
-      <button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label="Свернуть меню" />
+      <button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label="Свернуть меню">
+        <CollapseIcon />
+      </button>
       {NAV_GROUPS.map((group) => (
         <NavGroup key={group.id} group={group} active={active} onToggle={toggleGroup} />
       ))}
@@ -71,7 +74,10 @@ export default function Sidebar({ active }: { active: string }) {
           className="theme-toggle"
           onClick={() => { const next = theme === "dark" ? "light" : "dark"; setTheme(next); applyTheme(next); }}
           aria-label="Сменить тему"
-        />
+        >
+          <span className="icon-sun"><SunIcon /></span>
+          <span className="icon-moon"><MoonIcon /></span>
+        </button>
         <button
           type="button"
           className="logout-btn"

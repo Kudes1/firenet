@@ -23,7 +23,7 @@ test("«Открыть» переключает черновик", async ({ page
   await page.goto(env().baseURL + "/ui/drafts");
   await page.locator("#drafts-table tbody tr", { hasText: name })
     .getByRole("button", { name: "Открыть" }).click();
-  await page.waitForURL(/\/ui\/topology$/);
+  // Открытие черновика переключает контекст: баннер должен показать имя.
   await expect(page.locator(".draft-banner-editing")).toContainText(name);
 });
 
@@ -36,7 +36,7 @@ test("«Изменения» показывает diff черновика", asyn
   await page.goto(env().baseURL + "/ui/drafts");
   await page.locator("#drafts-table tbody tr", { hasText: name })
     .getByRole("button", { name: "Изменения" }).click();
-  const panel = page.locator("#diff-panel");
+  const panel = page.locator('[data-testid="diff-panel"]');
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("df-r1");
   await expect(panel).toContainText("добавлено");
@@ -50,7 +50,7 @@ test("удаление черновика", async ({ page, request }) => {
   await page.goto(env().baseURL + "/ui/drafts");
   page.on("dialog", (d) => d.accept());
   await page.locator("#drafts-table tbody tr", { hasText: name })
-    .getByRole("button", { name: "Удалить" }).click();
+    .getByRole("button", { name: "Удалить", exact: false }).click();
   await expect(page.locator("#drafts-table tbody tr", { hasText: name })).toHaveCount(0);
 });
 
@@ -61,11 +61,9 @@ test("admin подтверждает черновик в новую версию
   await op(request, id, { kind: "create-device", device: { name: "df-c-r1", kind: "router" } });
   await loginViaUI(page);
   await page.goto(env().baseURL + "/ui/drafts");
-  await page.locator("#drafts-table tbody tr", { hasText: name })
-    .getByRole("button", { name: "Изменения" }).click();
-  await expect(page.locator("#confirm-btn")).toBeVisible();
-  await page.locator("#confirm-btn").click();
-  await expect(page.locator("#error-banner")).toContainText(/Черновик подтверждён как версия \d+/);
+  const row = page.locator("#drafts-table tbody tr", { hasText: name });
+  await row.getByRole("button", { name: "Подтвердить" }).click();
+  await expect(page.locator('[data-testid="banner"]')).toContainText(/Черновик подтверждён как версия \d+/);
   // Ищем версию именно этого черновика: параллельные тесты подтверждают
   // свои черновики, поэтому ни длина списка, ни последний ID не стабильны.
   await expect.poll(async () =>
@@ -80,10 +78,9 @@ test("не-admin: подтверждение недоступно", async ({ pag
   await loginViaUI(page, creds);
   const id = await createDraft(page.request, `df-own-${uid()}`);
   await page.goto(env().baseURL + "/ui/drafts");
-  await expect(page.locator("#all-toggle")).toBeHidden();
-  await page.locator("#drafts-table tbody tr", { hasText: "df-own-" })
-    .getByRole("button", { name: "Изменения" }).click();
-  await expect(page.locator("#confirm-btn")).toBeHidden();
+  await expect(page.locator(".modal-check")).toBeHidden();
+  const row = page.locator("#drafts-table tbody tr", { hasText: "df-own-" });
+  await expect(row.getByRole("button", { name: "Подтвердить" })).toBeHidden();
   const res = await page.request.post(`${env().baseURL}/api/drafts/${id}/confirm`, { data: {} });
   expect(res.status()).toBe(403);
 });

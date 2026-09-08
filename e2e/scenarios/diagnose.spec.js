@@ -30,15 +30,14 @@ test("путь найден между двумя подсетями", async ({ 
   const { a, b } = await arrangeTwoSites(request, id);
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/diagnose");
-  // Панель пути открыта по умолчанию: клик по инструменту — это toggle.
-  if (await page.locator("#diag-panel").isHidden()) await page.locator("#diag-tool-path").click();
-  await expect(page.locator("#diag-panel")).toBeVisible();
-  await page.locator("#diag-src").fill("10.50.0.7");
-  await page.locator("#diag-dst").fill("10.51.0.7");
-  await page.getByRole("button", { name: "Диагностировать" }).click();
-  const summary = page.locator("#diag-summary");
-  await expect(summary).toContainText(new RegExp(`${a} → ${b}: путей 1`));
-  await expect(page.locator("#diag-paths")).toContainText("Путь 1");
+  const panel = page.locator('[data-testid="diag-panel"]');
+  await expect(panel).toBeVisible();
+  await panel.locator("label", { hasText: "Источник" }).locator("input").fill("10.50.0.7");
+  await panel.locator("label", { hasText: "Назначение" }).locator("input").fill("10.51.0.7");
+  await panel.getByRole("button", { name: "Проверить путь" }).click();
+  const report = page.locator('[data-testid="diag-report"]');
+  await expect(report).toContainText(new RegExp(`${a} → ${b}: путей 1`));
+  await expect(report.locator(".diag-path").first()).toContainText("dg-r1");
 });
 
 test("путь не найден без связи", async ({ page, request }) => {
@@ -46,13 +45,13 @@ test("путь не найден без связи", async ({ page, request }) =
   const { a, b } = await arrangeTwoSites(request, id, { linked: false });
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/diagnose");
-  if (await page.locator("#diag-panel").isHidden()) await page.locator("#diag-tool-path").click();
-  await expect(page.locator("#diag-panel")).toBeVisible();
-  await page.locator("#diag-src").fill("10.50.0.7");
-  await page.locator("#diag-dst").fill("10.51.0.7");
-  await page.getByRole("button", { name: "Диагностировать" }).click();
-  await expect(page.locator("#diag-summary")).toContainText(": путей 0");
-  await expect(page.locator(".diag-unreachable")).toContainText("Недостижимо: путей между подсетями нет.");
+  const panel = page.locator('[data-testid="diag-panel"]');
+  await expect(panel).toBeVisible();
+  await panel.locator("label", { hasText: "Источник" }).locator("input").fill("10.50.0.7");
+  await panel.locator("label", { hasText: "Назначение" }).locator("input").fill("10.51.0.7");
+  await panel.getByRole("button", { name: "Проверить путь" }).click();
+  await expect(page.locator('[data-testid="diag-report"]')).toContainText(": путей 0");
+  await expect(page.locator(".diag-unreachable")).toContainText("Путей нет.");
 });
 
 test("односторонняя доступность без mirror", async ({ page, request }) => {
@@ -60,12 +59,12 @@ test("односторонняя доступность без mirror", async ({
   await arrangeTwoSites(request, id, { mirror: false });
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/diagnose");
-  if (await page.locator("#diag-panel").isHidden()) await page.locator("#diag-tool-path").click();
-  await expect(page.locator("#diag-panel")).toBeVisible();
-  await page.locator("#diag-src").fill("10.50.0.7");
-  await page.locator("#diag-dst").fill("10.51.0.7");
-  await page.getByRole("button", { name: "Диагностировать" }).click();
-  await expect(page.locator(".diag-halfpath")).toContainText("Доступность в одну сторону");
+  const panel = page.locator('[data-testid="diag-panel"]');
+  await expect(panel).toBeVisible();
+  await panel.locator("label", { hasText: "Источник" }).locator("input").fill("10.50.0.7");
+  await panel.locator("label", { hasText: "Назначение" }).locator("input").fill("10.51.0.7");
+  await panel.getByRole("button", { name: "Проверить путь" }).click();
+  await expect(page.locator(".diag-halfpath")).toContainText("Доступность только в одну сторону");
 });
 
 test("распространение сети", async ({ page, request }) => {
@@ -73,11 +72,10 @@ test("распространение сети", async ({ page, request }) => {
   await arrangeTwoSites(request, id);
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/diagnose");
-  await page.locator("#diag-tool-spread").click();
-  await expect(page.locator("#spread-panel")).toBeVisible();
-  await page.locator("#spread-src").fill("10.50.0.7");
-  // Esc закрывает выпадающий список подсказок, иначе он перекрывает submit.
-  await page.locator("#spread-src").press("Escape");
-  await page.getByRole("button", { name: "Показать распространение" }).click();
-  await expect(page.locator("#spread-summary")).toContainText(/Достижимо \d+ из \d+ подсетей/);
+  await page.locator('[data-testid="tool-spread"]').click();
+  const spread = page.locator('[data-testid="spread-panel"]');
+  await expect(spread).toBeVisible();
+  await spread.locator("input").fill("10.50.0.7");
+  await spread.getByRole("button", { name: "Проверить доступность" }).click();
+  await expect(page.locator('[data-testid="spread-report"]')).toContainText(/Достижимо \d+ из \d+ подсетей/);
 });

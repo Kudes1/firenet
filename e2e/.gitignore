@@ -3,3 +3,5 @@ node_modules/
 .tmp/
 test-results/
 playwright-report/
+.e2e-frontend.pid
+.e2e-server.pid

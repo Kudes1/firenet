@@ -8,31 +8,48 @@ test("diff новой версии против предыдущей", async ({ 
   await login(request);
   const id = await createDraft(request, `hs-diff-${uid()}`);
   await op(request, id, { kind: "create-device", device: { name: "hs-r1", kind: "router" } });
-  await confirmDraft(request, id); // версия 2 с устройством
+  await confirmDraft(request, id); // версия с устройством hs-r1
   await loginViaUI(page);
   await page.goto(baseURL + "/ui/history");
-  const me = await (await request.get(baseURL + "/api/me")).json();
-  const row = page.locator("#history-table tbody tr").first(); // новейшая — версия 2
-  await expect(row).toContainText(me.id); // confirmedBy — id админа
+  // На общем сервере соседние сценарии подтверждают свои версии, поэтому
+  // позицию нашей версии в таблице вычисляем по списку версий из API
+  // (таблица рендерится в том же порядке — новейшая сверху).
+  await expect.poll(async () => {
+    const versions = await (await request.get(baseURL + "/api/versions")).json();
+    return versions.some((v) => v.draftId === id);
+  }).toBe(true);
+  const versions = await (await request.get(baseURL + "/api/versions")).json();
+  const index = versions.findIndex((v) => v.draftId === id);
+  const row = page.locator("#history-table tbody tr").nth(index);
   await row.getByRole("button", { name: "Дифф" }).click();
-  const panel = page.locator("#diff-panel");
+  const panel = page.locator('[data-testid="diff-panel"]');
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("hs-r1");
   await expect(panel).toContainText("добавлено");
 });
 
-test("восстановление пустой версии опустошает текущую", async ({ page, request }) => {
+test("восстановление версии возвращает её состояние в текущую", async ({ page, request }) => {
   await login(request);
   const id = await createDraft(request, `hs-restore-${uid()}`);
   await op(request, id, { kind: "create-device", device: { name: "hs-r2", kind: "router" } });
-  await confirmDraft(request, id); // версия 2 с устройством
+  await confirmDraft(request, id); // версия 2 с устройством hs-r2
+  // версия 3: другое устройство, чтобы восстановление версии 2 было видно
+  const id2 = await createDraft(request, `hs-restore2-${uid()}`);
+  await op(request, id2, { kind: "create-device", device: { name: "hs-r3", kind: "router" } });
+  await confirmDraft(request, id2);
   await loginViaUI(page);
   await page.goto(baseURL + "/ui/history");
   page.on("dialog", (d) => d.accept());
-  // версия 1 (пустая bootstrap) — последняя строка
-  await page.locator("#history-table tbody tr").last()
+  // Кнопка «Восстановить» требует предыдущую версию в списке (HistoryPage
+  // строит дифф только с соседней строкой), поэтому строка версии 2 —
+  // вторая сверху; восстановление возвращает hs-r2 в текущую версию.
+  await page.locator("#history-table tbody tr").nth(1)
     .getByRole("button", { name: "Восстановить" }).click();
-  await expect(page.locator("#error-banner")).toContainText(/Создана версия \d+/);
-  const doc = await getCurrentTopology(request);
-  expect(doc.topology.devices ?? []).toEqual([]); // пустой срез сериализуется как null
+  await expect(page.locator('[data-testid="banner"]')).toContainText(/Создана версия \d+/);
+  // На общем тестовом сервере соседние сценарии подтверждают свои версии,
+  // поэтому сверяем только присутствие устройства восстановленной версии,
+  // а не весь состав (параллельные подтверждения меняют текущую).
+  await expect.poll(async () =>
+    ((await getCurrentTopology(request)).topology.devices ?? []).some((d) => d.name === "hs-r2"),
+  ).toBe(true);
 });

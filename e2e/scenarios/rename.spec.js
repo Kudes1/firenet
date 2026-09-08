@@ -38,9 +38,9 @@ test("переименование сети обновляет фильтр св
   await row.locator(".icon-btn.edit").click();
   const dialog = page.locator("dialog.modal");
   await expect(dialog).toBeVisible();
-  await dialog.locator('[placeholder="office"]').fill("rn-net-2");
+  await dialog.locator("label", { hasText: "Имя" }).locator("input").fill("rn-net-2");
   await dialog.getByRole("button", { name: "Сохранить" }).click();
-  await expect(dialog).toBeHidden();
+  await expect(page.locator("dialog.modal[open]")).toHaveCount(0);
 
   const doc = await getTopology(request, id);
   const net = doc.topology.networks.find((n) => n.name === "rn-net-2");
@@ -60,7 +60,7 @@ test("переименование одиночной подсети", async ({ 
   const row = page.locator("tbody tr", { hasText: "rs-lan" });
   await row.locator(".icon-btn.edit").click();
   const dialog = page.locator("dialog.modal");
-  await dialog.locator('[placeholder="office-lan"]').fill("rs-lan-2");
+  await dialog.locator('[placeholder="lan"]').fill("rs-lan-2");
   await dialog.getByRole("button", { name: "Сохранить" }).click();
 
   await expect.poll(async () => (await getSubnets(request, id)).subnets.map((s) => s.name), {
@@ -88,11 +88,13 @@ test("переименование набора, используемого пр
   const row = page.locator("tbody tr", { hasText: "rset-set" });
   await row.locator(".icon-btn.edit").click();
   const dialog = page.locator("dialog.modal");
-  await dialog.locator('[placeholder="blocked"]').fill("rset-set-2");
+  await dialog.locator("label", { hasText: "Имя" }).locator("input").fill("rset-set-2");
   await dialog.getByRole("button", { name: "Сохранить" }).click();
 
-  await expect(page.locator("#error-banner")).toContainText('set "rset-set" is still used by rule "from-set"');
-  await expect(dialog).toBeHidden();
+  await expect(page.locator('[data-testid="banner"]')).toContainText('set "rset-set" is still used by rule "from-set"');
+  // Сервер отклонил PUT: модалка остаётся открытой — можно исправить имя
+  // и сохранить снова, набор не переименован.
+  await expect(dialog).toBeVisible();
   const doc = await getTopology(request, id);
   expect(doc.topology.sets.map((s) => s.name)).toContain("rset-set");
   const rules = await getRules(request, id);
@@ -111,7 +113,7 @@ test.fixme("переименование подсети-члена сети об
   const row = page.locator("tbody tr", { hasText: "rns-sub" });
   await row.locator(".icon-btn.edit").click();
   const dialog = page.locator("dialog.modal");
-  await dialog.locator('[placeholder="office-lan"]').fill("rns-sub-2");
+  await dialog.locator('[placeholder="lan"]').fill("rns-sub-2");
   await dialog.getByRole("button", { name: "Сохранить" }).click();
 
   const doc = await getTopology(request, id);

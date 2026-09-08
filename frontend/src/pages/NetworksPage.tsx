@@ -8,6 +8,7 @@ import DataTable, { type Column } from "../components/ui/DataTable";
 import MemberList from "../components/ui/MemberList";
 import Modal from "../components/ui/Modal";
 import { notify } from "../components/notify";
+import { DeleteIcon, EditIcon } from "../components/icons";
 
 type Draft = { index: number; name: string; subnets: string[]; description: string };
 
@@ -93,8 +94,8 @@ export default function NetworksPage() {
       title: "",
       render: (r) => (
         <>
-          <button type="button" className="icon-btn edit" title={`Изменить сеть ${r.name}`} onClick={() => open(rows.indexOf(r))} />
-          <button type="button" className="icon-btn delete" title={`Удалить сеть ${r.name}`} onClick={() => remove(rows.indexOf(r))} />
+          <button type="button" className="icon-btn edit" title={`Изменить сеть ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
+          <button type="button" className="icon-btn delete" title={`Удалить сеть ${r.name}`} onClick={() => remove(rows.indexOf(r))}><DeleteIcon /></button>
         </>
       ),
     },

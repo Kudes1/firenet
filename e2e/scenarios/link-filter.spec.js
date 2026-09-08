@@ -1,19 +1,18 @@
 import { test, expect } from "@playwright/test";
-import { login, createDraft } from "../helpers/api.js";
+import { login, createDraft, putSubnets, op } from "../helpers/api.js";
 import {
-  loginViaUI, openWithDraft, openTablePage, activateTool, createNode, canvasClick,
-  contextMenuItem, waitTopology,
+  loginViaUI, openWithDraft, openTablePage, createDeviceNode, createNetworkNode, linkDevices, waitTopology,
 } from "../helpers/ui.js";
 
 const draftName = (name) => `${name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 async function createSubnet(page, name, cidr) {
-  await page.getByRole("button", { name: "+ подсеть" }).click();
+  await page.getByRole("button", { name: "+ Подсеть" }).click();
   const dialog = page.locator("dialog.modal");
-  await dialog.locator('[placeholder="office-lan"]').fill(name);
+  await dialog.locator('[placeholder="lan"]').fill(name);
   await dialog.locator('[placeholder="10.0.0.0/24"]').fill(cidr);
   await dialog.getByRole("button", { name: "Сохранить" }).click();
-  await expect(dialog).toBeHidden();
+  await expect(page.locator("dialog.modal[open]")).toHaveCount(0);
 }
 
 async function addNetworkMember(page, network, subnet) {
@@ -23,12 +22,15 @@ async function addNetworkMember(page, network, subnet) {
   await dialog.locator(".member-add input").fill(subnet);
   await dialog.getByRole("button", { name: new RegExp(`^${subnet} \\(`) }).click();
   await dialog.getByRole("button", { name: "Сохранить" }).click();
-  await expect(dialog).toBeHidden();
+  await expect(page.locator("dialog.modal[open]")).toHaveCount(0);
 }
 
 async function freshDraft(page, request, name) {
   await login(request);
   const id = await createDraft(request, draftName(name));
+  // Камера по умолчанию: мировые координаты == экранным, иначе fitView
+  // подгонит масштаб и клики по канве попадут не туда.
+  await op(request, id, { kind: "set-camera", camera: { x: 0, y: 0, z: 1 } });
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/subnets");
   await createSubnet(page, "lf-sub-a", "10.60.1.0/24");
@@ -38,55 +40,64 @@ async function freshDraft(page, request, name) {
 
 async function arrangeLinkWithNetworks(page, id, request) {
   await openWithDraft(page, id, "/ui/topology");
-  await activateTool(page, "device");
-  await createNode(page, "lf-r1", { x: 400, y: 300 }, "router");
-  await createNode(page, "lf-r2", { x: 700, y: 300 }, "router");
-  await activateTool(page, "network");
-  await createNode(page, "lf-net-a", { x: 400, y: 550 });
-  await createNode(page, "lf-net-b", { x: 700, y: 550 });
-  await activateTool(page, "connect");
-  await canvasClick(page, 400, 300);
-  await canvasClick(page, 700, 300);
-  await canvasClick(page, 400, 550);
-  await canvasClick(page, 400, 300);
-  await canvasClick(page, 700, 550);
-  await canvasClick(page, 700, 300);
+  const r1 = await createDeviceNode(page, { x: 400, y: 300 });
+  const r2 = await createDeviceNode(page, { x: 700, y: 300 });
+  const netA = await createNetworkNode(page, { x: 400, y: 550 });
+  const netB = await createNetworkNode(page, { x: 700, y: 550 });
+  await linkDevices(page, r1, r2);
+  // Сначала дожидаемся, что браузерный flush (дебаунс 400мс) подтвердил
+  // связь: иначе API-операции ниже сменят ревизию, а следующий flush
+  // браузера упадёт с CAS-конфликтом и перетрёт их.
+  await waitTopology(request, id, (doc) => doc.topology.links?.length === 1);
+  // Привязка сетей к устройствам — операцией через API: connect-инструмент
+  // в React-версии создаёт только device-device связи.
+  await op(request, id, { kind: "attach-network", networkName: netA, attach: { device: r1 } });
+  await op(request, id, { kind: "attach-network", networkName: netB, attach: { device: r2 } });
+  // Подсети-члены: без них сети «пустые», link-exports не находит
+  // достижимых сущностей и комбобокс экспорта остаётся пустым.
+  await op(request, id, { kind: "update-network", networkName: netA, network: { name: netA, subnets: ["lf-sub-a"], attach: [{ device: r1 }] } });
+  await op(request, id, { kind: "update-network", networkName: netB, network: { name: netB, subnets: ["lf-sub-b"], attach: [{ device: r2 }] } });
   await waitTopology(request, id, (doc) => {
     const nets = doc.topology.networks;
     return doc.topology.links.length === 1
-      && nets.every((n) => (n.attach || []).length === 1);
+      && nets.every((n) => (n.attach || []).length === 1 && (n.subnets || []).length === 1);
   });
-  await openTablePage(page, id, "/ui/networks");
-  await addNetworkMember(page, "lf-net-a", "lf-sub-a");
-  await addNetworkMember(page, "lf-net-b", "lf-sub-b");
+  await page.reload();
   await openWithDraft(page, id, "/ui/topology");
+  return { r1, r2, netA, netB };
 }
 
-test("связь становится фильтрованной с экспортами и возвращается в обычную", async ({ page, request }) => {
+test("связь становится фильтрованной с экспортами через таблицу связей", async ({ page, request }) => {
   const id = await freshDraft(page, request, "link-filter");
-  await arrangeLinkWithNetworks(page, id, request);
+  const { r1, r2, netA, netB } = await arrangeLinkWithNetworks(page, id, request);
 
-  await contextMenuItem(page, 550, 300, "Редактировать");
-  const panel = page.locator("#link-panel");
-  await expect(panel).toBeVisible();
-  await expect(panel.locator("strong")).toHaveText("Связь lf-r1 ↔ lf-r2");
+  // Фильтр настраивается на странице «Связи»: контекстного меню канвы в
+  // React-версии нет. «Фильтровать» переводит связь в фильтрованный режим
+  // сразу (без модалки); экспорты задаются через «Изменить фильтр».
+  await openTablePage(page, id, "/ui/links");
+  const row = page.locator("tbody tr", { hasText: `${r1} ↔ ${r2}` });
+  await row.getByRole("button", { name: "Фильтровать" }).click();
+  await row.locator(".icon-btn.edit").click();
+  const dialog = page.locator('dialog.modal[open]');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(`${r1} ↔ ${r2}`);
 
-  await panel.getByRole("button", { name: "Сделать фильтрованной" }).click();
-  const selects = panel.locator(".member-add select");
-  await selects.nth(0).selectOption({ label: "lf-net-a" });
-  await selects.nth(1).selectOption({ label: "lf-net-b" });
-  await panel.getByRole("button", { name: "Применить" }).click();
-  await expect(panel).toBeHidden();
+  // Кандидаты экспорта подгружаются с бэкенда (link-exports): сеть видна,
+  // только когда она привязана к соответствующему устройству.
+  const exportA = dialog.locator("fieldset", { hasText: r1 }).locator(".member-add input");
+  await exportA.fill(netA);
+  await dialog.locator("fieldset", { hasText: r1 }).locator(".member-suggestion", { hasText: netA }).click();
+  const exportB = dialog.locator("fieldset", { hasText: r2 }).locator(".member-add input");
+  await exportB.fill(netB);
+  await dialog.locator("fieldset", { hasText: r2 }).locator(".member-suggestion", { hasText: netB }).click();
 
   await waitTopology(request, id, (doc) => {
     const f = doc.topology.links[0].filter;
-    return !!f && f.aExports.includes("lf-net-a") && f.bExports.includes("lf-net-b");
+    return !!f && f.aExports.includes(netA) && f.bExports.includes(netB);
   });
+  await dialog.getByRole("button", { name: "Закрыть" }).click();
 
-  await contextMenuItem(page, 550, 300, "Редактировать");
-  await panel.getByRole("button", { name: "Вернуть обычную" }).click();
-  await panel.getByRole("button", { name: "Применить" }).click();
-  await expect(panel).toBeHidden();
-
+  // Возврат в обычную из таблицы.
+  await row.getByRole("button", { name: "Обычная" }).click();
   await waitTopology(request, id, (doc) => doc.topology.links[0].filter == null);
 });

@@ -7,6 +7,7 @@ import { uniqueNameHint } from "../lib/validate";
 import DataTable, { type Column } from "../components/ui/DataTable";
 import Modal from "../components/ui/Modal";
 import { notify } from "../components/notify";
+import { DeleteIcon, EditIcon } from "../components/icons";
 
 type Draft = { index: number; name: string; description: string };
 
@@ -93,8 +94,8 @@ export default function UnionsPage() {
       title: "",
       render: (r) => (
         <>
-          <button type="button" className="icon-btn edit" title={`Изменить объединение ${r.name}`} onClick={() => open(rows.indexOf(r))} />
-          <button type="button" className="icon-btn delete" title={`Удалить объединение ${r.name}`} onClick={() => remove(rows.indexOf(r))} />
+          <button type="button" className="icon-btn edit" title={`Изменить объединение ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
+          <button type="button" className="icon-btn delete" title={`Удалить объединение ${r.name}`} onClick={() => remove(rows.indexOf(r))}><DeleteIcon /></button>
         </>
       ),
     },

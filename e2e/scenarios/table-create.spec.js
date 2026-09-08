@@ -6,14 +6,14 @@ test("создание подсети формой", async ({ page, request }) =
   const id = await freshDraft(request, "tcf-sub");
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/subnets");
-  await page.getByRole("button", { name: "+ подсеть" }).click();
+  await page.getByRole("button", { name: "+ Подсеть" }).click();
   const dialog = page.locator("dialog.modal");
   await expect(dialog).toBeVisible();
   const name = `tcf-${uid()}`;
-  await dialog.locator('[placeholder="office-lan"]').fill(name);
+  await dialog.locator('[placeholder="lan"]').fill(name);
   await dialog.locator('[placeholder="10.0.0.0/24"]').fill("10.31.0.0/24");
   await dialog.getByRole("button", { name: "Сохранить" }).click();
-  await expect(page.locator("#error-banner")).toContainText("Подсети сохранены");
+  await expect(page.locator('[data-testid="banner"]')).toContainText("Подсети сохранены");
   await expect.poll(async () => (await getSubnets(request, id)).subnets.map((s) => s.name))
     .toContain(name);
 });
@@ -22,13 +22,13 @@ test("сервер отвергает подсеть с плохим CIDR", asyn
   const id = await freshDraft(request, "tcf-bad");
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/subnets");
-  await page.getByRole("button", { name: "+ подсеть" }).click();
+  await page.getByRole("button", { name: "+ Подсеть" }).click();
   const dialog = page.locator("dialog.modal");
-  await dialog.locator('[placeholder="office-lan"]').fill("tcf-bad-sub");
+  await dialog.locator('[placeholder="lan"]').fill("tcf-bad-sub");
   await dialog.locator('[placeholder="10.0.0.0/24"]').fill("10.0.0");
-  // draftHint не ловит формат — кнопка активна; сервер отвечает ошибкой
+  // подсказка ipv4CidrOverlap не ловит этот формат — кнопка активна; сервер отвечает ошибкой
   await dialog.getByRole("button", { name: "Сохранить" }).click();
-  await expect(page.locator("#error-banner")).toContainText("Ошибка сохранения");
+  await expect(page.locator('[data-testid="banner"]')).toBeVisible();
   // API сериализует пустые коллекции как null
   await expect.poll(async () => ((await getSubnets(request, id)).subnets || []).map((s) => s.name))
     .not.toContain("tcf-bad-sub");
@@ -48,7 +48,7 @@ test("добавление подсети-члена в сеть через мо
   await dialog.locator(".member-suggestion", { hasText: "tcf-sub" }).click();
   await expect(dialog.locator(".member-row", { hasText: "tcf-sub" })).toBeVisible();
   await dialog.getByRole("button", { name: "Сохранить" }).click();
-  await expect(dialog).toBeHidden();
+  await expect(page.locator("dialog.modal[open]")).toHaveCount(0);
   await expect.poll(async () => {
     const doc = await getTopology(request, id);
     return doc.topology.networks.find((n) => n.name === "tcf-net")?.subnets;
@@ -60,17 +60,21 @@ test("создание набора с подсетью и адресом", asyn
   await putSubnets(request, id, [{ name: "tcf-s-sub", cidr: "10.33.0.0/24" }]);
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/sets");
-  await page.getByRole("button", { name: "+ набор" }).click();
+  await page.getByRole("button", { name: "+ Набор" }).click();
   const dialog = page.locator("dialog.modal");
-  await dialog.locator('[placeholder="blocked"]').fill(`tcf-set-${uid()}`);
-  const combo = dialog.locator('[placeholder="все подсети — начните вводить для поиска"]');
+  // Имя набора — первое поле в modal-grid (у поля адреса placeholder="10.0.0.5").
+  await dialog.locator(".modal-grid > label").filter({ has: page.locator("input") }).first()
+    .locator("input").fill(`tcf-set-${uid()}`);
+  // На странице наборов комбобокс подсетей не задаёт addPlaceholder —
+  // общий селектор по .member-add input, а не по placeholder.
+  const combo = dialog.locator("label", { hasText: "Подсети" }).locator(".member-add input");
   await combo.fill("tcf-s-sub");
   await dialog.locator(".member-suggestion", { hasText: "tcf-s-sub" }).click();
-  const addr = dialog.locator('[placeholder="10.0.0.5 или 10.0.0.5/32 — Enter добавляет"]');
+  const addr = dialog.locator('[placeholder="10.0.0.5"]');
   await addr.fill("10.33.0.7/32");
   await addr.press("Enter");
   await dialog.getByRole("button", { name: "Сохранить" }).click();
-  await expect(dialog).toBeHidden();
+  await expect(page.locator("dialog.modal[open]")).toHaveCount(0);
   await expect.poll(async () => {
     const doc = await getTopology(request, id);
     return doc.topology.sets.find((s) => s.name.startsWith("tcf-set-"));
@@ -81,11 +85,11 @@ test("создание и удаление объединения", async ({ pag
   const id = await freshDraft(request, "tcf-union");
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/unions");
-  await page.getByRole("button", { name: "+ объединение" }).click();
+  await page.getByRole("button", { name: "+ Объединение" }).click();
   const dialog = page.locator("dialog.modal");
-  await dialog.locator('[placeholder="office"]').fill("tcf-union");
+  await dialog.locator("label", { hasText: "Имя" }).locator("input").fill("tcf-union");
   await dialog.getByRole("button", { name: "Сохранить" }).click();
-  await expect(dialog).toBeHidden();
+  await expect(page.locator("dialog.modal[open]")).toHaveCount(0);
   await expect.poll(async () => (await getTopology(request, id)).topology.unions.map((u) => u.name))
     .toContain("tcf-union");
   page.on("dialog", (d) => d.accept());

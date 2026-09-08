@@ -9,6 +9,7 @@ import DataTable, { type Column } from "../components/ui/DataTable";
 import MemberList from "../components/ui/MemberList";
 import Modal from "../components/ui/Modal";
 import { notify } from "../components/notify";
+import { EditIcon } from "../components/icons";
 
 type Row = { key: string; index: number; a: string; b: string; filter: LinkDoc["filter"] };
 
@@ -113,7 +114,7 @@ export default function LinksPage() {
       title: "",
       render: (r) => (r.filter ? (
         <>
-          <button type="button" className="icon-btn edit" title={`Изменить фильтр связи ${r.a} ↔ ${r.b}`} onClick={() => open(r.index)} />
+          <button type="button" className="icon-btn edit" title={`Изменить фильтр связи ${r.a} ↔ ${r.b}`} onClick={() => open(r.index)}><EditIcon /></button>
           <button type="button" className="btn-link" title={`Вернуть обычной связь ${r.a} ↔ ${r.b}`} onClick={() => setFilter(r, undefined)}>Обычная</button>
         </>
       ) : (

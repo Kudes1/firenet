@@ -5,6 +5,7 @@ import {
 import type { DraftDiffEntry, DraftResponse } from "../api/types";
 import { useDraft } from "../draft/DraftContext";
 import { notify } from "../components/notify";
+import { DeleteIcon } from "../components/icons";
 
 const CHANGE_LABEL: Record<string, string> = { added: "добавлено", modified: "изменено", removed: "удалено" };
 
@@ -104,7 +105,7 @@ export default function DraftsPage() {
                 {me.data?.role === "admin" && d.status !== "merged" && (
                   <button type="button" className="btn-link" title={`Подтвердить черновик ${d.name}`} onClick={() => onConfirm(d)}>Подтвердить</button>
                 )}
-                <button type="button" className="icon-btn delete" title={`Удалить черновик ${d.name}`} onClick={() => onDelete(d)} />
+                <button type="button" className="icon-btn delete" title={`Удалить черновик ${d.name}`} onClick={() => onDelete(d)}><DeleteIcon /></button>
               </td>
             </tr>
           ))}

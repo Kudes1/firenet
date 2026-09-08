@@ -124,6 +124,7 @@ function TopologyCanvasInner({
   return (
     <div
       className="canvas-wrap"
+      data-testid="topo-canvas"
       style={{ width: "100%", height: "100%" }}
       onClick={handlePaneClick}
       onKeyDown={handleKeyDown}

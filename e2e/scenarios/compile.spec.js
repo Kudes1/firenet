@@ -48,6 +48,6 @@ test("компиляция молча опускает правило с нед�
   await page.locator("#compile-run").click();
   // правило без физического пути никому не ставится; компилятор молча
   // возвращает пустой список — баннера нет (compiler.Compile, err == nil)
-  await expect(page.locator("#error-banner")).toBeHidden();
+  await expect(page.locator('[data-testid="banner"]')).toBeHidden();
   await expect(page.locator("#compile-output")).not.toContainText("cpb-r1");
 });

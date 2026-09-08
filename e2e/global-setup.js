@@ -39,9 +39,13 @@ export async function waitForPostgres(container) {
   });
 }
 
-export function cleanupSetupResources(container, server) {
-  if (server?.pid) {
-    try { process.kill(server.pid, "SIGTERM"); } catch { /* уже умер */ }
+// Порядок важен: сначала фронтенд, потом бэкенд. Если убить backend первым,
+// Vite-прокси начнёт возвращать 502, но сам процесс останется висеть.
+export function cleanupSetupResources(container, server, frontend) {
+  for (const proc of [frontend, server]) {
+    if (proc?.pid) {
+      try { process.kill(proc.pid, "SIGTERM"); } catch { /* уже умер */ }
+    }
   }
   if (container) {
     try { execSync(`docker rm -f ${container}`, { stdio: "pipe" }); } catch { /* уже удалён */ }
@@ -51,6 +55,7 @@ export function cleanupSetupResources(container, server) {
 export default async function globalSetup() {
   let container;
   let server;
+  let frontend;
   try {
     const pgPort = await freePort();
     container = `firenet-e2e-pg-${Date.now()}`;
@@ -76,23 +81,42 @@ export default async function globalSetup() {
       stdio: "inherit",
     });
 
-    const baseURL = `http://127.0.0.1:${appPort}`;
-    const ready = async () => {
-      const res = await fetch(`${baseURL}/api/login`, {
+    const backendReady = async () => {
+      const res = await fetch(`http://127.0.0.1:${appPort}/api/login`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(ADMIN),
       });
       return res.ok;
     };
-    await waitFor("сервер firenet", ready, 60_000);
+    await waitFor("сервер firenet", backendReady, 60_000);
     // Успешный логин уже означает, что Postgres и миграции готовы; отдельной
     // проверки pg_isready не нужно.
 
+    // Playwright ходит на Vite: он же отдаёт статику React-приложения и
+    // проксирует /api на бэкенд — один origin, cookie-сессия работает.
+    const fePort = await freePort();
+    frontend = spawn("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", String(fePort), "--strictPort"], {
+      cwd: new URL("../frontend", import.meta.url).pathname,
+      env: {
+        ...process.env,
+        // Прокси Vite должен знать, где бэкенд: dev-режим вне compose.
+        VITE_API_TARGET: `http://127.0.0.1:${appPort}`,
+      },
+      stdio: "inherit",
+    });
+
+    const baseURL = `http://127.0.0.1:${fePort}`;
+    await waitFor("frontend", async () => {
+      const res = await fetch(baseURL + "/");
+      return res.ok;
+    }, 60_000);
+
     fs.writeFileSync(ENV_FILE, JSON.stringify({ baseURL, container, admin: ADMIN }));
     fs.writeFileSync(new URL("./.e2e-server.pid", import.meta.url), String(server.pid));
+    fs.writeFileSync(new URL("./.e2e-frontend.pid", import.meta.url), String(frontend.pid));
   } catch (error) {
-    cleanupSetupResources(container, server);
+    cleanupSetupResources(container, server, frontend);
     throw error;
   }
 }

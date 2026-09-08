@@ -85,6 +85,9 @@
 * { box-sizing: border-box; }
 [hidden], [x-cloak] { display: none !important; }
 html, body { height: 100%; }
+/* React монтируется в #root; легаси клал разметку прямо в flex-body, поэтому
+   без явного размера #root сжимается по контенту и ломает всю раскладку. */
+#root { width: 100%; height: 100%; }
 body {
   margin: 0;
   display: flex;
@@ -292,6 +295,16 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   background:
     radial-gradient(circle, var(--border) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--bg);
+}
+
+/* Оболочка Layout: сайдбар и main в строку на всю высоту экрана —
+   легаси держал их прямыми детьми flex-body, React-версия заворачивает
+   их в этот div, поэтому flex-геометрия должна жить здесь. */
+.app-shell {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
 }
 #topo-canvas, #diag-canvas { display: block; width: 100%; height: 100%; }
 /* обе карты — интерактивный холст: жесты касания ведут камеру, а не скролл */

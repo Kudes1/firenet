@@ -37,7 +37,12 @@ export default function DataTable<T>({ columns, rows, rowKey, empty, actions, hi
         <div className="toolbar-text">{hint}</div>
         <div className="toolbar-actions">
           {searchable.length > 0 && (
-            <button type="button" className="btn-search" title="Поиск" onClick={() => setSearchOpen(!searchOpen)} />
+            <button type="button" className="btn-search secondary" title="Поиск" onClick={() => setSearchOpen(!searchOpen)}>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+                <circle cx="6.5" cy="6.5" r="4.25" />
+                <path d="m13.2 13.2-4.3-4.3" />
+              </svg>
+            </button>
           )}
           {actions}
         </div>

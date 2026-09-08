@@ -14,10 +14,10 @@ test("переключение фильтра связи из таблицы с�
   await openTablePage(page, id, "/ui/links");
   const row = page.locator("tbody tr").first();
   await expect(row).toContainText("обычная");
-  await row.getByRole("button", { name: "Сделать фильтрованной" }).click();
+  await row.getByRole("button", { name: "Фильтровать" }).click();
   await expect.poll(async () => (await getTopology(request, id)).topology.links[0].filter)
     .toEqual({ aExports: [], bExports: [] });
-  await row.getByRole("button", { name: "Вернуть обычную" }).click();
+  await row.getByRole("button", { name: "Обычная" }).click();
   await expect.poll(async () => (await getTopology(request, id)).topology.links[0].filter)
     .toBeUndefined();
 });

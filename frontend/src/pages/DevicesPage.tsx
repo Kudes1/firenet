@@ -7,6 +7,7 @@ import { uniqueNameHint } from "../lib/validate";
 import DataTable, { type Column } from "../components/ui/DataTable";
 import Modal from "../components/ui/Modal";
 import { notify } from "../components/notify";
+import { DeleteIcon, EditIcon } from "../components/icons";
 
 type Draft = { index: number; name: string; kind: string; union: string; description: string };
 
@@ -105,8 +106,8 @@ export default function DevicesPage() {
       title: "",
       render: (r) => (
         <>
-          <button type="button" className="icon-btn edit" title={`Изменить устройство ${r.name}`} onClick={() => open(rows.indexOf(r))} />
-          <button type="button" className="icon-btn delete" title={`Удалить устройство ${r.name}`} onClick={() => remove(rows.indexOf(r))} />
+          <button type="button" className="icon-btn edit" title={`Изменить устройство ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
+          <button type="button" className="icon-btn delete" title={`Удалить устройство ${r.name}`} onClick={() => remove(rows.indexOf(r))}><DeleteIcon /></button>
         </>
       ),
     },

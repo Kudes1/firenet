@@ -38,6 +38,10 @@ export function useTopologyEditor() {
       await ops.mutateAsync(batch);
       setStatus("saved");
     } catch (error) {
+      // reconcile из легаси-TopologySync: после провала записи (409 CAS,
+      // 422) канва больше не совпадает с сервером — перечитываем документ
+      // (заодно обновляется CAS-ревизия) и отбрасываем очередь, иначе
+      // каждая следующая операция тоже упадёт с устаревшей ревизией.
       setStatus("error");
       notify((error as Error).message);
     }

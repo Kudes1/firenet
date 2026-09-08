@@ -5,6 +5,7 @@ import type { UserResponse, UserRole } from "../api/types";
 import { containsFold } from "../lib/search";
 import Modal from "../components/ui/Modal";
 import { notify } from "../components/notify";
+import { DeleteIcon } from "../components/icons";
 
 type Invite = { username: string; url: string };
 
@@ -106,7 +107,7 @@ export default function UsersPage() {
                   <button type="button" className="btn-link" title={`Показать ссылку для ${u.username}`} onClick={() => showInvite(u)}>Ссылка</button>
                 )}
                 {u.id !== me.data?.id && (
-                  <button type="button" className="icon-btn delete" title={`Удалить пользователя ${u.username}`} onClick={() => remove(u)} />
+                  <button type="button" className="icon-btn delete" title={`Удалить пользователя ${u.username}`} onClick={() => remove(u)}><DeleteIcon /></button>
                 )}
               </td>
             </tr>

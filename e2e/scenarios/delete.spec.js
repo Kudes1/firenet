@@ -14,48 +14,22 @@ async function arrangeDeviceWithLink(request, id) {
   });
 }
 
-// selectSearchResult выделяет поисковый хит кликом в центр канваса и
-// удаляет его. Клик во время полёта камеры (tween 180ms после поиска) может
-// зацепить провод привязки или связь: #topo-delete при этом активируется, а
-// связи и привязки удаляются молча, без confirm (topology.js: setupDeleteButton).
-// Поэтому цель проверяем по тексту подтверждающего диалога: не тот объект —
-// диалог отклоняем и выбираем заново; после остановки полёта центр канваса
-// попадает в сам узел.
-async function selectSearchResult(page, query, expectDeleted) {
-  await page.locator("#topo-search-toggle").click();
-  await page.locator("#topo-search").fill(query);
-  const box = await page.locator("#topo-canvas").boundingBox();
-  if (!box) throw new Error("канвас не виден");
-  const canvas = page.locator("#topo-canvas");
-  const remove = page.locator("#topo-delete");
-  const select = () => expect.poll(async () => {
-    await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
-    return remove.isEnabled();
-  }, { timeout: 2_000 }).toBe(true);
-  for (;;) {
-    await select();
-    const dialogP = page.waitForEvent("dialog", { timeout: 5_000 });
-    dialogP.catch(() => {});
-    const silentP = page
-      .waitForFunction(() => document.getElementById("topo-delete").disabled, null, { timeout: 5_000 })
-      .then(() => null);
-    silentP.catch(() => {});
-    const clickP = remove.click();
-    const dialog = await Promise.race([dialogP, silentP]);
-    const matched = !!dialog && dialog.message().includes(expectDeleted);
-    if (dialog) await (matched ? dialog.accept() : dialog.dismiss());
-    await clickP;
-    if (matched) return;
-  }
-}
+// Выделение узла кликом по его телу и удаление кнопкой тулбара.
+// React-версия удаляет выбранные узлы сразу, без подтверждающего диалога.
 
 test("удаление устройства со связью убирает и связь", async ({ page, request }) => {
   const id = await freshDraft(request, "delete-device");
   await arrangeDeviceWithLink(request, id);
+  // Камера по умолчанию: мировые координаты == экранным, иначе fitView
+  // подгонит масштаб и клик по узлу попадёт не туда.
+  await op(request, id, { kind: "set-camera", camera: { x: 0, y: 0, z: 1 } });
   await loginViaUI(page);
   await openWithDraft(page, id, "/ui/topology");
 
-  await selectSearchResult(page, "d-r1", "устройство d-r1");
+  const node = page.locator('[data-testid="topo-canvas"] [data-testid="rf__node-device:d-r1"]');
+  await expect(node).toBeVisible();
+  await node.click({ position: { x: 30, y: 20 } });
+  await page.locator('[data-testid="topo-delete"]').click();
 
   await waitTopology(request, id, (doc) => doc.topology.devices.every((d) => d.name !== "d-r1"));
   const doc = await getTopology(request, id);
@@ -76,10 +50,14 @@ test("удаление сети чистит экспорты фильтров",
     link: { a: { device: "d-r1" }, b: { device: "d-r2" } },
     filter: { aExports: ["dn-net"], bExports: [] },
   });
+  await op(request, id, { kind: "set-camera", camera: { x: 0, y: 0, z: 1 } });
   await loginViaUI(page);
   await openWithDraft(page, id, "/ui/topology");
 
-  await selectSearchResult(page, "dn-net", "сеть dn-net");
+  const node = page.locator('[data-testid="topo-canvas"] [data-testid="rf__node-network:dn-net"]');
+  await expect(node).toBeVisible();
+  await node.click({ position: { x: 40, y: 20 } });
+  await page.locator('[data-testid="topo-delete"]').click();
 
   await waitTopology(request, id, (doc) => (doc.topology.networks || []).length === 0);
   const doc = await getTopology(request, id);
@@ -108,7 +86,7 @@ test("удаление подсети-члена сети блокируется
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator("tbody tr", { hasText: "dns-sub" }).locator(".icon-btn.delete").click();
 
-  await expect(page.locator("#error-banner")).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator('[data-testid="banner"]')).toBeVisible({ timeout: 5_000 });
   const doc = await getSubnets(request, id);
   expect(doc.subnets.map((s) => s.name)).toContain("dns-sub");
 });

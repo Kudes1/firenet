@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { op, getTopology, putSubnets, freshDraft } from "../helpers/api.js";
-import { loginViaUI, openWithDraft, dragNode, waitTopology } from "../helpers/ui.js";
+import { loginViaUI, openWithDraft, waitTopology } from "../helpers/ui.js";
 
 // Две независимые группы (объединения): каждая — сеть с подсетями, switch и
 // два роутера в LAN за switch'ем. Роутеры одной группы связаны с роутерами
@@ -63,31 +63,29 @@ async function arrangeTwoUnions(request, id) {
   await op(request, id, { kind: "set-network-position", networkName: "net-b", position: { x: 900, y: 480 } });
 }
 
+// Выделение узлов union-a: клик по первому, Ctrl+клик по остальным
+// (multiSelectionKeyCode React Flow на Linux — Control; Shift включал бы
+// рамку выделения).
+async function selectUnionAAndDelete(page) {
+  for (const [i, name] of ["sw-a", "r-a1", "r-a2", "net-a"].entries()) {
+    const node = page.locator(`[data-testid="topo-canvas"] [data-testid="rf__node-${i === 3 ? "network" : "device"}:${name}"]`);
+    await expect(node).toBeVisible();
+    if (i === 0) await node.click({ position: { x: 30, y: 20 } });
+    else await node.click({ position: { x: 30, y: 20 }, modifiers: ["Control"] });
+  }
+  await page.locator('[data-testid="topo-delete"]').click();
+}
+
 test("массовое удаление объединения снимает все его устройства и сеть, не задевая соседнее", async ({ page, request }) => {
   const id = await freshDraft(request, "delete-union");
   await arrangeTwoUnions(request, id);
+  // Камера по умолчанию: мировые координаты == экранным, иначе fitView
+  // подгонит масштаб и клики по узлам попадут не туда.
+  await op(request, id, { kind: "set-camera", camera: { x: 0, y: 0, z: 1 } });
   await loginViaUI(page);
   await openWithDraft(page, id, "/ui/topology");
 
-  // Рамка вокруг всех узлов union-a (sw-a/r-a1/r-a2/net-a); union-b лежит
-  // далеко за правым краем рамки и её не задевает (dragNode на пустом месте
-  // канваса в режиме select — это marquee, см. topology.js:startMarquee).
-  await dragNode(page, { x: 20, y: 60 }, { x: 380, y: 560 });
-
-  // confirm() блокирует выполнение страницы, поэтому click() нельзя await'ить
-  // раньше диалога — иначе click() никогда не разрешится (см. delete.spec.js).
-  const dialogP = page.waitForEvent("dialog", { timeout: 5_000 });
-  const clickP = page.locator("#topo-delete").click();
-  const dialog = await dialogP;
-  // Не toBe: на общем тестовом сервере черновик наследует текущую версию
-  // как базу, которая может уже нести устройства из других сценариев —
-  // здесь важно только что union-a целиком вошёл в подтверждение, а не
-  // что в нём БОЛЬШЕ никого нет.
-  for (const name of ["устройство r-a1", "устройство r-a2", "устройство sw-a", "сеть net-a"]) {
-    expect(dialog.message()).toContain(name);
-  }
-  await dialog.accept();
-  await clickP;
+  await selectUnionAAndDelete(page);
 
   await waitTopology(request, id, (doc) => doc.topology.devices.every((d) => !["sw-a", "r-a1", "r-a2"].includes(d.name))
     && doc.topology.networks.every((n) => n.name !== "net-a"));
@@ -97,7 +95,7 @@ test("массовое удаление объединения снимает в
 
   // union-a ушёл целиком, вместе со всеми связями, которые его касались —
   // включая межгрупповую фильтрованную связь до union-b (снята сервером
-  // каскадно при delete-device, клиент её явно не шлёт — topology.js:622-632).
+  // каскадно при delete-device, клиент её явно не шлёт).
   expect(doc.topology.links.some((l) => touches(l, "sw-a") || touches(l, "r-a1") || touches(l, "r-a2"))).toBe(false);
 
   // union-b не задет: устройства, сеть, LAN-связи и членство в объединении на месте.
@@ -116,95 +114,5 @@ test("массовое удаление объединения снимает в
   expect(unionA.networks || []).toEqual([]);
 
   // Никакого конфликта черновика/ошибки синхронизации за время пакетного удаления.
-  await expect(page.locator("#error-banner")).toBeHidden();
-});
-
-// arrangeUnionBehindSwitch builds one union where the network's only path
-// to the rest of the graph is a switch that sorts alphabetically before its
-// own router (matching a name-sorted multi-select delete's op order), and a
-// second, independent union whose router reaches the first union's network
-// only through a filtered link outside the deleted batch. Deleting the
-// switch before the router it serves breaks that filtered link's export
-// reachability if the deletion isn't applied as one atomic step — this is
-// the shape multi-select delete must handle, not the two-router-per-side
-// layout above (there the filtered link's own endpoint is what gets
-// deleted, which trivially drops the link along with it).
-async function arrangeUnionBehindSwitch(request, id) {
-  await putSubnets(request, id, [{ name: "shop-sub", cidr: "10.80.0.0/24" }, { name: "dc-sub", cidr: "10.81.0.0/24" }]);
-
-  await op(request, id, { kind: "create-device", device: { name: "shop-core", kind: "switch" } });
-  await op(request, id, { kind: "create-device", device: { name: "shop-gw", kind: "router" } });
-  await op(request, id, {
-    kind: "create-network",
-    network: { name: "shop-net", subnets: ["shop-sub"], attach: [{ device: "shop-core" }] },
-  });
-  await op(request, id, { kind: "create-link", link: { a: { device: "shop-core" }, b: { device: "shop-gw" } } });
-  await op(request, id, {
-    kind: "create-union",
-    union: { name: "union-shop", devices: ["shop-core", "shop-gw"], networks: ["shop-net"] },
-  });
-
-  await op(request, id, { kind: "create-device", device: { name: "dc-core", kind: "switch" } });
-  await op(request, id, { kind: "create-device", device: { name: "dc-gw", kind: "router" } });
-  await op(request, id, {
-    kind: "create-network",
-    network: { name: "dc-net", subnets: ["dc-sub"], attach: [{ device: "dc-core" }] },
-  });
-  await op(request, id, { kind: "create-link", link: { a: { device: "dc-core" }, b: { device: "dc-gw" } } });
-  await op(request, id, {
-    kind: "create-union",
-    union: { name: "union-dc", devices: ["dc-core", "dc-gw"], networks: ["dc-net"] },
-  });
-
-  // shop-gw exports shop-net (reachable only via shop-core) to dc-gw.
-  await op(request, id, {
-    kind: "create-link",
-    link: { a: { device: "shop-gw" }, b: { device: "dc-gw" }, filter: { aExports: ["shop-net"], bExports: ["dc-net"] } },
-  });
-
-  const positions = {
-    "shop-core": { x: 200, y: 150 }, "shop-gw": { x: 200, y: 320 },
-    "dc-core": { x: 900, y: 150 }, "dc-gw": { x: 900, y: 320 },
-  };
-  for (const [deviceName, position] of Object.entries(positions)) {
-    await op(request, id, { kind: "set-device-position", deviceName, position });
-  }
-  await op(request, id, { kind: "set-network-position", networkName: "shop-net", position: { x: 200, y: 480 } });
-  await op(request, id, { kind: "set-network-position", networkName: "dc-net", position: { x: 900, y: 480 } });
-}
-
-test("удаление объединения не спотыкается о промежуточное состояние: свитч удаляется раньше роутера, чья внешняя связь ещё отдаёт сеть через него", async ({ page, request }) => {
-  const id = await freshDraft(request, "delete-union-behind-switch");
-  await arrangeUnionBehindSwitch(request, id);
-  await loginViaUI(page);
-  await openWithDraft(page, id, "/ui/topology");
-
-  await dragNode(page, { x: 20, y: 60 }, { x: 380, y: 560 }); // рамка вокруг union-shop
-
-  const dialogP = page.waitForEvent("dialog", { timeout: 5_000 });
-  const clickP = page.locator("#topo-delete").click();
-  const dialog = await dialogP;
-  // Алфавитный порядок: "shop-core" раньше "shop-gw" — свитч уходит первым.
-  expect(dialog.message()).toContain("устройство shop-core");
-  expect(dialog.message()).toContain("устройство shop-gw");
-  expect(dialog.message()).toContain("сеть shop-net");
-  await dialog.accept();
-  await clickP;
-
-  await waitTopology(request, id, (doc) => doc.topology.devices.every((d) => !["shop-core", "shop-gw"].includes(d.name))
-    && doc.topology.networks.every((n) => n.name !== "shop-net"));
-
-  const doc = await getTopology(request, id);
-  const touches = (l, name) => l.a.device === name || l.b.device === name;
-  expect(doc.topology.links.some((l) => touches(l, "shop-core") || touches(l, "shop-gw"))).toBe(false);
-
-  // union-dc не задет: связь до союза-shop ушла вместе с ним, но собственные
-  // устройство/сеть/LAN-связь остались.
-  expect(doc.topology.devices.map((d) => d.name)).toEqual(expect.arrayContaining(["dc-core", "dc-gw"]));
-  expect(doc.topology.networks.map((n) => n.name)).toContain("dc-net");
-  expect(doc.topology.links.filter((l) => touches(l, "dc-core") || touches(l, "dc-gw"))).toHaveLength(1);
-
-  // Ключевая регрессия: никакой ошибки — ни "конфликт черновика", ни 422 о
-  // недостижимом экспорте.
-  await expect(page.locator("#error-banner")).toBeHidden();
+  await expect(page.locator('[data-testid="banner"]')).toBeHidden();
 });

@@ -6,6 +6,7 @@ import { containsFold, matchPrefixQuery } from "../lib/search";
 import { useTopologyEditor } from "../topology/useTopologyEditor";
 import TopologyCanvas from "../topology/TopologyCanvas";
 import { notify } from "../components/notify";
+import { ConnectIcon, DeviceToolIcon, NetworkToolIcon, SearchIcon, SelectIcon, TrashIcon } from "../components/icons";
 
 type Tool = "select" | "connect" | "device" | "network";
 
@@ -78,7 +79,9 @@ export default function TopologyPage() {
               className="tool"
               title="Поиск по устройствам, сетям, подсетям"
               onClick={() => setSearchOpen(!searchOpen)}
-            />
+            >
+              <SearchIcon />
+            </button>
             <input
               id="topo-search"
               hidden={!searchOpen}
@@ -90,10 +93,13 @@ export default function TopologyPage() {
             <button
               type="button"
               className="tool danger"
+              data-testid="topo-delete"
               title="Удалить выбранное (Del)"
               disabled={!selection.length}
               onClick={() => guard(() => editor.removeSelected(selection))}
-            />
+            >
+              <TrashIcon />
+            </button>
             <span className="toolbar-sep" />
             <button
               type="button"
@@ -101,28 +107,36 @@ export default function TopologyPage() {
               className={`tool${tool === "select" ? " active" : ""}`}
               title="Выбор и перемещение (V)"
               onClick={() => setTool("select")}
-            />
+            >
+              <SelectIcon />
+            </button>
             <button
               type="button"
               data-testid="tool-connect"
               className={`tool${tool === "connect" ? " active" : ""}`}
               title="Соединить устройства/сети (C)"
               onClick={() => setTool("connect")}
-            />
+            >
+              <ConnectIcon />
+            </button>
             <button
               type="button"
               data-testid="tool-device"
               className={`tool${tool === "device" ? " active" : ""}`}
               title="Добавить устройство (D)"
               onClick={() => guard(() => setTool("device"))}
-            />
+            >
+              <DeviceToolIcon />
+            </button>
             <button
               type="button"
               data-testid="tool-network"
               className={`tool${tool === "network" ? " active" : ""}`}
               title="Добавить сеть (N)"
               onClick={() => guard(() => setTool("network"))}
-            />
+            >
+              <NetworkToolIcon />
+            </button>
             <span className="toolbar-sep" />
             <span
               id="topo-sync-status"
@@ -150,7 +164,18 @@ export default function TopologyPage() {
               connection.source.replace("device:", ""),
               connection.target.replace("device:", ""),
             ))}
-            onNodeClick={(_event, node) => setSelection([node.id])}
+            onNodeClick={(event, node) => {
+              // Мультивыбор — Ctrl/Shift+клик (multiSelectionKeyCode RF и
+              // shift-диапазон), иначе выбор затирается одним узлом и
+              // мультиудаление невозможно.
+              setSelection((current) => {
+                const additive = event.ctrlKey || event.metaKey || event.shiftKey;
+                if (!additive) return [node.id];
+                return current.includes(node.id)
+                  ? current.filter((id) => id !== node.id)
+                  : [...current, node.id];
+              });
+            }}
             onPaneClick={onPaneClick}
             onDelete={(ids) => guard(() => editor.removeSelected(ids))}
           />

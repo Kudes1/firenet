@@ -52,7 +52,7 @@ test("waitForPostgres проверяет pg_isready до запуска серв
   try {
     await setup.waitForPostgres("firenet-e2e-pg-test");
     assert.deepEqual(fs.readFileSync(log, "utf8").trim().split("\n"), [
-      "exec", "firenet-e2e-pg-test", "pg_isready", "-U", "firenet", "-d", "firenet",
+      "exec", "firenet-e2e-pg-test", "pg_isready", "-h", "127.0.0.1", "-U", "firenet", "-d", "firenet",
     ]);
     const source = fs.readFileSync(new URL("./global-setup.js", import.meta.url), "utf8");
     assert.ok(source.indexOf("await waitForPostgres(container)") < source.indexOf("server = spawn("));

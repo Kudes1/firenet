@@ -4,6 +4,7 @@ import type { DiagnoseReport, LayoutDoc, MapMark, SpreadResult, TopologyDoc } fr
 import { layoutLinkKey } from "../lib/links";
 import TopologyCanvas from "../topology/TopologyCanvas";
 import { notify } from "../components/notify";
+import { ResetIcon } from "../components/icons";
 
 const FORM_KEY = "firenet-diag-form-v1";
 const EMPTY_TOPOLOGY: TopologyDoc = { devices: [], links: [], networks: [], sets: [], unions: [] };
@@ -105,7 +106,9 @@ export default function DiagnosePage() {
             <button type="button" data-testid="tool-path" className={`tool${panel === "path" ? " active" : ""}`} title="Диагностика пути" onClick={() => setPanel("path")} />
             <button type="button" data-testid="tool-spread" className={`tool${panel === "spread" ? " active" : ""}`} title="Распространение" onClick={() => setPanel("spread")} />
             <span className="toolbar-sep" />
-            <button type="button" className="tool" title="Сбросить" disabled={!report && !spreadMark} onClick={reset} />
+            <button type="button" className="tool" title="Сбросить" disabled={!report && !spreadMark} onClick={reset}>
+              <ResetIcon />
+            </button>
           </div>
 
           <TopologyCanvas topology={doc} layout={layout} editable={false} markOf={markOf} />

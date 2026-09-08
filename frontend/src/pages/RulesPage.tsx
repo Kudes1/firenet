@@ -7,6 +7,7 @@ import Combo from "../components/ui/Combo";
 import MemberList from "../components/ui/MemberList";
 import Modal from "../components/ui/Modal";
 import { notify } from "../components/notify";
+import { DeleteIcon, EditIcon } from "../components/icons";
 
 type RuleDraft = {
   index: number; name: string; comment: string; src: string[]; dst: string[];
@@ -30,6 +31,12 @@ export default function RulesPage() {
   const [chainEditing, setChainEditing] = useState(false);
   const [chainDraft, setChainDraft] = useState<ChainDoc | null>(null);
   const [highlighted, setHighlighted] = useState<string[]>([]);
+  // Крестик прячет панель до следующего «Проверить» (как lintOpen в rules.js:
+  // refetch в легаси заново открывал панель — здесь роль lintOpen играет
+  // отсутствие refetch после закрытия).
+  const [lintOpen, setLintOpen] = useState(false);
+  const findings = lint.data?.findings ?? [];
+  const showLint = lintOpen && findings.length > 0;
 
   const chains = rules.data?.chains ?? [];
   const chain = chains[active];
@@ -215,19 +222,19 @@ export default function RulesPage() {
       <div className="table-toolbar">
         <div className="toolbar-text"><h3>Правила</h3></div>
         <div className="toolbar-actions">
-          <button type="button" onClick={() => void lint.refetch()}>Проверить</button>
+          <button type="button" onClick={() => { setLintOpen(true); void lint.refetch(); }}>Проверить</button>
           <button type="button" className="primary" title="Добавить правило" onClick={() => openRule(-1)}>+ Правило</button>
         </div>
       </div>
 
-      {lint.data && !!lint.data.findings?.length && (
+      {showLint && (
         <div className="lint-panel" data-testid="lint-panel">
           <div className="lint-panel-header">
             <strong>Замечания</strong>
-            <button type="button" className="lint-panel-close" onClick={() => void lint.refetch()}>×</button>
+            <button type="button" className="lint-panel-close" onClick={() => setLintOpen(false)}>×</button>
           </div>
           <div className="lint-panel-body">
-            {lint.data.findings?.map((f, i) => (
+            {findings.map((f, i) => (
               <button type="button" className="lint-finding" key={i} onClick={() => jumpToFinding(f.rules, f.chain)}>
                 <span className={`badge badge-${f.severity === "warning" ? "warn" : "info"}`}>{f.severity}</span>
                 <span className="lint-finding-chain">{f.chain}</span>
@@ -262,8 +269,8 @@ export default function RulesPage() {
               <td>{r.action}{r.jumpTo ? ` → ${r.jumpTo}` : ""}</td>
               <td>{r.mirror ? "да" : "—"}</td>
               <td>
-                <button type="button" className="icon-btn edit" title={`Изменить правило ${r.name}`} onClick={() => openRule(i)} />
-                <button type="button" className="icon-btn delete" title={`Удалить правило ${r.name}`} onClick={() => removeRule(i)} />
+                <button type="button" className="icon-btn edit" title={`Изменить правило ${r.name}`} onClick={() => openRule(i)}><EditIcon /></button>
+                <button type="button" className="icon-btn delete" title={`Удалить правило ${r.name}`} onClick={() => removeRule(i)}><DeleteIcon /></button>
               </td>
             </tr>
           ))}
