@@ -5879,7 +5879,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 > 5. **`navigator.clipboard` в jsdom отсутствует.** В реализации `UsersPage` он вызывается напрямую (`navigator.clipboard.writeText`), поэтому тест «copies the invite link» подменяет его через `Object.assign(navigator, { clipboard: ... })`. Если jsdom/версия изменится — этот трюк надо сохранить.
 > 6. **`users.error` в UsersPage — не мгновенный.** Пока `useUsers()` не завершился, `users.error` равен `null`, поэтому баннер «Доступ только для администраторов» появляется только после ответа `/api/users` (403). Проверки баннера должны идти через `findBy...` (polling), а не `getBy...` — так в тестах и сделано.
 
-- [ ] **Step 1: Написать `frontend/src/pages/DraftsPage.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/pages/DraftsPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -5986,7 +5986,7 @@ describe("DraftsPage", () => {
 });
 ```
 
-- [ ] **Step 2: Реализовать `frontend/src/pages/DraftsPage.tsx`**
+- [x] **Step 2: Реализовать `frontend/src/pages/DraftsPage.tsx`**
 
 ```tsx
 import { useState } from "react";
@@ -6133,7 +6133,7 @@ export default function DraftsPage() {
 }
 ```
 
-- [ ] **Step 3: Написать `frontend/src/pages/UsersPage.test.tsx`**
+- [x] **Step 3: Написать `frontend/src/pages/UsersPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -6216,7 +6216,7 @@ describe("UsersPage", () => {
 });
 ```
 
-- [ ] **Step 4: Реализовать `frontend/src/pages/UsersPage.tsx`**
+- [x] **Step 4: Реализовать `frontend/src/pages/UsersPage.tsx`**
 
 ```tsx
 import { useState } from "react";
@@ -6385,7 +6385,7 @@ export default function UsersPage() {
 }
 ```
 
-- [ ] **Step 5: Зарегистрировать маршруты**
+- [x] **Step 5: Зарегистрировать маршруты**
 
 ```tsx
 import DraftsPage from "./pages/DraftsPage";
@@ -6395,7 +6395,7 @@ import UsersPage from "./pages/UsersPage";
         <Route path="/ui/users" element={<UsersPage />} />
 ```
 
-- [ ] **Step 6: Запустить тесты**
+- [x] **Step 6: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -6403,11 +6403,18 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): drafts and users pages"
 ```
+
+> **Правки относительно кода из плана (выявлены при реализации).**
+> 1. **MSW 2 не матчит query-параметры, записанные в URL хендлера.** Хендлер `http.get("/api/drafts?all=1", ...)` молча не срабатывает (предупреждение о «redundant usage of query parameters» в stderr), и «чужой» черновик не появляется. Заменено на один хендлер `http.get("/api/drafts", ...)`, разбирающий `new URL(request.url).searchParams.has("all")`.
+> 2. **URL приглашения живёт в `<input readOnly value=...>`, а не в тексте.** `findByText("http://host/invite/tok")` его не находит — заменено на `findByDisplayValue(...)`.
+> 3. **`navigator.clipboard` — только геттер:** `Object.assign(navigator, { clipboard })` падает с «Cannot set property». Заменено на `Object.defineProperty(navigator, "clipboard", { value, configurable: true })`.
+> 4. **`userEvent.setup()` подменяет `navigator.clipboard` своим стабом.** Спай, установленный до `renderPage`, затирается (проверено диагностикой: `navigator.clipboard.writeText === writeText` даёт `false`). Спай ставится сразу после `renderPage`; кроме того, `server.use(...)` перенесён до `renderPage`, иначе первый запрос `/api/users` уходит без хендлера.
+> 5. **App.test.tsx ожидал заглушки для `/ui/drafts` и `/ui/users`** — после регистрации реальных страниц они падали; убраны из списка заглушек и добавлены в список реальных страниц (как это делалось в задачах 10–15).
 
 ---
 
