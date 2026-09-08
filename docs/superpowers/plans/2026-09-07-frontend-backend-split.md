@@ -6811,7 +6811,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 **Если при исполнении `npm test` падает на `getByTestId("link:...")` (ребро) или на отсутствии `diag-flow-ok` в классам — это пункты 4 и 2 выше, а не ошибки сборки.**
 
-- [ ] **Step 1: Добавить ResizeObserver в `frontend/src/test/setup.ts`**
+- [x] **Step 1: Добавить ResizeObserver в `frontend/src/test/setup.ts`**
 
 React Flow измеряет контейнер; в jsdom нет ResizeObserver, поэтому тесты падают без заглушки.
 
@@ -6839,7 +6839,9 @@ if (!("DOMMatrixReadOnly" in globalThis)) {
 }
 ```
 
-- [ ] **Step 2: Написать `frontend/src/topology/TopologyCanvas.test.tsx`**
+- [x] **Step 2: Написать `frontend/src/topology/TopologyCanvas.test.tsx`**
+
+> **Правка относительно исходного черновика (см. Step 3).** Черновые проверки `getByText("r1")` / `getByText("office")` не проходят дважды: label рендерится как «r1 (router)» (точный матч не срабатывает), а текст внутри `<span class="node-label">` разбит Реактом на несколько текстовых узлов (regex-матч ловит «multiple elements»). Итоговый тест проверяет текст через обёртку узла: `getByTestId("rf__node-device:r1")` → `toHaveTextContent("r1")` и аналогично для `network:office`.
 
 ```tsx
 import { render, screen } from "@testing-library/react";
@@ -6911,7 +6913,7 @@ describe("TopologyCanvas", () => {
 });
 ```
 
-- [ ] **Step 3: Запустить — тест падает**
+- [x] **Step 3: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -6919,7 +6921,9 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './TopologyCanvas'`.
 
-- [ ] **Step 4: Создать `frontend/src/topology/DeviceNode.tsx`**
+> **Правка относительно исходного черновика (выявлено исполнением, см. Step 7).** Падает не только «Cannot find module»: после создания компонентов из черновика два теста красные — «renders one node per…» и «renders links and attachments». Причина в RF 12 (подтверждено по исходникам `@xyflow/react` 12.11.6 / `@xyflow/system`): ребро рендерится только для «инициализированных» узлов — `isNodeInitialized` требует `node.measured.width` (появляется через ResizeObserver, которого в jsdom нет) **и** `internals.handleBounds || node.handles?.length`, а `getEdgePosition` при неинициализированных концах возвращает null. Замечание «камень №2» про mark — верно, но камень №4 про рёбра неполон: рёбра не рисуются не из-за testid, а из-за неинициализированных узлов.
+
+- [x] **Step 4: Создать `frontend/src/topology/DeviceNode.tsx`**
 
 ```tsx
 import { Handle, Position, type NodeProps } from "@xyflow/react";
@@ -6959,7 +6963,7 @@ export const DeviceNode = memo(function DeviceNode({ data, selected, isConnectab
 });
 ```
 
-- [ ] **Step 5: Создать `frontend/src/topology/NetworkNode.tsx`**
+- [x] **Step 5: Создать `frontend/src/topology/NetworkNode.tsx`**
 
 ```tsx
 import { Handle, Position, type NodeProps } from "@xyflow/react";
@@ -6986,7 +6990,7 @@ export const NetworkNode = memo(function NetworkNode({ data, selected, isConnect
 });
 ```
 
-- [ ] **Step 6: Создать `frontend/src/topology/LinkEdge.tsx`**
+- [x] **Step 6: Создать `frontend/src/topology/LinkEdge.tsx`**
 
 ```tsx
 import { BaseEdge, getSmoothStepPath, type EdgeProps } from "@xyflow/react";
@@ -7040,7 +7044,9 @@ export function LinkEdge({
 }
 ```
 
-- [ ] **Step 7: Создать `frontend/src/topology/TopologyCanvas.tsx`**
+- [x] **Step 7: Создать `frontend/src/topology/TopologyCanvas.tsx`**
+
+> **Правка относительно исходного черновика (устраняет красные тесты из Step 3).** Черновик добавлял к узлам только `className`. Итоговый код добавляет каждому узлу декларативные `width`/`height` и проп `handles` (координаты хэндлов в локальных координатах узла): в jsdom ResizeObserver не работает, и без этого рёбра не рендерятся (см. правку в Step 3). В браузере поведение не меняется: размеры узлов фиксированы (`DEVICE_W/H`, `NET_W/H`), а при наличии DOM-замера `internals.handleBounds` имеет приоритет над декларативным пропом (`getEdgePosition`: `sourceNode.internals.handleBounds || toHandleBounds(sourceNode.handles)`). Заодно импортируются `DEVICE_H`, `DEVICE_W`, `NET_H`, `NET_W`, `type SceneNode`, `Position`, а `onNodeDragStop` использует `_event` — черновик с `event` не проходит `noUnusedParameters`.
 
 ```tsx
 import {
@@ -7125,15 +7131,15 @@ export default function TopologyCanvas({
 }
 ```
 
-- [ ] **Step 8: Запустить тесты**
+- [x] **Step 8: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
 ```
 
-Expected: зелёные. Если падает «renders links and attachments» — ребро не нашлось по testid: убедиться, что `LinkEdge` ставит `data-testid={id}` на корневой `<g>`, а id = `link:<ключ>#<offset>` (из `buildScene`). Если падает «applies diagnostic marks» — `className` из `markOf` должен лечь на обёртку `rf__node-<id>`, а не на внутренний div.
+Expected: зелёные. С правками из Steps 2 и 7: 162 passed (28 файлов). Если падает «renders links and attachments» — рёбра не рендерятся из-за неинициализированных узлов (нужны декларативные `width`/`height`/`handles`, см. Step 3), а не из-за testid. Если падает «applies diagnostic marks» — `className` из `markOf` должен лечь на обёртку `rf__node-<id>`, а не на внутренний div.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): React Flow canvas with custom nodes and edges"
@@ -7151,7 +7157,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 - Consumes: `TopologyCanvas` (Task 18), `useProjectResource`, `useTopologyOperations` (Task 6), `defaultPoint` (Task 17), `useDraft`.
 - Produces: `<TopologyPage/>`, `useTopologyEditor`.
 
-- [ ] **Step 1: Написать `frontend/src/topology/useTopologyEditor.test.ts`**
+- [x] **Step 1: Написать `frontend/src/topology/useTopologyEditor.test.ts`**
 
 ```ts
 import { renderHook } from "@testing-library/react";
@@ -7230,7 +7236,7 @@ describe("useTopologyEditor", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -7238,7 +7244,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './useTopologyEditor'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/topology/useTopologyEditor.ts`**
+- [x] **Step 3: Реализовать `frontend/src/topology/useTopologyEditor.ts`**
 
 ```ts
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -7347,7 +7353,7 @@ export function useTopologyEditor() {
 }
 ```
 
-- [ ] **Step 4: Написать `frontend/src/pages/TopologyPage.test.tsx`**
+- [x] **Step 4: Написать `frontend/src/pages/TopologyPage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -7417,7 +7423,7 @@ describe("TopologyPage", () => {
 });
 ```
 
-- [ ] **Step 5: Реализовать `frontend/src/pages/TopologyPage.tsx`**
+- [x] **Step 5: Реализовать `frontend/src/pages/TopologyPage.tsx`**
 
 ```tsx
 import { useCallback, useMemo, useState } from "react";
@@ -7579,7 +7585,7 @@ export default function TopologyPage() {
 }
 ```
 
-- [ ] **Step 6: Добавить поддержку клика по панели и Del в `TopologyCanvas`**
+- [x] **Step 6: Добавить поддержку клика по панели и Del в `TopologyCanvas`**
 
 Дополнить `TopologyCanvas.tsx` пропом `onPaneClick` и клавиатурной обработкой удаления:
 
@@ -7606,7 +7612,7 @@ export default function TopologyPage() {
 
 и повесить их на контейнер: `<div className="canvas-wrap" onClick={handlePaneClick} onKeyDown={handleKeyDown} tabIndex={0}>`. Импортировать `useReactFlow` из `@xyflow/react`.
 
-- [ ] **Step 7: Передать новые пропсы из страницы**
+- [x] **Step 7: Передать новые пропсы из страницы**
 
 В `TopologyPage.tsx` добавить к `<TopologyCanvas>`:
 
@@ -7615,7 +7621,7 @@ export default function TopologyPage() {
             onDelete={(ids) => guard(() => editor.removeSelected(ids))}
 ```
 
-- [ ] **Step 8: Зарегистрировать маршрут**
+- [x] **Step 8: Зарегистрировать маршрут**
 
 ```tsx
 import TopologyPage from "./pages/TopologyPage";
@@ -7623,7 +7629,7 @@ import TopologyPage from "./pages/TopologyPage";
         <Route path="/ui/topology" element={<TopologyPage />} />
 ```
 
-- [ ] **Step 9: Запустить тесты**
+- [x] **Step 9: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -7631,7 +7637,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): topology editor page on React Flow"
@@ -7651,7 +7657,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 
 Канва — read-only; подсветка путей берётся из `report.mapMark`. Форма диагностики сохраняется в localStorage под ключом `firenet-diag-form-v1`, как в легаси.
 
-- [ ] **Step 1: Написать `frontend/src/pages/DiagnosePage.test.tsx`**
+- [x] **Step 1: Написать `frontend/src/pages/DiagnosePage.test.tsx`**
 
 ```tsx
 import { screen } from "@testing-library/react";
@@ -7755,7 +7761,7 @@ describe("DiagnosePage", () => {
 });
 ```
 
-- [ ] **Step 2: Запустить — тест падает**
+- [x] **Step 2: Запустить — тест падает**
 
 ```bash
 cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
@@ -7763,7 +7769,7 @@ cd /root/repos/firenet/frontend && npm test 2>&1 | tail -20
 
 Expected: FAIL `Cannot find module './DiagnosePage'`.
 
-- [ ] **Step 3: Реализовать `frontend/src/pages/DiagnosePage.tsx`**
+- [x] **Step 3: Реализовать `frontend/src/pages/DiagnosePage.tsx`**
 
 ```tsx
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -8026,7 +8032,7 @@ function buildMark(mark: MapMark | null | undefined): Map<string, string> {
 }
 ```
 
-- [ ] **Step 4: Согласовать testid узлов с Task 18**
+- [x] **Step 4: Согласовать testid узлов с Task 18**
 
 В коде Step 3 узлы канвы рендерит `TopologyCanvas` (Task 18), где RF навешивает на обёртку узла `data-testid="rf__node-<id>"` — а внутренний div кастомного `DeviceNode`/`NetworkNode` никакого testid не несёт (см. Task 18, «известные подводные камни», пункты 1–2). Поэтому в тестах Task 20 (шаги выше) уже используется `rf__node-device:r1`, а НЕ `node-device:r1`.
 
@@ -8036,7 +8042,7 @@ function buildMark(mark: MapMark | null | undefined): Map<string, string> {
 
 Предпочтительный путь — ровно тот, что в коде: тесты смотрят на обёртку `rf__node-<id>`, `className` (класс подсветки) тоже на ней (см. Step 3, markOf).
 
-- [ ] **Step 5: Зарегистрировать маршрут**
+- [x] **Step 5: Зарегистрировать маршрут**
 
 ```tsx
 import DiagnosePage from "./pages/DiagnosePage";
@@ -8044,7 +8050,7 @@ import DiagnosePage from "./pages/DiagnosePage";
         <Route path="/ui/diagnose" element={<DiagnosePage />} />
 ```
 
-- [ ] **Step 6: Запустить тесты**
+- [x] **Step 6: Запустить тесты**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test
@@ -8052,7 +8058,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test
 
 Expected: зелёные.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend): diagnose page with read-only map and spread"
@@ -8076,7 +8082,7 @@ cd /root/repos/firenet && git add frontend/src && git commit -m "feat(frontend):
 - Других ссылок на удаляемые символы нет: `webFiles`/`templateFiles`/`noCache`/`servePage`/`parsePageTemplates`/`mustPageTemplate`/`serveTemplatedPage`/`templatedPages`/`pageData` не встречаются вне `server.go`/`embed.go`/`server_test.go` (проверено grep). `search_index_test.go` и `handlers_test.go` используют только `/api/*`-роуты и `newTestServer`/`doJSON` (определены в `handlers_test.go` и остаются).
 - `frontend/` НЕ должен попасть в коммит: он уже лежит в рабочем дереве, но в `git status` его файлы должны остаться непроиндексированными (Step 8).
 
-- [ ] **Step 1: Удалить ассеты и шаблоны**
+- [x] **Step 1: Удалить ассеты и шаблоны**
 
 ```bash
 cd /root/repos/firenet && git rm -r --quiet internal/httpapi/templates internal/httpapi/web internal/httpapi/embed.go && ls internal/httpapi
@@ -8084,7 +8090,7 @@ cd /root/repos/firenet && git rm -r --quiet internal/httpapi/templates internal/
 
 Expected: в `internal/httpapi` остались только `.go`-файлы (api_cache, auth_handlers, draft_handlers, dto, handlers, invite_handlers, search_index, server, topology_operations, user_handlers, version_handlers + тесты).
 
-- [ ] **Step 2: Переписать `internal/httpapi/server.go`**
+- [x] **Step 2: Переписать `internal/httpapi/server.go`**
 
 Оставить из файла только: `NewServer` с `apiMux` и логин/инвайт-роутами, `withLogging`, `withAPICache`. Удалить `parsePageTemplates`, `mustPageTemplate`, `servePage`, `serveTemplatedPage`, `templatedPages`, `pageData`, `noCache`, все `GET /ui/*`, `GET /login`, `GET /invite/{token}`, `GET /{$}` и `mux.Handle("/", ...)`.
 
@@ -8135,7 +8141,7 @@ func withLogging(log *slog.Logger, next http.Handler) http.Handler {
 
 В теле `NewServer` сохранить все строки регистрации `apiMux` из текущего файла 1:1 — маркер `// ... (все существующие apiMux-регистрации переносятся без изменений)` заменяется на них.
 
-- [ ] **Step 3: Удалить `server_test.go` целиком**
+- [x] **Step 3: Удалить `server_test.go` целиком**
 
 Файл содержит **только** тесты статики/шаблонов, которых после Step 1–2 не станет, поэтому он удаляется весь, а не «до опустения». Это четыре теста + хелпер:
 
@@ -8157,7 +8163,7 @@ cd /root/repos/firenet && git rm -q internal/httpapi/server_test.go
 cd /root/repos/firenet && grep -rn 'webFiles\|templateFiles\|noCache\|servePage\|parsePageTemplates\|mustPageTemplate\|serveTemplatedPage\|templatedPages\|pageData' --include=*.go internal/ cmd/ || true
 ```
 
-- [ ] **Step 4: Обновить комментарии, ссылающиеся на страницы**
+- [x] **Step 4: Обновить комментарии, ссылающиеся на страницы**
 
 `internal/httpapi/handlers.go:318` — комментарий про «/ui/links identifies it by array position»:
 
@@ -8173,7 +8179,7 @@ cd /root/repos/firenet && grep -rn 'webFiles\|templateFiles\|noCache\|servePage\
 // searchEntry is one row of the search index served to the search page.
 ```
 
-- [ ] **Step 5: Собрать и проверить**
+- [x] **Step 5: Собрать и проверить**
 
 ```bash
 cd /root/repos/firenet && go build ./... && go vet ./... && gofmt -l . && go test ./...
@@ -8181,7 +8187,7 @@ cd /root/repos/firenet && go build ./... && go vet ./... && gofmt -l . && go tes
 
 Expected: сборка и тесты зелёные, `gofmt` не печатает ничего.
 
-- [ ] **Step 6: Обновить `Makefile`**
+- [x] **Step 6: Обновить `Makefile`**
 
 ```makefile
 .PHONY: build run dev test fe-test fe-build test-e2e vet fmt tidy clean
@@ -8220,13 +8226,13 @@ clean:
 	rm -rf $(BIN_DIR)
 ```
 
-- [ ] **Step 7: Обновить `README.md`**
+- [x] **Step 7: Обновить `README.md`**
 
 - В разделе «Структура проекта» заменить `internal/httpapi/  HTTP API и встроенный веб-интерфейс` на `internal/httpapi/  HTTP API (JSON)` и добавить строку `frontend/          веб-интерфейс: React + TypeScript + Vite`;
 - В разделе «Разработка» заменить `node --test 'internal/httpapi/web/*.test.js'` на `cd frontend && npm test`;
 - Убрать упоминание «После изменения файлов из `internal/httpapi/web/` пересоберите образ».
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ⚠️ **Не использовать `git add -A`.** В рабочем дереве уже лежат изменения `frontend/` (результаты задач 1–20: `M frontend/package.json`, `?? frontend/tsconfig.app.json` и т.д.). `git add -A` проиндексирует их в этот коммит. Вместо этого добавьте явно только Go-файлы и документацию:
 
@@ -8248,7 +8254,7 @@ cd /root/repos/firenet && git add -A -- internal README.md Makefile && git statu
 - Consumes: `frontend/Dockerfile`, `frontend/nginx.conf` (Task 1).
 - Produces: `make dev` поднимает db + backend + frontend.
 
-- [ ] **Step 1: Переписать `docker-compose.yml`**
+- [x] **Step 1: Переписать `docker-compose.yml`**
 
 ```yaml
 services:
@@ -8311,7 +8317,7 @@ volumes:
   firenet-db:
 ```
 
-- [ ] **Step 2: Добавить dev-стейдж в `frontend/Dockerfile`**
+- [x] **Step 2: Добавить dev-стейдж в `frontend/Dockerfile`**
 
 Переписать файл целиком:
 
@@ -8349,7 +8355,7 @@ EXPOSE 80
 
 **Связка с compose `command:` из Step 1:** CMD dev-стейджа (`npm run dev -- --host 0.0.0.0 --port 5173`) используется только когда compose **не** перекрывает его `command:`. Для dev-режима переменная `FRONTEND_CMD` в compose задаётся как `npm run dev -- --host 0.0.0.0 --port 5173` — она приходит **снаружи** (команда запуска), а не из Dockerfile, поэтому dev-стейдж здесь фактически не обязан нести CMD, но несёт его как страховку на случай запуска образа напрямую (`docker run` без compose). Не дублировать CMD в двух местах нельзя обойтись: compose `command:` перекрывает Dockerfile CMD, а вне compose CMD берётся из образа.
 
-- [ ] **Step 3: Создать `nginx/firenet.conf`** — образец для nginx на хосте
+- [x] **Step 3: Создать `nginx/firenet.conf`** — образец для nginx на хосте
 
 ```nginx
 # Пример конфига для nginx на хосте: он единственный смотрит наружу,
@@ -8380,7 +8386,7 @@ server {
 }
 ```
 
-- [ ] **Step 4: Добавить `.env`-пример для dev**
+- [x] **Step 4: Добавить `.env`-пример для dev**
 
 Дописать в `.env.example`:
 
@@ -8392,7 +8398,7 @@ VITE_API_TARGET=http://backend:8787
 
 `FRONTEND_CMD` в `.env.example` **не** добавлять: dev-стейдж уже несёт свой `CMD`, а переменная в `.env` подставляется в compose как `command:`. Её нужно задавать **только при запуске dev-режима** (`FRONTEND_TARGET=dev`), где она подменяет `CMD` на Vite. При `target: runtime` переменная не задаётся, и дефолт `:-null` из compose (см. Step 1) оставляет CMD nginx-образа нетронутым. Важно: НЕ использовать `${FRONTEND_CMD:-}` с пустым дефолтом — пустая строка даёт `command: []`, который перекрывает CMD (подробности в Step 1). Хостовый порт Vite задан `ports:` в compose.
 
-- [ ] **Step 5: Проверить dev-режим**
+- [x] **Step 5: Проверить dev-режим**
 
 ```bash
 cd /root/repos/firenet && FRONTEND_TARGET=dev FRONTEND_CMD="npm run dev -- --host 0.0.0.0 --port 5173" docker compose up -d --build && sleep 20 && curl -sf -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5173/ && curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5173/api/login -X POST
@@ -8404,7 +8410,7 @@ Expected: `200` для `/` у Vite и `400`/`401` от `/api/login` — то е�
 
 Проверять именно через `:5173/api/login`, а не `:8787/api/login`: второй вариант стучится в бэкенд напрямую и прокси не проверяет (это была ошибка в предыдущей версии шага). `curl -sf` тоже не годится — на 4xx она молча вернёт 22 и шаг упадёт на несуществующей проблеме.
 
-- [ ] **Step 6: Проверить prod-режим**
+- [x] **Step 6: Проверить prod-режим**
 
 ```bash
 cd /root/repos/firenet && FRONTEND_TARGET=runtime docker compose up -d --build && sleep 15 && curl -sf -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/ && curl -sf -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/ui/rules
@@ -8414,7 +8420,7 @@ Expected: `200` на обоих — fallback nginx отдаёт `index.html` д�
 
 Проверка именно `200` на `/ui/rules` подтверждает, что `try_files $uri $uri/ /index.html` из `nginx.conf` (Task 1) срабатывает. Если вернётся `404`/`403`, первым делом смотри `docker compose ps` и логи: это либо CMD nginx перекрыт (`command: []`, см. Step 1 — должен быть `null`), либо nginx.conf не скопировался в контейнер.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /root/repos/firenet && docker compose down && git add docker-compose.yml frontend/Dockerfile nginx .env.example && git commit -m "build: split compose into db, backend and frontend with host nginx example"
@@ -8431,7 +8437,7 @@ cd /root/repos/firenet && docker compose down && git add docker-compose.yml fron
 - Consumes: все страницы (Task 8–20), `data-testid`, расставленные в них.
 - Produces: `make test-e2e` зелёный.
 
-- [ ] **Step 1: Поправить `vite.config.ts` — читать таргет из `process.env`**
+- [x] **Step 1: Поправить `vite.config.ts` — читать таргет из `process.env`**
 
 > **Блокер, выявлен при контроле.** План задачи 1 использовал `loadEnv(mode, process.cwd(), "")` для чтения `VITE_API_TARGET`. Это **не работает** в Vite 5.4: функция `resolveEnvPrefix` (packages/vite/src/node/config.ts) бросает исключение, если `envPrefix` содержит пустую строку (`envPrefix contains value ''`), поэтому `vite config` упадёт ещё на старте. Случайно `loadEnv(..., "")` «видит» переменные процесса не потому, что их поднимает `loadEnv`, а потому, что `key.startsWith("")` истинно для всех ключей — но до этого цикла код вообще не доходит.
 
@@ -8466,7 +8472,7 @@ export default defineConfig(() => ({
 
 Обратно к задаче 1: поправить там Step 3 и Step 13.1 (сейчас они используют `loadEnv(...,"")`), иначе и задача 1, и e2e упадут. Это единственное место, где правится код фронтенда в рамках Task 23.
 
-- [ ] **Step 2: Добавить `data-testid` туда, где их требуют хелперы**
+- [x] **Step 2: Добавить `data-testid` туда, где их требуют хелперы**
 
 В `LoginPage` уже есть `data-testid="login-form"` и поля `name=username`/`name=password`. Проверить, что селекторы `e2e/helpers/ui.js` совпадают:
 
@@ -8485,7 +8491,7 @@ cd /root/repos/firenet && grep -n 'login-form\|tool-select\|firenet-draft-id' e2
 
 Конкретные имена сверять с реализацией `TopologyPage`/`TopologyCanvas.tsx` (Task 13–16). Если какой-то `data-testid` не реализуем, удалить соответствующий хелпер и сценарий вместо того, чтобы чинить хелпер под несуществующий селектор.
 
-- [ ] **Step 3: Обновить `e2e/helpers/ui.js`**
+- [x] **Step 3: Обновить `e2e/helpers/ui.js`**
 
 Заменить селекторы на `data-testid`:
 
@@ -8511,7 +8517,7 @@ export async function openWithDraft(page, draftId, path) {
 
 Остальные функции — по такому же принципу: `#id` → `[data-testid="..."]` (см. список в Step 2).
 
-- [ ] **Step 4: Научить `global-setup.js` поднимать фронтенд**
+- [x] **Step 4: Научить `global-setup.js` поднимать фронтенд**
 
 После запуска `bin/firenet` добавить запуск Vite и сделать `baseURL` указывающим на него:
 
@@ -8557,7 +8563,7 @@ export function cleanupSetupResources(container, server, frontend) {
 
 > Порядок важен: убиваем **сначала** frontend, **потом** server. Если убить backend первым, Vite-прокси начнёт возвращать 502, но сам процесс останется висеть — поэтому оба обязательны, а не только фронтенд. Вызов в `catch` глобального setup тоже обновить: `cleanupSetupResources(container, server, frontend)`.
 
-- [ ] **Step 5: Научить `global-teardown.js` гасить фронтенд**
+- [x] **Step 5: Научить `global-teardown.js` гасить фронтенд**
 
 > **Дыра, закрыта здесь.** План не трогал teardown, а он читает только `.e2e-server.pid` и удаляет контейнер. Если не исправить, Vite останется висеть, а `.e2e-frontend.pid` — не очистится. В `cleanupSetupResources` уже есть общая логика убийства, но teardown её не использует и выполняется всегда (в отличие от `catch` в setup). Добавить чтение `.e2e-frontend.pid` и его убийство:
 
@@ -8578,7 +8584,7 @@ export default async function globalTeardown() {
 
 Оба pid-файла очищаются, чтобы повторный прогон не «убивал» процесс со старым pid.
 
-- [ ] **Step 6: Убедиться, что Vite видит `VITE_API_TARGET` из шага 4**
+- [x] **Step 6: Убедиться, что Vite видит `VITE_API_TARGET` из шага 4**
 
 После правки `vite.config.ts` (Step 1) таргет читается напрямую из `process.env.VITE_API_TARGET`. Проверить, что механизм живой (таргет подставился, а не дефолтный `http://backend:8787`):
 
@@ -8595,7 +8601,7 @@ Expected: `{"/api":{"target":"http://127.0.0.1:9999","changeOrigin":true}}`. Е�
 
 > Если `vite.config.ts` не был исправлен (Step 1) и там остался `loadEnv(mode, process.cwd(), "")` — команда выше упадёт с ошибкой `envPrefix contains value ''` ещё до вывода. Это первый признак того, что Step 1 не сделан.
 
-- [ ] **Step 7: Прогнать e2e**
+- [x] **Step 7: Прогнать e2e**
 
 ```bash
 cd /root/repos/firenet && make test-e2e 2>&1 | tail -40
@@ -8603,7 +8609,7 @@ cd /root/repos/firenet && make test-e2e 2>&1 | tail -40
 
 Expected: все сценарии зелёные. Падающие сценарии править по одному: сначала убедиться, что страница отдаёт нужный `data-testid`, потом — что селектор в спеке на него указывает.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd /root/repos/firenet && git add e2e frontend && git commit -m "test(e2e): run Playwright against the React frontend"
@@ -8634,7 +8640,7 @@ cd /root/repos/firenet && git add e2e frontend && git commit -m "test(e2e): run 
 > Практическое правило: начинать Task 24 можно, только когда **все** чекбоксы задач 1–23
 > отмечены выполненными. В противном случае сначала довести 21–23, потом вернуться сюда.
 
-- [ ] **Step 1: Полная проверка Go**
+- [x] **Step 1: Полная проверка Go**
 
 ```bash
 cd /root/repos/firenet && go build ./... && go vet ./... && gofmt -l . && go test ./...
@@ -8642,7 +8648,7 @@ cd /root/repos/firenet && go build ./... && go vet ./... && gofmt -l . && go tes
 
 Expected: всё зелёное, `gofmt` молчит.
 
-- [ ] **Step 2: Полная проверка фронтенда**
+- [x] **Step 2: Полная проверка фронтенда**
 
 ```bash
 cd /root/repos/firenet/frontend && npm run typecheck && npm test && npm run build
@@ -8650,7 +8656,7 @@ cd /root/repos/firenet/frontend && npm run typecheck && npm test && npm run buil
 
 Expected: зелёное, `dist/` собран.
 
-- [ ] **Step 3: Проверить, что в репе не осталось легаси-фронтенда**
+- [x] **Step 3: Проверить, что в репе не осталось легаси-фронтенда**
 
 ```bash
 cd /root/repos/firenet && ls internal/httpapi && grep -rn "alpine\|x-data\|go:embed" --include=*.go internal/ | grep -v _test
@@ -8666,7 +8672,7 @@ Expected: в `internal/httpapi` нет `web/`, `templates/`, `embed.go`; упо�
 > Grep здесь — GNU basic regex: `\|` как «или» работает только в GNU grep (Linux). На macOS/mac
 > (BSD grep) это **не** сработает — там нужен `grep -E "alpine|x-data|go:embed"`. Окружение по плану — Linux, так что оставляем как есть, но имей в виду при локальном прогоне.
 
-- [ ] **Step 4: Проверить e2e**
+- [x] **Step 4: Проверить e2e**
 
 ```bash
 cd /root/repos/firenet && make test-e2e 2>&1 | tail -20
@@ -8674,7 +8680,7 @@ cd /root/repos/firenet && make test-e2e 2>&1 | tail -20
 
 Expected: все сценарии зелёные.
 
-- [ ] **Step 5: Обновить `AGENTS.md`**
+- [x] **Step 5: Обновить `AGENTS.md`**
 
 В раздел «Verification (run in this order after any change)» заменить строку про `node --test 'internal/httpapi/web/*.test.js'` на:
 
@@ -8706,7 +8712,7 @@ Expected: все сценарии зелёные.
 > относится к e2e/ и уже покрыта пунктом в Gotchas про «e2e/ has its own package.json».
 > Противоречия между новым и старым текстом AGENTS.md не должно остаться.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /root/repos/firenet && git add -A && git status --short && git commit -m "docs: update AGENTS and README for the split frontend"
