@@ -1,22 +1,20 @@
 package httpapi
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"html/template"
-	"io"
-	"io/fs"
 	"log/slog"
 	"net/http"
-	"path"
-	"strings"
 
 	"github.com/kudes1/firenet/internal/auth"
 	"github.com/kudes1/firenet/internal/pgstore"
 )
 
-// NewServer builds the HTTP handler for firenet's web UI and JSON API.
-// Every /api/ route requires a valid session (login/logout excepted).
+// NewServer builds the HTTP handler for firenet's JSON API. It is an
+// adapter, at the same tier as the former CLI: it reuses internal/topology,
+// internal/rules and internal/app for all domain logic and knows nothing
+// about any UI. The web UI is a separate service (frontend/) that talks to
+// this API.
+// Every /api/ route requires a valid session (login/logout/invites
+// excepted).
 // Project content lives entirely in projects (internal/pgstore): the
 // current confirmed version is read-only everywhere, edits only ever
 // happen inside a personal draft.
@@ -77,160 +75,7 @@ func NewServer(projects *pgstore.Store, users *auth.Store, log *slog.Logger) htt
 	mux.HandleFunc("POST /api/invites/{token}", h.acceptInvite)
 	mux.Handle("/api/", auth.RequireAuth(users)(apiMux))
 
-	pages := parsePageTemplates()
-
-	// Standalone UI pages.
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/ui/topology", http.StatusFound)
-	})
-	mux.HandleFunc("GET /login", servePage("login.html"))
-	mux.HandleFunc("GET /invite/{token}", servePage("invite.html"))
-	mux.HandleFunc("GET /ui/topology", serveTemplatedPage(mustPageTemplate(pages, "topology"), templatedPages["topology"].data))
-	mux.HandleFunc("GET /ui/subnets", serveTemplatedPage(mustPageTemplate(pages, "subnets"), templatedPages["subnets"].data))
-	mux.HandleFunc("GET /ui/networks", serveTemplatedPage(mustPageTemplate(pages, "networks"), templatedPages["networks"].data))
-	mux.HandleFunc("GET /ui/devices", serveTemplatedPage(mustPageTemplate(pages, "devices"), templatedPages["devices"].data))
-	mux.HandleFunc("GET /ui/sets", serveTemplatedPage(mustPageTemplate(pages, "sets"), templatedPages["sets"].data))
-	mux.HandleFunc("GET /ui/unions", serveTemplatedPage(mustPageTemplate(pages, "unions"), templatedPages["unions"].data))
-	mux.HandleFunc("GET /ui/links", serveTemplatedPage(mustPageTemplate(pages, "links"), templatedPages["links"].data))
-	mux.HandleFunc("GET /ui/rules", serveTemplatedPage(mustPageTemplate(pages, "rules"), templatedPages["rules"].data))
-	mux.HandleFunc("GET /ui/compile", serveTemplatedPage(mustPageTemplate(pages, "compile"), templatedPages["compile"].data))
-	mux.HandleFunc("GET /ui/diagnose", serveTemplatedPage(mustPageTemplate(pages, "diagnose"), templatedPages["diagnose"].data))
-	mux.HandleFunc("GET /ui/users", serveTemplatedPage(mustPageTemplate(pages, "users"), templatedPages["users"].data))
-	mux.HandleFunc("GET /ui/drafts", serveTemplatedPage(mustPageTemplate(pages, "drafts"), templatedPages["drafts"].data))
-	mux.HandleFunc("GET /ui/history", serveTemplatedPage(mustPageTemplate(pages, "history"), templatedPages["history"].data))
-	mux.HandleFunc("GET /ui/search", serveTemplatedPage(mustPageTemplate(pages, "search"), templatedPages["search"].data))
-
-	webRoot, err := fs.Sub(webFiles, "web")
-	if err != nil {
-		panic(err) // embedded at build time; can't fail at runtime
-	}
-	mux.Handle("/", noCache(webRoot, http.FileServer(http.FS(webRoot))))
-
 	return withLogging(log, withAPICache(mux))
-}
-
-// noCache lets browsers keep assets cached but forbids reuse without
-// revalidation: the embed FS carries no modification times, so the file
-// server has neither Last-Modified nor ETag, and browsers would otherwise
-// heuristically serve stale JS after a rebuild. A content-hash ETag turns
-// every revalidation into a cheap 304; a rebuild changes the hash and the
-// fresh bytes are served.
-func noCache(root fs.FS, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			if b, err := fs.ReadFile(root, strings.TrimPrefix(path.Clean(r.URL.Path), "/")); err == nil {
-				sum := sha256.Sum256(b)
-				etag := `"` + hex.EncodeToString(sum[:8]) + `"`
-				w.Header().Set("ETag", etag)
-				w.Header().Set("Cache-Control", "no-cache")
-				if r.Header.Get("If-None-Match") == etag {
-					w.WriteHeader(http.StatusNotModified)
-					return
-				}
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// servePage renders one of the embedded static HTML pages.
-func servePage(name string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		b, err := webFiles.ReadFile("web/" + name)
-		if err != nil {
-			http.Error(w, "page not found", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(b)
-	}
-}
-
-type pageData struct {
-	Title         string
-	Nav           string
-	Script        string
-	NoDraftBanner bool
-}
-
-type templatedPage struct {
-	file string
-	data pageData
-}
-
-// templatedPages lists every page migrated onto the shared layout: its
-// content-template file and the per-page data rendered into it, keyed by
-// the same name parsePageTemplates uses. One table instead of two (a file
-// map plus separate pageData literals at each route registration) so a
-// page's file and its Title/Nav/Script can't drift apart as more pages
-// migrate.
-var templatedPages = map[string]templatedPage{
-	"subnets":  {file: "templates/subnets.html", data: pageData{Title: "firenet — подсети", Nav: "subnets", Script: "subnets.js"}},
-	"unions":   {file: "templates/unions.html", data: pageData{Title: "firenet — объединения", Nav: "unions", Script: "unions.js"}},
-	"diagnose": {file: "templates/diagnose.html", data: pageData{Title: "firenet — диагностика", Nav: "diagnose", Script: "diagnose.js"}},
-	"compile":  {file: "templates/compile.html", data: pageData{Title: "firenet — компиляция", Nav: "compile", Script: "compile.js"}},
-	"history":  {file: "templates/history.html", data: pageData{Title: "firenet — история версий", Nav: "history", Script: "history.js"}},
-	"drafts":   {file: "templates/drafts.html", data: pageData{Title: "firenet — черновики", Nav: "drafts", Script: "drafts.js"}},
-	"devices":  {file: "templates/devices.html", data: pageData{Title: "firenet — устройства", Nav: "devices", Script: "devices.js"}},
-	"users":    {file: "templates/users.html", data: pageData{Title: "firenet — пользователи", Nav: "users", Script: "users.js", NoDraftBanner: true}},
-	"networks": {file: "templates/networks.html", data: pageData{Title: "firenet — сети", Nav: "networks", Script: "networks.js"}},
-	"links":    {file: "templates/links.html", data: pageData{Title: "firenet — связи", Nav: "links", Script: "links.js"}},
-	"rules":    {file: "templates/rules.html", data: pageData{Title: "firenet — правила", Nav: "rules", Script: "rules.js"}},
-	"sets":     {file: "templates/sets.html", data: pageData{Title: "firenet — наборы", Nav: "sets", Script: "sets.js"}},
-	"topology": {file: "templates/topology.html", data: pageData{Title: "firenet — топология", Nav: "topology", Script: "topology.js"}},
-	"search":   {file: "templates/search.html", data: pageData{Title: "firenet — поиск", Nav: "search", Script: "search.js", NoDraftBanner: true}},
-}
-
-// parsePageTemplates parses layout.html once and Clone()s it per page before
-// parsing that page's own content file into the clone. Parsing layout.html
-// and every content file into one shared *template.Template would collide:
-// every file's {{define "content"}} lands in the same namespace (Go
-// template blocks aren't scoped per source file), so the last one parsed
-// would silently win for every page's {{template "content" .}} call.
-//
-// html/template's contextual-escaping errors surface at Execute, not at
-// Parse: template.Must alone only catches a broken template at boot if
-// something happens to execute it before the first live request does. The
-// warm-up ExecuteTemplate below makes that guarantee unconditional instead
-// of depending on test coverage.
-func parsePageTemplates() map[string]*template.Template {
-	base := template.Must(template.ParseFS(templateFiles, "templates/layout.html"))
-	pages := make(map[string]*template.Template, len(templatedPages))
-	for name, page := range templatedPages {
-		clone := template.Must(base.Clone())
-		tmpl := template.Must(clone.ParseFS(templateFiles, page.file))
-		if err := tmpl.ExecuteTemplate(io.Discard, "layout", page.data); err != nil {
-			panic(err)
-		}
-		pages[name] = tmpl
-	}
-	return pages
-}
-
-// mustPageTemplate looks up a page parsed by parsePageTemplates, panicking
-// at server construction if name doesn't match a parsed page. Without this,
-// a typo'd route registration (pages["subnet"] instead of pages["subnets"])
-// would return a nil *template.Template that only nil-derefs the first time
-// someone requests that route, instead of failing at boot like every other
-// broken-template case parsePageTemplates already guards against.
-func mustPageTemplate(pages map[string]*template.Template, name string) *template.Template {
-	tmpl, ok := pages[name]
-	if !ok {
-		panic("httpapi: no parsed template for page " + name)
-	}
-	return tmpl
-}
-
-// serveTemplatedPage renders a page parsed by parsePageTemplates. It
-// replaces servePage only for routes migrated onto the shared layout;
-// every other page keeps using servePage unchanged.
-func serveTemplatedPage(tmpl *template.Template, data pageData) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			http.Error(w, "render error", http.StatusInternalServerError)
-		}
-	}
 }
 
 func withLogging(log *slog.Logger, next http.Handler) http.Handler {

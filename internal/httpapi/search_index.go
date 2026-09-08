@@ -7,7 +7,7 @@ import (
 	"github.com/kudes1/firenet/internal/projectdoc"
 )
 
-// searchEntry is one row of the search index served to /ui/search. The
+// searchEntry is one row of the search index served to the search page. The
 // client-side filter matches queries against these flat fields; Prefixes
 // carries the entity's CIDR blocks for semantic IP/CIDR matching.
 type searchEntry struct {

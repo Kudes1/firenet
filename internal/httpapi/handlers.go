@@ -315,9 +315,9 @@ func (h *handlers) writeLinkExports(w http.ResponseWriter, r *http.Request, doc 
 	}
 
 	// The link candidates flow (topology operations) identifies its link
-	// by canonical endpoint pair; /ui/links still identifies it by array
-	// index. Resolve by pair when both a and b are given, otherwise fall
-	// back to the legacy index so /ui/links keeps working unmodified.
+	// by canonical endpoint pair; the links page still addresses a link by
+	// array position in its own URLs, so the legacy index is handed back to
+	// keep that working.
 	a, hasA := q["a"]
 	b, hasB := q["b"]
 	byPair := hasA && hasB

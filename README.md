@@ -78,13 +78,7 @@ go build ./...
 go vet ./...
 gofmt -l .
 go test ./...
-node --test 'internal/httpapi/web/*.test.js'
-```
-
-После изменения файлов из `internal/httpapi/web/` пересоберите образ:
-
-```sh
-docker compose up -d --build
+cd frontend && npm test
 ```
 
 ## Структура проекта
@@ -92,7 +86,8 @@ docker compose up -d --build
 ```
 cmd/firenet/       точка входа приложения
 internal/app/      ядро бизнес-логики
-internal/httpapi/  HTTP API и встроенный веб-интерфейс
+internal/httpapi/  HTTP API (JSON)
+frontend/          веб-интерфейс: React + TypeScript + Vite
 internal/pgstore/  хранение проектов и версий в PostgreSQL
 internal/auth/     аутентификация и пользователи
 internal/topology/ модель сети: устройства, связи, подсети и зоны
