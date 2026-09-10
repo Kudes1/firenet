@@ -65,6 +65,22 @@ describe("Combo", () => {
     expect(list.style.left).toBe("100px"); // 300 - 200
   });
 
+  it("portals suggestions into a canvas panel when used inside one", async () => {
+    const user = userEvent.setup();
+    render(
+      <div className="canvas-wrap">
+        <div className="canvas-panel" style={{ position: "absolute", left: 50, top: 50 }}>
+          <Combo items={["alpha", "beta"]} onPick={() => {}} />
+        </div>
+      </div>,
+    );
+    await user.click(screen.getByRole("textbox"));
+    const suggestions = document.querySelector(".canvas-panel .member-suggestions");
+    expect(suggestions).not.toBeNull();
+    // absolute внутри панели, не fixed в body
+    expect((suggestions as HTMLElement).style.position).toBe("absolute");
+  });
+
   it("positions the list under the input (fixed coordinates)", async () => {
     const user = userEvent.setup();
     const { container } = render(<Combo items={["lan"]} onPick={vi.fn()} />);

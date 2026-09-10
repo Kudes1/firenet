@@ -39,7 +39,8 @@ export default function Combo({ items, placeholder, onPick }: Props) {
     // позиционированных потомков. Поэтому внутри диалога клиентские
     // координаты пересчитываются относительно его коробки, и позиция
     // остаётся absolute; вне диалога это обычный fixed.
-    const dialog = input.closest("dialog[open]");
+    // То же для .canvas-panel (позиционированный контейнер в канве).
+    const dialog = input.closest("dialog[open], .canvas-panel");
     if (dialog) {
       const d = dialog.getBoundingClientRect();
       setRect({ dialog: true, top: r.bottom - d.top + 4, left: r.left - d.left, width: r.width });
@@ -65,7 +66,7 @@ export default function Combo({ items, placeholder, onPick }: Props) {
   // Портал: в открытый <dialog>, если Combo используется в модалке — список
   // попадает в top layer и рисуется поверх backdrop; иначе в body, чтобы
   // его не обрезали скролл-контейнеры страницы.
-  const portalTarget = inputRef.current?.closest("dialog[open]") ?? document.body;
+  const portalTarget = inputRef.current?.closest("dialog[open], .canvas-panel") ?? document.body;
 
   return (
     <div className="member-combo">
