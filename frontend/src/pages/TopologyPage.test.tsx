@@ -145,7 +145,7 @@ describe("TopologyPage", () => {
     await waitFor(() => expect(body).toEqual({ kind: "delete-device", deviceName: "r1" }), { timeout: 2000 });
   });
 
-  it("edits a device in a modal over the canvas", async () => {
+  it("edits a device in a panel inside the canvas", async () => {
     useRichLayout();
     await openNodeMenu("rf__node-device:r1");
     fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
@@ -155,7 +155,7 @@ describe("TopologyPage", () => {
     expect(await screen.findByLabelText("Описание")).toBeInTheDocument();
   });
 
-  it("edits a network in a modal over the canvas", async () => {
+  it("edits a network in a panel inside the canvas", async () => {
     useRichLayout();
     await openNodeMenu("rf__node-network:office");
     fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
@@ -164,7 +164,7 @@ describe("TopologyPage", () => {
     expect(await screen.findAllByText("lan")).not.toHaveLength(0);
   });
 
-  it("edits a link filter in a modal over the canvas", async () => {
+  it("edits a link filter in a panel inside the canvas", async () => {
     renderPage(<TopologyPage />, "/ui/topology", "d1");
     // Ребро — SVG <g> с data-testid; ПКМ по нему доходит до RF. Дефолтного
     // msw-layout хватает: он содержит r1, sw1 и office.
@@ -179,7 +179,7 @@ describe("TopologyPage", () => {
     expect(document.querySelector(".canvas-panel")).not.toBeNull();
   });
 
-  it("opens device edit modal without dimming the canvas", async () => {
+  it("opens device edit panel inside the canvas", async () => {
     useRichLayout();
     await openNodeMenu("rf__node-device:r1");
     fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
@@ -188,7 +188,7 @@ describe("TopologyPage", () => {
     expect(document.querySelector(".canvas-panel")).not.toBeNull();
   });
 
-  it("outlines link endpoints while the filter modal is open", async () => {
+  it("outlines link endpoints while the filter panel is open", async () => {
     renderPage(<TopologyPage />, "/ui/topology", "d1");
     const edge = await screen.findByTestId("link:r1|sw1#0");
     fireEvent.contextMenu(edge, { clientX: 200, clientY: 100 });

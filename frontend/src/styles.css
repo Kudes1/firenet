@@ -642,6 +642,16 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 }
 .canvas-panel-header h3 { margin: 0; font-size: 1rem; }
 .canvas-panel-body { padding: var(--space-3) var(--space-4); overflow-y: auto; }
+/* Поля форм панели — как в модалках (dialog.modal label выше): подпись
+   над полем, единый ритм отступов. */
+.canvas-panel-body label,
+.canvas-panel-body .modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  font-size: 0.9rem;
+}
 
 /* submenu revealed by hover/focus on its wrapper */
 .ctx-sub { position: relative; display: flex; flex-direction: column; }

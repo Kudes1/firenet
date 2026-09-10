@@ -177,9 +177,18 @@ function TopologyCanvasInner({
   );
 
   // Del удаляет выбранные узлы: события клавиатуры идут на контейнер,
-  // потому что фокус у React Flow, а не у инпутов страницы.
+  // потому что фокус у React Flow, а не у инпутов страницы. Панели редактиро-
+  // вания рендерятся внутри .canvas-wrap — их keydown (в т.ч. Delete при
+  // наборе текста) не должен доходить до удаления узлов.
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key !== "Delete" || !onDelete) return;
+    const target = event.target;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof Element && target.closest(".canvas-panel"))
+    ) return;
     const ids = rfNodes.filter((n) => n.selected).map((n) => n.id);
     if (ids.length) onDelete(ids);
   }, [rfNodes, onDelete]);

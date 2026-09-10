@@ -98,6 +98,28 @@ describe("TopologyCanvas", () => {
     expect(onDelete).toHaveBeenCalledWith(["device:r1"]);
   });
 
+  // Панели редактирования рендерятся внутри .canvas-wrap: Delete, нажатый
+  // в инпуте панели (или любом другом поле), не должен удалять выбранные
+  // узлы канвы.
+  it("ignores Delete from panel inputs and other form fields", async () => {
+    const onDelete = vi.fn();
+    render(<TopologyCanvas topology={topology} layout={layout} editable onDelete={onDelete} />);
+    const node = await screen.findByTestId("rf__node-device:r1");
+    fireEvent.click(node);
+    const canvas = screen.getByTestId("topo-canvas");
+    // Инпут внутри панели редактирования.
+    const input = document.createElement("input");
+    const panel = document.createElement("div");
+    panel.className = "canvas-panel";
+    panel.appendChild(input);
+    canvas.appendChild(panel);
+    fireEvent.keyDown(input, { key: "Delete", bubbles: true });
+    expect(onDelete).not.toHaveBeenCalled();
+    // Тот же Delete с самой канвы по-прежнему удаляет выделение.
+    fireEvent.keyDown(canvas, { key: "Delete" });
+    expect(onDelete).toHaveBeenCalledWith(["device:r1"]);
+  });
+
   // Единый источник истины о выделении — RF: страница получает id выбранных
   // узлов через onSelectionChange, а не ведёт свой список по кликам.
   it("reports selection changes", async () => {
