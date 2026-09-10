@@ -114,6 +114,10 @@ button, input, select, th, td, .banner {
   border-right: 1px solid var(--border);
   transition: width .15s ease;
 }
+.sidebar > .brand { font-size: 1.05rem; letter-spacing: 0.01em; white-space: nowrap; line-height: var(--icon); }
+.brand-short { display: none; width: var(--icon); text-align: center; }
+.sidebar.collapsed .brand-full { display: none; }
+.sidebar.collapsed .brand-short { display: inline-block; }
 /* Единая геометрия ряда: одинаковые паддинги, иконка всегда в одной и той
    же левой колонке. Сворачивание только прячет подписи — значки не сдвигаются. */
 nav.side-nav a,
@@ -146,6 +150,8 @@ nav.side-nav > * + * { border-top: 1px solid var(--border); padding-top: var(--s
   border-radius: var(--radius-sm);
 }
 .nav-group-header:hover { background: var(--panel-bg-hover); color: var(--fg); }
+.nav-group-header .chevron svg { transition: transform .15s ease; }
+.nav-group.closed .nav-group-header .chevron svg { transform: rotate(90deg); }
 .nav-group-links { display: flex; flex-direction: column; gap: var(--space-1); }
 .nav-group.closed .nav-group-links { display: none; }
 nav.side-nav a {
@@ -158,6 +164,8 @@ nav.side-nav a {
 }
 nav.side-nav a:hover { background: var(--panel-bg-hover); color: var(--fg); }
 nav.side-nav a.active { color: var(--fg); background: var(--panel-bg); font-weight: 600; }
+nav.side-nav .icon { display: inline-flex; width: var(--icon); height: var(--icon); flex-shrink: 0; }
+nav.side-nav .icon svg { width: 100%; height: 100%; }
 
 .sidebar-toggle {
   margin-top: auto;
@@ -168,7 +176,11 @@ nav.side-nav a.active { color: var(--fg); background: var(--panel-bg); font-weig
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
+  /* svg без размера раздувается до дефолтных 300×150, расталкивая
+     user-box за нижнюю границу сайдбара */
+  overflow: hidden;
 }
+.sidebar-toggle svg { width: var(--icon); height: var(--icon); }
 .sidebar-toggle:hover { background: var(--panel-bg-hover); }
 
 /* 56px: ось иконок левая и от ширины не зависит; запас справа нужен,
@@ -213,7 +225,7 @@ main {
 }
 .tab-panel[hidden] { display: none; }
 
-.topology-layout { display: flex; flex: 1; min-height: 0; }
+.topology-layout { display: flex; flex: 1; min-height: 0; position: relative; }
 .panel {
   background: var(--panel-bg);
   border: 1px solid var(--border);
@@ -275,16 +287,111 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 
 .hint { font-size: 0.78rem; color: var(--muted); line-height: 1.4; }
 
+/* Сетка точек рисует <Background /> React Flow (gap 24), поэтому у обёртки
+   только нейтральный фон — иначе сетки накладываются друг на друга. */
 .canvas-wrap {
   flex: 1;
   position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
-  background:
-    radial-gradient(circle, var(--border) 1px, transparent 1px) 0 0 / 24px 24px,
-    var(--bg);
+  background: var(--bg);
 }
+
+/* Узлы канвы. Геометрия (радиус) задаётся инлайн в DeviceNode (KINDS.rx),
+   цвет — здесь, по типу: легаси красил контуры из CanvasTheme (--kind-*),
+   поэтому переменные те же. Толщина контура легаси — 1.5px (lineWidth). */
+.topo-node {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+  background: var(--panel-bg);
+  border: 1.5px solid var(--border);
+  color: var(--fg);
+  font-size: 0.82rem;
+  cursor: default;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.topo-node.device-node.kind-router { border-color: var(--kind-router); }
+.topo-node.device-node.kind-switch { border-color: var(--kind-switch); }
+.topo-node.network-node {
+  position: relative; /* якорь для absolutely-позиционного svg облака */
+  /* Бугорки облака выходят за bbox узла на 7px — базовый overflow: hidden
+     их обрезал бы, узлу сети нужны видимые границы. */
+  overflow: visible;
+  border: none;
+  background: transparent;
+  align-items: center;
+  text-align: center;
+}
+/* Текст поверх облака: позиционированные элементы красятся в порядке DOM,
+   svg идёт первым, поэтому тексту достаточно position: relative. */
+.topo-node.network-node .node-label,
+.topo-node.network-node .node-hint {
+  position: relative;
+}
+/* Облако — svg позади текста: контур --kind-network, заливка 12% той же
+   краски (как было у овала). Обводка легаси — 1.5px. */
+.topo-node.network-node .net-cloud {
+  position: absolute;
+  inset: -7px;
+  overflow: visible;
+  pointer-events: none;
+}
+.topo-node.network-node .net-cloud-outline {
+  fill: color-mix(in srgb, var(--kind-network) 12%, var(--panel-bg));
+  stroke: var(--kind-network);
+  stroke-width: 1.5;
+}
+.topo-node.network-node.selected {
+  border: none;
+  padding: 6px 10px; /* компенсация: размер узла не меняется */
+}
+/* Выделенное облако: контур accent (union-color в легаси гасили). */
+.topo-node.network-node.selected .net-cloud-outline {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+/* Контур объединения: заливка/обводка краской объединения приходит атрибутом;
+   здесь только прозрачности (легаси: fill 0.07, stroke 0.5) и подпись. */
+.union-outline {
+  pointer-events: none;
+  overflow: visible;
+}
+.union-outline-rect {
+  fill-opacity: 0.07;
+  stroke-opacity: 0.5;
+}
+.union-outline-label {
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: var(--panel-bg);
+  stroke-width: 3px;
+}
+.topo-node .node-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Выделение — как в легаси (styled): контур accent и толще базового. */
+.topo-node.selected {
+  border-color: var(--accent) !important;
+  border-width: 2.5px;
+  padding: 5px 9px; /* компенсация: размер узла не меняется */
+}
+/* Концы редактируемой связи — контуры A/B (легаси end-a/end-b, lineWidth 2.5).
+   Класс вешается на обёртку react-flow__node узла, поэтому селектор через неё. */
+.react-flow__node.link-end-a .topo-node { border-color: var(--link-end-a) !important; border-width: 2.5px; }
+.react-flow__node.link-end-b .topo-node { border-color: var(--link-end-b) !important; border-width: 2.5px; }
+/* Затемнение при поиске/редактировании связи (легаси: viewport .search-dim). */
+.react-flow__node.search-dim { opacity: 0.35; }
+.topo-node svg { flex-shrink: 0; }
 
 /* Оболочка Layout: сайдбар и main в строку на всю высоту экрана —
    легаси держал их прямыми детьми flex-body, React-версия заворачивает
@@ -891,17 +998,46 @@ td .owner-badge { margin: 1px var(--space-1) 1px 0; }
 .zone-list { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); }
 .net-name-input { max-width: 16rem; }
 
-/* Modal dialog (native <dialog>) */
+/* Modal dialog (native <dialog>): floating panel with a draggable header,
+   like the legacy canvas panels. */
 dialog.modal {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-bg);
   color: var(--fg);
-  padding: var(--space-4);
+  padding: 0;
   min-width: 22rem;
+  box-shadow: var(--shadow);
 }
-dialog.modal::backdrop { background: rgba(0, 0, 0, 0.45); }
-dialog.modal h3 { margin-top: 0; }
+/* Лёгкое затемнение: канва/страница остаются читаемыми (легаси не затемнял
+   вовсе, но для табличных страниц нужен визуальный фокус). */
+dialog.modal::backdrop { background: rgba(0, 0, 0, 0.25); }
+/* Канвовые модалки: без затемнения — подсветка концов связи на канве видна. */
+dialog.modal.modal-undimmed::backdrop { background: transparent; }
+dialog.modal .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+dialog.modal .modal-header h3 { margin: 0; font-size: 1rem; }
+.modal-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+}
+.modal-close:hover { color: var(--fg); background: var(--panel-bg-hover); }
+dialog.modal .modal-body { padding: var(--space-3) var(--space-4); }
 dialog.modal label,
 dialog.modal .modal-field {
   display: flex;
@@ -910,8 +1046,14 @@ dialog.modal .modal-field {
   margin-bottom: var(--space-3);
   font-size: 0.9rem;
 }
-.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
-.modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+/* Кнопки форм модалок: строка справа, обычная высота, отделена от полей. */
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
+dialog.modal .modal-actions.modal-footer {
+  margin-top: 0;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.modal-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-3); }
 .modal-grid label,
 .modal-grid .modal-field { margin-bottom: 0; }
 .modal-check {
@@ -936,9 +1078,16 @@ dialog.modal label.check-row,
 dialog.modal-lg { width: min(44rem, 92vw); }
 dialog.modal {
   max-height: min(85vh, 100% - 2 * var(--space-4));
-  overflow-y: auto;
 }
+/* Скроллится тело, а не вся панель: хедер остаётся на месте при drag. */
+dialog.modal .modal-body { overflow-y: auto; }
+dialog.modal .modal-body { box-sizing: border-box; width: 100%; }
+dialog.modal .modal-body > :last-child { margin-bottom: 0; }
 dialog.modal .multiselect-panel { max-height: 320px; }
+dialog.modal textarea { resize: vertical; min-height: 4.5rem; }
+dialog.modal input:not([type="checkbox"]),
+dialog.modal select,
+dialog.modal textarea { width: 100%; }
 
 /* Link filter editor: export/import columns per device */
 .filter-dirs { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
@@ -967,8 +1116,10 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .member-row button { margin-left: auto; }
 .member-empty { padding: var(--space-2); text-align: center; font-style: italic; }
 
-/* Searchable subnet picker (network editor modal) */
-.member-combo { position: relative; margin-bottom: var(--space-3); }
+/* Searchable subnet picker (network editor modal). Список рендерится
+   порталом (в dialog или body) с inline position: fixed — не влияет на
+   скролл контейнеров, внутри которых лежит Combo. */
+.member-combo { margin-bottom: var(--space-3); }
 .member-combo input { width: 100%; padding-right: 2.2rem; }
 .member-combo-toggle {
   position: absolute;
@@ -984,10 +1135,6 @@ dialog.modal .multiselect-panel { max-height: 320px; }
 .member-combo-toggle svg { width: 1rem; height: 1rem; transition: transform 0.15s ease; }
 .member-combo-toggle.open svg { transform: rotate(180deg); }
 .member-suggestions {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
   z-index: 40;
   background: var(--bg);
   border: 1px solid var(--border);

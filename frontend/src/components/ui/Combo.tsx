@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type Props = {
   items: string[];
@@ -8,10 +9,15 @@ type Props = {
 
 // Комбобокс с клавиатурной навигацией (↑/↓/Enter/Esc) — заменяет
 // member-combo из легаси-страниц. Список кандидатов фильтруется на месте.
+// Список рендерится порталом (в открытый <dialog> в модалке, иначе в body):
+// он рисуется поверх модалок и скролл-контейнеров, а прокрутка возможна
+// только в самом длинном списке, не в модальном окне.
 export default function Combo({ items, placeholder, onPick }: Props) {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [rect, setRect] = useState<{ dialog: boolean; top: number; left: number; width: number } | null>(null);
 
   const filtered = items.filter((i) => i.toLowerCase().includes(search.toLowerCase()));
 
@@ -22,13 +28,53 @@ export default function Combo({ items, placeholder, onPick }: Props) {
     setCursor(0);
   };
 
+  // Координаты списка фиксируем при открытии; дальше они не «плавают»
+  // при скролле содержимого модалки.
+  const measure = () => {
+    const input = inputRef.current;
+    if (!input) return setRect(null);
+    const r = input.getBoundingClientRect();
+    // Портал кладёт список в открытый <dialog>, а dialog.modal всегда несёт
+    // inline translate (даже 0px 0px) — он становится containing block для
+    // позиционированных потомков. Поэтому внутри диалога клиентские
+    // координаты пересчитываются относительно его коробки, и позиция
+    // остаётся absolute; вне диалога это обычный fixed.
+    const dialog = input.closest("dialog[open]");
+    if (dialog) {
+      const d = dialog.getBoundingClientRect();
+      setRect({ dialog: true, top: r.bottom - d.top + 4, left: r.left - d.left, width: r.width });
+    } else {
+      setRect({ dialog: false, top: r.bottom + 4, left: r.left, width: r.width });
+    }
+  };
+  useLayoutEffect(measure, [open]);
+
+  // Закрытие по клику вне (теперь список живёт вне DOM-дерева инпута).
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (inputRef.current?.contains(t)) return;
+      if ((e.target as HTMLElement).closest?.(".member-suggestions")) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  // Портал: в открытый <dialog>, если Combo используется в модалке — список
+  // попадает в top layer и рисуется поверх backdrop; иначе в body, чтобы
+  // его не обрезали скролл-контейнеры страницы.
+  const portalTarget = inputRef.current?.closest("dialog[open]") ?? document.body;
+
   return (
     <div className="member-combo">
       <input
+        ref={inputRef}
         value={search}
         placeholder={placeholder ?? "начните вводить для поиска"}
         onChange={(e) => { setSearch(e.target.value); setOpen(true); setCursor(0); }}
-        onFocus={() => setOpen(true)}
+        onFocus={() => { measure(); setOpen(true); }}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") { e.preventDefault(); setCursor(Math.min(cursor + 1, filtered.length - 1)); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setCursor(Math.max(cursor - 1, 0)); }
@@ -37,8 +83,16 @@ export default function Combo({ items, placeholder, onPick }: Props) {
         }}
       />
       <button type="button" className={`member-combo-toggle${open ? " open" : ""}`} onClick={() => setOpen(!open)} />
-      {open && (
-        <div className="member-suggestions">
+      {open && rect && createPortal(
+        <div
+          className="member-suggestions"
+          style={{
+            position: rect.dialog ? "absolute" : "fixed",
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+          }}
+        >
           {filtered.map((item, i) => (
             <button
               type="button"
@@ -51,7 +105,8 @@ export default function Combo({ items, placeholder, onPick }: Props) {
             </button>
           ))}
           {filtered.length === 0 && <p className="hint member-empty">Ничего не найдено</p>}
-        </div>
+        </div>,
+        portalTarget,
       )}
     </div>
   );

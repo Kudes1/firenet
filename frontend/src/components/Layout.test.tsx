@@ -49,6 +49,27 @@ describe("Layout", () => {
     }
   });
 
+  it("shows an icon and a label in every nav link", async () => {
+    renderLayout();
+    const link = await screen.findByRole("link", { name: "Схема" });
+    expect(link.querySelector(".icon svg")).not.toBeNull();
+    expect(link.querySelector(".label")).toHaveTextContent("Схема");
+    expect(link).toHaveAccessibleName("Схема");
+  });
+
+  it("renders group headers with a chevron icon and the toggle at the bottom", async () => {
+    renderLayout();
+    await screen.findByRole("link", { name: "Схема" });
+    const sidebar = document.querySelector(".sidebar") as HTMLElement;
+    expect(sidebar.querySelector(".brand")).not.toBeNull();
+    const header = sidebar.querySelector(".nav-group-header") as HTMLElement;
+    expect(header.querySelector(".chevron svg")).not.toBeNull();
+    // порядок как в легаси: brand → nav (группы + standalone) → toggle → user-box
+    const classes = [...sidebar.children].map((el) => el.className);
+    expect(classes).toEqual(["brand", "side-nav", "sidebar-toggle", "user-box"]);
+    expect(sidebar.querySelector(".nav-group-header .chevron svg")).not.toBeNull();
+  });
+
   it("marks the active page", async () => {
     renderLayout("/ui/subnets");
     expect(await screen.findByRole("link", { name: "Подсети" })).toHaveClass("active");

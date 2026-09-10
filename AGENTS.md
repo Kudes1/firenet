@@ -23,7 +23,7 @@ When locating or analyzing code:
  - grep / glob as fallback
 
 ## Tool usage
- - Use built-in OpenCode LSP (gopls, typescript-language-server) for code navigation.
+ - Use Serena MCP for code navigation (see «Serena-first code navigation» above).
  - Don't use playwright unless explicitly asked to do so.
 
 ## Stack

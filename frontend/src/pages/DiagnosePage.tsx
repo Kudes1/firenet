@@ -102,7 +102,7 @@ export default function DiagnosePage() {
   return (
     <main className="page" data-testid="page-diagnose">
       <div className="topology-layout">
-        <div className="canvas-wrap">
+        <TopologyCanvas topology={doc} layout={layout} editable={false} markOf={markOf}>
           <div className="topo-toolbar">
             <button type="button" data-testid="tool-path" className={`tool${panel === "path" ? " active" : ""}`} title="Диагностика пути" onClick={() => setPanel("path")} />
             <button type="button" data-testid="tool-spread" className={`tool${panel === "spread" ? " active" : ""}`} title="Распространение" onClick={() => setPanel("spread")} />
@@ -111,8 +111,6 @@ export default function DiagnosePage() {
               <ResetIcon />
             </button>
           </div>
-
-          <TopologyCanvas topology={doc} layout={layout} editable={false} markOf={markOf} />
 
           {panel === "path" ? (
             <form
@@ -174,7 +172,7 @@ export default function DiagnosePage() {
               </div>
             </form>
           )}
-        </div>
+        </TopologyCanvas>
 
         {report && (
           <div className="page-panel" data-testid="diag-report">

@@ -30,8 +30,8 @@ export const policyFixture: PolicyDoc = {
 };
 
 export const layoutFixture: LayoutDoc = {
-  devices: { r1: { x: 40, y: 40 } },
-  networks: {},
+  devices: { r1: { x: 40, y: 40 }, sw1: { x: 300, y: 40 } },
+  networks: { office: { x: 40, y: 300 } },
   links: {},
   camera: { x: 0, y: 0, z: 1 },
 };

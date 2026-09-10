@@ -5,35 +5,61 @@ import { useMe } from "../api/queries";
 import type { UserResponse } from "../api/types";
 import { storageKeys } from "../lib/storage";
 import { initialTheme, applyTheme } from "./theme";
-import { CollapseIcon, MoonIcon, SunIcon } from "./icons";
+import {
+  ChevronRightIcon,
+  CollapseIcon,
+  CompileIcon,
+  DevicesIcon,
+  DiagnoseIcon,
+  DraftsIcon,
+  HistoryIcon,
+  LinksIcon,
+  MoonIcon,
+  NetworksIcon,
+  RulesIcon,
+  SearchIcon,
+  SetsIcon,
+  SubnetsIcon,
+  SunIcon,
+  TopologyIcon,
+  UnionsIcon,
+  UsersIcon,
+} from "./icons";
 
 const NAV_GROUPS = [
   { id: "topology", title: "Топология", links: [
-    { id: "topology", href: "/ui/topology", label: "Схема" },
-    { id: "devices", href: "/ui/devices", label: "Устройства" },
-    { id: "networks", href: "/ui/networks", label: "Сети" },
-    { id: "unions", href: "/ui/unions", label: "Объединения" },
-    { id: "links", href: "/ui/links", label: "Связи" },
+    { id: "topology", href: "/ui/topology", label: "Схема", Icon: TopologyIcon },
+    { id: "devices", href: "/ui/devices", label: "Устройства", Icon: DevicesIcon },
+    { id: "networks", href: "/ui/networks", label: "Сети", Icon: NetworksIcon },
+    { id: "unions", href: "/ui/unions", label: "Объединения", Icon: UnionsIcon },
+    { id: "links", href: "/ui/links", label: "Связи", Icon: LinksIcon },
   ] },
   { id: "firewall", title: "Firewall", links: [
-    { id: "subnets", href: "/ui/subnets", label: "Подсети" },
-    { id: "sets", href: "/ui/sets", label: "Наборы" },
-    { id: "rules", href: "/ui/rules", label: "Правила" },
-    { id: "compile", href: "/ui/compile", label: "Компиляция" },
+    { id: "subnets", href: "/ui/subnets", label: "Подсети", Icon: SubnetsIcon },
+    { id: "sets", href: "/ui/sets", label: "Наборы", Icon: SetsIcon },
+    { id: "rules", href: "/ui/rules", label: "Правила", Icon: RulesIcon },
+    { id: "compile", href: "/ui/compile", label: "Компиляция", Icon: CompileIcon },
   ] },
   { id: "versions", title: "Версии", links: [
-    { id: "drafts", href: "/ui/drafts", label: "Черновики" },
-    { id: "history", href: "/ui/history", label: "История" },
+    { id: "drafts", href: "/ui/drafts", label: "Черновики", Icon: DraftsIcon },
+    { id: "history", href: "/ui/history", label: "История", Icon: HistoryIcon },
   ] },
 ];
 
 const STANDALONE = [
-  { id: "search", href: "/ui/search", label: "Поиск" },
-  { id: "diagnose", href: "/ui/diagnose", label: "Диагностика" },
-  { id: "users", href: "/ui/users", label: "Пользователи", adminOnly: true },
+  { id: "search", href: "/ui/search", label: "Поиск", Icon: SearchIcon },
+  { id: "diagnose", href: "/ui/diagnose", label: "Диагностика", Icon: DiagnoseIcon },
+  { id: "users", href: "/ui/users", label: "Пользователи", Icon: UsersIcon, adminOnly: true },
 ];
 
 const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? "active" : undefined);
+
+const NavItem = ({ href, label, Icon }: { href: string; label: string; Icon: () => JSX.Element }) => (
+  <NavLink to={href} end className={navClass} data-testid={`nav-${href.slice(4)}`}>
+    <span className="icon"><Icon /></span>
+    <span className="label">{label}</span>
+  </NavLink>
+);
 
 const setNavGroupOpen = (id: string, open: boolean) => {
   if (open) localStorage.removeItem(storageKeys.navGroup(id));
@@ -54,6 +80,18 @@ export default function Sidebar() {
 
   return (
     <aside className={`sidebar${collapsed ? " collapsed" : ""}`} data-testid="sidebar">
+      <strong className="brand">
+        <span className="brand-full">firenet</span>
+        <span className="brand-short">F</span>
+      </strong>
+      <nav className="side-nav">
+        {NAV_GROUPS.map((group) => (
+          <NavGroup key={group.id} group={group} />
+        ))}
+        {STANDALONE.filter((l) => !l.adminOnly || isAdmin(me)).map(({ Icon, ...link }) => (
+          <NavItem key={link.id} {...link} Icon={Icon} />
+        ))}
+      </nav>
       <button
         type="button"
         className="sidebar-toggle"
@@ -63,16 +101,6 @@ export default function Sidebar() {
       >
         <CollapseIcon />
       </button>
-      {NAV_GROUPS.map((group) => (
-        <NavGroup key={group.id} group={group} />
-      ))}
-      <nav className="side-nav">
-        {STANDALONE.filter((l) => !l.adminOnly || isAdmin(me)).map((link) => (
-          <NavLink key={link.id} to={link.href} end className={navClass} data-testid={`nav-${link.id}`}>
-            <span className="label">{link.label}</span>
-          </NavLink>
-        ))}
-      </nav>
       <div className="user-box">
         <span className="user-name">{me?.username ?? ""}</span>
         <button
@@ -112,15 +140,15 @@ function NavGroup({ group }: { group: (typeof NAV_GROUPS)[number] }) {
         type="button"
         className="nav-group-header"
         onClick={() => { setNavGroupOpen(group.id, !open); setOpen(!open); }}
+        aria-label={`Свернуть/развернуть раздел «${group.title}»`}
       >
-        {group.title}
+        <span className="icon chevron"><ChevronRightIcon /></span>
+        <span className="label">{group.title}</span>
       </button>
       {open && (
         <nav className="side-nav nav-group-links">
-          {group.links.map((link) => (
-            <NavLink key={link.id} to={link.href} end className={navClass} data-testid={`nav-${link.id}`}>
-              <span className="label">{link.label}</span>
-            </NavLink>
+          {group.links.map(({ Icon, ...link }) => (
+            <NavItem key={link.id} {...link} Icon={Icon} />
           ))}
         </nav>
       )}

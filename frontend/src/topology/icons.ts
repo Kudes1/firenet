@@ -6,11 +6,6 @@ export const DEVICE_H = 60;
 export const NET_W = 160;
 export const NET_H = 60;
 
-// Палитра различимых оттенков; цвет объединения = его порядок в документе.
-export const UNION_COLORS = [
-  "#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16",
-];
-
 type KindStyle = { rx: number; glyph?: string };
 
 // Глифы адаптированы из icons/*.svg (svgrepo.com), сетка 24x24, масштаб x0.5.
@@ -20,3 +15,8 @@ export const KINDS: Record<DeviceKind, KindStyle> = {
 };
 
 export const kindStyle = (kind: string): KindStyle => KINDS[kind as DeviceKind] ?? { rx: 4 };
+
+// Палитра различимых оттенков; цвет объединения = его порядок в документе.
+export const UNION_COLORS = [
+  "#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16",
+];

@@ -16,7 +16,7 @@ test("admin создаёт пользователя формой", async ({ page
 
   const inviteDialog = page.locator("dialog.modal", { hasText: "Ссылка приглашения" });
   await expect(inviteDialog).toBeVisible();
-  await inviteDialog.getByRole("button", { name: "Закрыть" }).click();
+  await inviteDialog.locator("button.modal-close").click();
 
   const row = page.locator("tbody tr", { hasText: username });
   await expect(row).toBeVisible();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutDoc, TopologyDoc } from "../api/types";
 import { DEVICE_H, DEVICE_W, NET_H, NET_W } from "./icons";
-import { buildScene, defaultPoint, unionColor } from "./scene";
+import { buildScene, defaultPoint, unionColor, unionBoxes, type PositionOf, type UnionBox } from "./scene";
 
 const topology: TopologyDoc = {
   devices: [
@@ -78,6 +78,21 @@ describe("buildScene", () => {
     expect(attach.target).toBe("network:office");
   });
 
+  // Геометрия связи — центр-цент (как в легаси), концы считаются в сцене:
+  // RF привязывает концы рёбер к хэндлам на границах, поэтому центры
+  // передаются в data и LinkEdge рисует по ним.
+  it("computes edge endpoints as node centers", () => {
+    const { edges } = buildScene(topology, layout);
+    // r1 в (0,0): центр (70,30); sw1 в (0,200): центр (70,230).
+    const link = edges.find((e) => e.id.startsWith("link:r1|sw1"))!;
+    expect(link.data.from).toEqual({ x: 70, y: 30 });
+    expect(link.data.to).toEqual({ x: 70, y: 230 });
+    // attach: sw1 (0,200) → центр (70,230); office (0,350) → центр (80,380).
+    const attach = edges.find((e) => e.type === "attach")!;
+    expect(attach.data.from).toEqual({ x: 70, y: 230 });
+    expect(attach.data.to).toEqual({ x: 80, y: 380 });
+  });
+
   it("skips links whose endpoints have no position yet", () => {
     const { edges } = buildScene(topology, { devices: { r1: { x: 0, y: 0 } } });
     expect(edges).toHaveLength(0);
@@ -108,6 +123,41 @@ describe("unionColor", () => {
   it("is stable per union index and wraps around", () => {
     expect(unionColor(0)).toBe(unionColor(0));
     expect(unionColor(8)).toBe(unionColor(0));
+  });
+});
+
+describe("unionBoxes", () => {
+  // bbox участников + UNION_PAD=30 со всех сторон (легаси unionBox):
+  // r1 (0,0,140x60), r2 (300,0,140x60), office (0,350,160x60).
+  const boxOf = (name: string, boxes: UnionBox[]) => boxes.find((b) => b.name === name)!;
+  const positionOf: PositionOf = (kind, name) => (kind === "network" ? layout.networks : layout.devices)![name];
+
+  it("wraps member nodes in a padded bounding box with a color", () => {
+    const boxes = unionBoxes(topology, positionOf);
+    expect(boxOf("u1", boxes)).toEqual({ name: "u1", color: unionColor(0), x: -30, y: -30, w: 500, h: 120 });
+  });
+
+  it("covers network nodes too and keeps union order", () => {
+    const topo: TopologyDoc = { ...topology, unions: [{ name: "u1", networks: ["office"] }, { name: "u2", devices: ["r1"] }] };
+    const boxes = unionBoxes(topo, positionOf);
+    expect(boxOf("u1", boxes)).toEqual({ name: "u1", color: unionColor(0), x: -30, y: 320, w: 220, h: 120 });
+    expect(boxOf("u2", boxes)).toEqual({ name: "u2", color: unionColor(1), x: -30, y: -30, w: 200, h: 120 });
+  });
+
+  it("drops unions without any positioned member", () => {
+    const topo: TopologyDoc = { ...topology, unions: [{ name: "empty", devices: ["ghost"] }, { name: "u1", devices: ["r1"] }] };
+    const boxes = unionBoxes(topo, positionOf);
+    expect(boxes.map((b) => b.name)).toEqual(["u1"]);
+  });
+
+  // Позиции живые (узел тащат локально, layout ещё не обновлён) —
+  // обводка должна следовать за ними сразу.
+  it("uses the callback positions over stale layout data", () => {
+    const boxes = unionBoxes(topology, (kind, name) => {
+      const base = positionOf(kind, name)!;
+      return name === "r2" ? { x: base.x + 100, y: base.y } : base;
+    });
+    expect(boxOf("u1", boxes)).toEqual({ name: "u1", color: unionColor(0), x: -30, y: -30, w: 600, h: 120 });
   });
 });
 

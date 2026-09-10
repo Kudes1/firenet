@@ -1,14 +1,12 @@
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import type { NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { DEVICE_H, DEVICE_W, kindStyle } from "./icons";
 
 // Узел устройства: рамка по типу (радиус и цвет), глиф типа перед именем.
 // memo — перерисовка нужна только при смене данных или выделения.
-// Хэндлы рендерятся только при isConnectable: RF не убирает их из DOM при
-// nodesConnectable={false}, а лишь делает pointer-events:none (см. камни).
-export const DeviceNode = memo(function DeviceNode({ data, selected, isConnectable }: NodeProps) {
-  const { name, kind, unionColor, description } = data as unknown as {
-    name: string; kind: string; unionColor?: string; description?: string;
+export const DeviceNode = memo(function DeviceNode({ data, selected }: NodeProps) {
+  const { name, kind, description } = data as unknown as {
+    name: string; kind: string; description?: string;
   };
   const style = kindStyle(kind);
   return (
@@ -19,7 +17,6 @@ export const DeviceNode = memo(function DeviceNode({ data, selected, isConnectab
         width: DEVICE_W,
         height: DEVICE_H,
         borderRadius: style.rx,
-        borderColor: unionColor,
       }}
     >
       {style.glyph && (
@@ -28,8 +25,7 @@ export const DeviceNode = memo(function DeviceNode({ data, selected, isConnectab
         </svg>
       )}
       <span className="node-label">{name} ({kind})</span>
-      {isConnectable && <Handle type="source" position={Position.Right} />}
-      {isConnectable && <Handle type="target" position={Position.Left} />}
+
     </div>
   );
 });

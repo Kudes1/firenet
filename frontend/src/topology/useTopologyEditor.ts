@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTopologyOperations } from "../api/queries";
-import type { DeviceDoc, LayoutPoint, NetworkDoc, TopologyOperation } from "../api/types";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTopologyOperations, projectKeys } from "../api/queries";
+import type { DeviceDoc, LayoutPoint, NetworkDoc, TopologyDoc, TopologyOperation } from "../api/types";
 import { useDraft } from "../draft/DraftContext";
 import { notify } from "../components/notify";
 import { defaultPoint } from "./scene";
@@ -14,8 +15,9 @@ const FLUSH_DELAY_MS = 400;
 // модель, что была в topology_sync.js. Статус нужен для индикатора
 // «сохранено/изменено» в тулбаре.
 export function useTopologyEditor() {
-  const { isReadOnly } = useDraft();
+  const { isReadOnly, scope } = useDraft();
   const ops = useTopologyOperations();
+  const queryClient = useQueryClient();
   const queue = useRef<TopologyOperation[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<SyncStatus>("saved");
@@ -97,12 +99,48 @@ export function useTopologyEditor() {
     }
   }, [enqueue]);
 
+  // setUnion перемещает объект в объединение targetName (или из всех
+  // объединений при null) — паритет с легаси setUnion в topology.js.
+  // Состав объединений читается из актуального кэша react-query: между
+  // открытием меню и кликом документ мог обновиться (flush чужой очереди),
+  // и имя объединения — единственная идентичность, переживающая это.
+  const setUnion = useCallback((name: string, nodeKind: "device" | "network", target: string | null) => {
+    const doc = queryClient.getQueryData(projectKeys.resource(scope, "topology")) as TopologyDoc | undefined;
+    const unions = doc?.unions ?? [];
+    const idField = nodeKind === "device" ? "deviceName" : "networkName";
+    const removeKind = nodeKind === "device" ? "union-remove-device" : "union-remove-network";
+    const addKind = nodeKind === "device" ? "union-add-device" : "union-add-network";
+    const targetUnion = target ? unions.find((u) => u.name === target) : undefined;
+    const alreadyInTarget = !!targetUnion && (targetUnion[nodeKind === "device" ? "devices" : "networks"] ?? []).includes(name);
+    const removeFrom = unions
+      .filter((u) => (u[nodeKind === "device" ? "devices" : "networks"] ?? []).includes(name) && (!targetUnion || u.name !== targetUnion.name))
+      .map((u) => u.name);
+    removeFrom.forEach((unionName) => enqueue({ kind: removeKind, unionName, [idField]: name }));
+    if (targetUnion && !alreadyInTarget) enqueue({ kind: addKind, unionName: targetUnion.name, [idField]: name });
+  }, [enqueue, queryClient, scope]);
+
   const setCamera = useCallback((camera: { x: number; y: number; zoom: number }) => {
     enqueue({ kind: "set-camera", camera: { x: camera.x, y: camera.y, z: camera.zoom } });
   }, [enqueue]);
 
+  // Батч операций из форм редактирования (update-device + перенос union).
+  const enqueueAll = useCallback((operations: TopologyOperation[]) => {
+    operations.forEach(enqueue);
+  }, [enqueue]);
+
+  // deleteLink/detachNetwork — операции контекстного меню по связи/привязке.
+  // Пара устройств нормализуется: бэкенд ищет связь по канонической паре.
+  const deleteLink = useCallback((a: string, b: string) => {
+    enqueue({ kind: "delete-link", link: { a: { device: a }, b: { device: b } } });
+  }, [enqueue]);
+
+  const detachNetwork = useCallback((networkName: string, device: string) => {
+    enqueue({ kind: "detach-network", networkName, attach: { device } });
+  }, [enqueue]);
+
   return {
     status, flush, moveDevice, moveNetwork, createDevice, createNetwork,
-    createLink, removeSelected, setCamera, nextDevicePoint: (index: number) => defaultPoint("device", index),
+    createLink, removeSelected, setUnion, enqueueAll, deleteLink, detachNetwork,
+    setCamera, nextDevicePoint: (index: number) => defaultPoint("device", index),
   };
 }
