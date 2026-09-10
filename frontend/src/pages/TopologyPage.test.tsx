@@ -175,9 +175,8 @@ describe("TopologyPage", () => {
     // Обычная связь: «Фильтровать» создаёт пустой фильтр и открывает модалку
     // с двумя колонками «Экспорт» (по одной на сторону).
     expect((await screen.findAllByText("Экспорт", { selector: "p.filter-dir-title" })).length).toBe(2);
-    // Канвовые модалки не затемняют канву (легаси держал канву видимой):
-    // подсвеченные концы не должны прятаться под ::backdrop.
-    expect(document.querySelector("dialog.modal")!.className).toContain("modal-undimmed");
+    // Форма редактирования — панель внутри канвы (.canvas-panel), не <dialog>.
+    expect(document.querySelector(".canvas-panel")).not.toBeNull();
   });
 
   it("opens device edit modal without dimming the canvas", async () => {
@@ -185,7 +184,8 @@ describe("TopologyPage", () => {
     await openNodeMenu("rf__node-device:r1");
     fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
     expect(await screen.findByLabelText("Имя")).toBeInTheDocument();
-    expect(document.querySelector("dialog.modal")!.className).toContain("modal-undimmed");
+    // Форма редактирования — панель внутри канвы (.canvas-panel), не <dialog>.
+    expect(document.querySelector(".canvas-panel")).not.toBeNull();
   });
 
   it("outlines link endpoints while the filter modal is open", async () => {

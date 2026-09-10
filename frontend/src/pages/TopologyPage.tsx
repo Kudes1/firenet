@@ -10,7 +10,7 @@ import TopologyCanvas from "../topology/TopologyCanvas";
 import ContextMenu, { type MenuItem } from "../topology/ContextMenu";
 import { contextMenuItems, type CanvasTarget } from "../topology/contextMenuItems";
 import { DeviceEditForm, NetworkEditForm, LinkFilterForm } from "../topology/editForms";
-import Modal from "../components/ui/Modal";
+import CanvasPanel from "../topology/CanvasPanel";
 import { notify } from "../components/notify";
 import { ConnectIcon, DeviceToolIcon, NetworkToolIcon, SearchIcon, SelectIcon, TrashIcon } from "../components/icons";
 
@@ -268,57 +268,53 @@ export default function TopologyPage() {
             />
           </div>
           {menu && <ContextMenu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
+          {/* Панели редактирования — children канвы: координаты канвовые,
+              панель обрезается рамкой .canvas-wrap (см. CanvasPanel). */}
+          {editDevice && (
+            <CanvasPanel title={`Изменить устройство ${editDevice.name}`} onClose={() => setEditTarget(null)}>
+              <DeviceEditForm
+                device={editDevice}
+                unions={doc.unions ?? []}
+                existingNames={devices.map((d) => d.name)}
+                onCancel={() => setEditTarget(null)}
+                onSubmit={(operations) => { setEditTarget(null); editor.enqueueAll(operations); }}
+              />
+            </CanvasPanel>
+          )}
+          {editNetwork && (
+            <CanvasPanel title={`Изменить сеть ${editNetwork.name}`} onClose={() => setEditTarget(null)} wide>
+              <NetworkEditForm
+                network={editNetwork}
+                networks={networks}
+                allSubnets={subnets.data?.subnets ?? []}
+                existingNames={networks.map((n) => n.name)}
+                onCancel={() => setEditTarget(null)}
+                onSubmit={(operations) => { setEditTarget(null); editor.enqueueAll(operations); }}
+              />
+            </CanvasPanel>
+          )}
+          {editLink && (
+            <CanvasPanel
+              title={`Фильтры связи ${editLink.a.device} ↔ ${editLink.b.device}`}
+              onClose={() => setEditTarget(null)}
+              wide
+            >
+              <LinkFilterForm
+                link={editLink}
+                onSave={async (next) => {
+                  const links = (doc.links ?? []).slice();
+                  if (editTarget?.kind === "link") links[editTarget.index] = next;
+                  try {
+                    await save.mutateAsync({ ...doc, links });
+                  } catch (error) {
+                    notify((error as Error).message);
+                  }
+                }}
+              />
+            </CanvasPanel>
+          )}
         </TopologyCanvas>
       </div>
-
-      {/* Модалки редактирования поверх канвы — те же формы, что и на
-          страницах-таблицах (editForms), но операции идут через очередь
-          редактора канвы. */}
-      {editDevice && (
-        <Modal open title={`Изменить устройство ${editDevice.name}`} onClose={() => setEditTarget(null)} undimmed>
-          <DeviceEditForm
-            device={editDevice}
-            unions={doc.unions ?? []}
-            existingNames={devices.map((d) => d.name)}
-            onCancel={() => setEditTarget(null)}
-            onSubmit={(operations) => { setEditTarget(null); editor.enqueueAll(operations); }}
-          />
-        </Modal>
-      )}
-      {editNetwork && (
-        <Modal open title={`Изменить сеть ${editNetwork.name}`} onClose={() => setEditTarget(null)} wide undimmed>
-          <NetworkEditForm
-            network={editNetwork}
-            networks={networks}
-            allSubnets={subnets.data?.subnets ?? []}
-            existingNames={networks.map((n) => n.name)}
-            onCancel={() => setEditTarget(null)}
-            onSubmit={(operations) => { setEditTarget(null); editor.enqueueAll(operations); }}
-          />
-        </Modal>
-      )}
-      {editLink && (
-        <Modal open={!!editLink}
-          title={`Фильтры связи ${editLink.a.device} ↔ ${editLink.b.device}`}
-          onClose={() => setEditTarget(null)}
-          wide
-          undimmed
-          footer={<button type="button" onClick={() => setEditTarget(null)}>Закрыть</button>}
-        >
-          <LinkFilterForm
-            link={editLink}
-            onSave={async (next) => {
-              const links = (doc.links ?? []).slice();
-              if (editTarget?.kind === "link") links[editTarget.index] = next;
-              try {
-                await save.mutateAsync({ ...doc, links });
-              } catch (error) {
-                notify((error as Error).message);
-              }
-            }}
-          />
-        </Modal>
-      )}
     </main>
   );
 }

@@ -1043,8 +1043,6 @@ dialog.modal {
 /* Лёгкое затемнение: канва/страница остаются читаемыми (легаси не затемнял
    вовсе, но для табличных страниц нужен визуальный фокус). */
 dialog.modal::backdrop { background: rgba(0, 0, 0, 0.25); }
-/* Канвовые модалки: без затемнения — подсветка концов связи на канве видна. */
-dialog.modal.modal-undimmed::backdrop { background: transparent; }
 dialog.modal .modal-header {
   display: flex;
   align-items: center;

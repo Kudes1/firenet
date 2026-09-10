@@ -7,14 +7,12 @@ type Props = {
   children: React.ReactNode;
   footer?: React.ReactNode;
   wide?: boolean;
-  // Без затемнения фона: модалки поверх канвы — подсветка на ней остаётся видна.
-  undimmed?: boolean;
 };
 
 // Плавающая панель на нативном <dialog>: из коробки получаем Esc и ловушку
 // фокуса, ::backdrop стилизуем на светлом затемнении. Панель перетаскивается
 // за хедер (как в легаси), клик по затемнению закрывает.
-export default function Modal({ open, title, onClose, children, footer, wide, undimmed }: Props) {
+export default function Modal({ open, title, onClose, children, footer, wide }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   // Перетаскивание: база фиксируется на mousedown (текущий сдвиг + rect до
   // сдвига), дальше offset считается от неё с зажимом «панель в кадре».
@@ -72,7 +70,7 @@ export default function Modal({ open, title, onClose, children, footer, wide, un
   return (
     <dialog
       ref={ref}
-      className={`modal${wide ? " modal-lg" : ""}${undimmed ? " modal-undimmed" : ""}`}
+      className={`modal${wide ? " modal-lg" : ""}`}
       style={{ translate: `${offset.x}px ${offset.y}px` }}
       onCancel={onClose}
       onClose={onClose}
