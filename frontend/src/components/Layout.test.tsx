@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -8,6 +10,8 @@ import { server } from "../test/msw";
 import * as fx from "../api/fixtures";
 import { storageKeys } from "../lib/storage";
 import Layout from "./Layout";
+
+const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 beforeAll(() => server.listen());
 beforeEach(() => {
@@ -93,6 +97,11 @@ describe("Layout", () => {
     server.use(http.get("/api/drafts/d1", () => HttpResponse.json(fx.draftFixture)));
     renderLayout();
     expect(await screen.findByText(/Черновик «правки»/)).toBeInTheDocument();
+  });
+
+  it("keeps the workspace spacing compact around the draft banner", async () => {
+    expect(styles).toMatch(/\bmain\s*\{[^}]*padding:\s*var\(--space-2\)/s);
+    expect(styles).toMatch(/\.draft-banner\s*\{[^}]*margin-bottom:\s*var\(--space-2\)/s);
   });
 });
 

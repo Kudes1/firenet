@@ -215,7 +215,7 @@ main {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: var(--space-3);
+  padding: var(--space-2);
 }
 .tab-panel {
   flex: 1;
@@ -391,7 +391,38 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .react-flow__node.link-end-b .topo-node { border-color: var(--link-end-b) !important; border-width: 2.5px; }
 /* Затемнение при поиске/редактировании связи (легаси: viewport .search-dim). */
 .react-flow__node.search-dim { opacity: 0.35; }
+/* Первый объект connect-инструмента (легаси pending: контур accent, толще). */
+.react-flow__node.pending .topo-node { border-color: var(--accent) !important; border-width: 3px; }
+/* Превью-линия связи от ожидающего объекта к курсору (легаси previewWire).
+   Оверлей на всю канву поверх узлов, но под тулбаром и панелями. */
+.connect-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  overflow: visible;
+  pointer-events: none;
+}
+.connect-preview path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+/* В connect-инструменте канва показывает, что клик адресован соединению. */
+.canvas-wrap.connecting .react-flow__pane { cursor: crosshair; }
 .topo-node svg { flex-shrink: 0; }
+/* Маркеры точек изгиба связи (легаси: белые кружки с контуром accent). */
+.waypoint-handle {
+  fill: var(--panel-bg);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  cursor: grab;
+  /* Контейнер ребра .react-flow__edge ставит pointer-events: visibleStroke:
+     унаследовав его, маркер ловил бы курсор только обводкой, а не кругом.
+     Тело маркера — цель drag и dblclick. */
+  pointer-events: all;
+}
+.waypoint-handle:hover { stroke-width: 2.5; }
 
 /* Оболочка Layout: сайдбар и main в строку на всю высоту экрана —
    легаси держал их прямыми детьми flex-body, React-версия заворачивает
@@ -517,10 +548,8 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .net-info-cidr { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .net-info-empty { color: var(--muted); font-size: 0.82rem; }
 
-/* floating panel chrome shared by canvas edit windows (#net-edit,
-   #device-edit, #link-panel) and diagnose tool panels (#diag-panel,
-   #spread-panel) — opened near a canvas point, draggable by header,
-   world-anchored via floating_panel.js. */
+/* floating panel chrome shared by legacy canvas edit windows
+   (#net-edit, #device-edit, #link-panel). */
 .floating-panel {
   position: absolute;
   z-index: 10;
@@ -629,6 +658,23 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   box-shadow: var(--shadow);
 }
 .canvas-panel-lg { width: min(44rem, calc(100% - 2 * var(--space-3))); }
+.canvas-panel-compact {
+  min-width: 16rem;
+  width: min(19rem, calc(100% - 2 * var(--space-3)));
+}
+.canvas-panel-compact .canvas-panel-header {
+  padding: var(--space-1) var(--space-2);
+  cursor: default;
+}
+.canvas-panel-compact .canvas-panel-header h3 { font-size: 0.9rem; }
+.canvas-panel-compact .canvas-panel-body { padding: var(--space-2) var(--space-3); }
+.network-info-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.network-info-row { display: flex; justify-content: space-between; gap: var(--space-3); }
+.network-info-cidr { color: var(--muted); white-space: nowrap; }
+.network-info-empty { margin: 0; color: var(--muted); }
+.create-panel-form { display: grid; gap: var(--space-2); }
+.create-panel-form label { margin-bottom: 0; font-size: 0.85rem; }
+.create-panel-form .modal-actions { margin-top: var(--space-1); }
 .canvas-panel-header {
   display: flex;
   align-items: center;
@@ -811,6 +857,21 @@ td:has(> input[type="checkbox"]) {
 }
 /* Search glyph matches the primary action's text size (1rem), not btn-sm's. */
 .btn-search svg { width: 1rem; height: 1rem; display: block; }
+.btn-search .search-toggle-icon { position: relative; display: inline-flex; width: 1rem; height: 1rem; }
+.btn-search .search-toggle-close {
+  position: absolute;
+  right: -0.25rem;
+  bottom: -0.2rem;
+  display: inline-flex;
+  width: 0.65rem;
+  height: 0.65rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--panel-bg);
+  color: var(--danger);
+}
+.btn-search .search-toggle-close svg { width: 0.7rem; height: 0.7rem; }
 
 .table-toolbar {
   display: flex;
@@ -1076,7 +1137,10 @@ dialog.modal .modal-header h3 { margin: 0; font-size: 1rem; }
   border-radius: var(--radius-sm);
 }
 .modal-close:hover { color: var(--fg); background: var(--panel-bg-hover); }
-dialog.modal .modal-body { padding: var(--space-3) var(--space-4); }
+dialog.modal .modal-body {
+  padding: var(--space-3) var(--space-4);
+  padding-right: var(--space-2);
+}
 dialog.modal label,
 dialog.modal .modal-field {
   display: flex;
@@ -1115,6 +1179,41 @@ dialog.modal label.check-row,
 
 /* Large modal variant (e.g. network editor with a long subnet list) */
 dialog.modal-lg { width: min(44rem, 92vw); }
+dialog.modal-compact {
+  min-width: 0;
+  width: min(18rem, calc(100vw - 2 * var(--space-4)));
+}
+dialog.modal-resizable .modal-resize-corner {
+  position: relative;
+  flex: 0 0 16px;
+  min-height: 16px;
+}
+dialog.modal-resizable .modal-resize-handle {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  z-index: 1;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+dialog.modal-resizable .modal-resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  opacity: 0.65;
+}
+dialog.modal-resizable .modal-resize-handle:hover::after { border-color: var(--accent); opacity: 1; }
+dialog.modal-resizable { min-width: 0; display: flex; flex-direction: column; }
+dialog.modal-resizable .modal-header,
+dialog.modal-resizable .modal-footer { flex-shrink: 0; }
+dialog.modal-resizable .modal-body { min-height: 0; flex: 1 1 auto; }
 dialog.modal {
   max-height: min(85vh, 100% - 2 * var(--space-4));
 }
@@ -1156,9 +1255,9 @@ dialog.modal textarea { width: 100%; }
 .member-empty { padding: var(--space-2); text-align: center; font-style: italic; }
 
 /* Searchable subnet picker (network editor modal). Список рендерится
-   порталом (в dialog или body) с inline position: fixed — не влияет на
-   скролл контейнеров, внутри которых лежит Combo. */
-.member-combo { margin-bottom: var(--space-3); }
+   порталом в ближайший label/fieldset, за пределами скролл-контейнера
+   участников; position: relative у .member-combo нужен для кнопки-триггера. */
+.member-combo { position: relative; margin-bottom: var(--space-3); }
 .member-combo input { width: 100%; padding-right: 2.2rem; }
 .member-combo-toggle {
   position: absolute;
@@ -1211,22 +1310,6 @@ dialog.modal textarea { width: 100%; }
 .diag-combo { margin-bottom: 0; }
 .diag-combo input { padding-right: 4.2rem; }
 
-/* — диагностика пути: плавающее окно параметров и отчёта — */
-/* .diag-panel-body — модификатор поверх .floating-panel-body для #diag-panel/
-   #spread-panel: тело со своим вертикальным скроллом (в отличие от
-   .net-edit, у этих панелей нет всплывающего поверх .member-suggestions,
-   которому нужен был бы overflow: visible). */
-.diag-panel-body { overflow-y: auto; }
-/* .floating-panel-body label/.modal-field (выше) стилизуют net-edit/
-   device-edit под их форму (flex-column, отступы) — diagnose делил это
-   правило непреднамеренно; до объединения панелей его label были обычным
-   inline-элементом браузера. Возвращаем исходную раскладку. */
-.diag-panel-body label,
-.diag-panel-body .modal-field {
-  display: inline;
-  margin-bottom: 0;
-  font-size: inherit;
-}
 .diag-path { border: 1px solid var(--border); border-radius: 8px; padding: var(--space-2); margin-bottom: var(--space-2); }
 .diag-path header { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-1); }
 .diag-chain { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
@@ -1391,7 +1474,7 @@ dialog.modal textarea { width: 100%; }
   align-items: center;
   gap: 12px;
   padding: 8px 16px;
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-2);
   font-size: 0.85em;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

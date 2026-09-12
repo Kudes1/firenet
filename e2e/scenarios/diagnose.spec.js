@@ -30,6 +30,7 @@ test("путь найден между двумя подсетями", async ({ 
   const { a, b } = await arrangeTwoSites(request, id);
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/diagnose");
+  await page.locator('[data-testid="tool-path"]').click();
   const panel = page.locator('[data-testid="diag-panel"]');
   await expect(panel).toBeVisible();
   await panel.locator("label", { hasText: "Источник" }).locator("input").fill("10.50.0.7");
@@ -45,6 +46,7 @@ test("путь не найден без связи", async ({ page, request }) =
   const { a, b } = await arrangeTwoSites(request, id, { linked: false });
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/diagnose");
+  await page.locator('[data-testid="tool-path"]').click();
   const panel = page.locator('[data-testid="diag-panel"]');
   await expect(panel).toBeVisible();
   await panel.locator("label", { hasText: "Источник" }).locator("input").fill("10.50.0.7");
@@ -59,6 +61,7 @@ test("односторонняя доступность без mirror", async ({
   await arrangeTwoSites(request, id, { mirror: false });
   await loginViaUI(page);
   await openTablePage(page, id, "/ui/diagnose");
+  await page.locator('[data-testid="tool-path"]').click();
   const panel = page.locator('[data-testid="diag-panel"]');
   await expect(panel).toBeVisible();
   await panel.locator("label", { hasText: "Источник" }).locator("input").fill("10.50.0.7");

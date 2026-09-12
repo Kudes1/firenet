@@ -1,24 +1,28 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useProjectResource, useProjectSave } from "../api/queries";
 import type { LayoutDoc, SubnetsDoc, TopologyDoc } from "../api/types";
 import { useDraft } from "../draft/DraftContext";
 import { containsFold, matchPrefixQuery } from "../lib/search";
 import { canonicalLink } from "../lib/links";
+import { connectOutcome, type ConnectTarget } from "../lib/connect";
 import { useEditorLock } from "../lib/editorLock";
 import { useTopologyEditor } from "../topology/useTopologyEditor";
-import TopologyCanvas from "../topology/TopologyCanvas";
+import TopologyCanvas, { type CanvasTool } from "../topology/TopologyCanvas";
+import { ConnectPreview } from "../topology/ConnectPreview";
+import { DEVICE_H, DEVICE_W, NET_H, NET_W } from "../topology/scene";
 import ContextMenu, { type MenuItem } from "../topology/ContextMenu";
 import { contextMenuItems, type CanvasTarget } from "../topology/contextMenuItems";
 import { DeviceEditForm, NetworkEditForm, LinkFilterForm } from "../topology/editForms";
 import CanvasPanel from "../topology/CanvasPanel";
 import { notify } from "../components/notify";
-import { ConnectIcon, DeviceToolIcon, NetworkToolIcon, SearchIcon, SelectIcon, TrashIcon } from "../components/icons";
+import { ConnectIcon, DeviceToolIcon, NetworkToolIcon, SearchIcon, SelectIcon, SyncStatusIcon, TrashIcon } from "../components/icons";
 
-type Tool = "select" | "connect" | "device" | "network";
 type EditTarget =
   | { kind: "device"; name: string }
   | { kind: "network"; name: string }
   | { kind: "link"; index: number };
+
+type CreateTarget = { kind: "device" | "network"; position: { x: number; y: number } };
 
 const EMPTY_TOPOLOGY: TopologyDoc = { devices: [], links: [], networks: [], sets: [], unions: [] };
 const EMPTY_LAYOUT: LayoutDoc = {};
@@ -36,12 +40,19 @@ export default function TopologyPage() {
   const editor = useTopologyEditor();
   const save = useProjectSave<TopologyDoc>("topology");
 
-  const [tool, setTool] = useState<Tool>("select");
+  const [tool, setTool] = useState<CanvasTool>("select");
+  // Первый объект connect-инструмента (легаси pending): ждёт пары.
+  const [pending, setPending] = useState<ConnectTarget | null>(null);
+  // Курсор в координатах сцены — второй конец превью-линии.
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [selection, setSelection] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; items: MenuItem[] } | null>(null);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [createTarget, setCreateTarget] = useState<CreateTarget | null>(null);
+  const [createName, setCreateName] = useState("");
+  const [createDeviceKind, setCreateDeviceKind] = useState<"router" | "switch">("router");
 
   const doc = topology.data ?? EMPTY_TOPOLOGY;
   const layout = layoutQuery.data ?? EMPTY_LAYOUT;
@@ -97,10 +108,110 @@ export default function TopologyPage() {
     action();
   };
 
+  // Смена инструмента сбрасывает ожидающий объект: пара, выбранная в connect,
+  // не должна доживать до возврата в него (легаси setTool → cancelPending).
+  const selectTool = useCallback((next: CanvasTool) => {
+    setPending(null);
+    setCursor(null);
+    setTool(next);
+  }, []);
+
+  // pendingId — id узла-кандидата в терминах канвы (device:<name>).
+  const pendingId = pending && `${pending.kind}:${pending.name}`;
+
+  // Второй клик connect-инструмента: исход считает connectOutcome (чистая
+  // логика), страница только исполняет его — операция в очередь, баннер или
+  // сброс. Инструмент остаётся активным: можно соединять следующую пару.
+  const onConnectPick = useCallback((id: string) => {
+    const kind = id.startsWith("device:") ? "device" : "network";
+    const target: ConnectTarget = { kind, name: id.slice(kind.length + 1) };
+    if (!pending) {
+      setPending(target);
+      return;
+    }
+    const outcome = connectOutcome(pending, target, doc);
+    setPending(null);
+    setCursor(null);
+    if ("operation" in outcome) {
+      guard(() => {
+        const op = outcome.operation;
+        if (op.kind === "create-link" && op.link) editor.createLink(op.link.a.device, op.link.b.device);
+        else if (op.kind === "attach-network" && op.networkName && op.attach) {
+          editor.attachNetwork(op.networkName, op.attach.device);
+        }
+      });
+    } else if ("warning" in outcome) {
+      notify(outcome.warning);
+    }
+  }, [pending, doc, guard, editor]);
+
+  // Горячие клавиши инструментов (легаси shortcuts: v/c/d/n) и Esc — отмена
+  // ожидающего объекта. Клавиши гаснут в полях ввода и панелях редактирования.
+  useEffect(() => {
+    if (!canEdit) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (event.key === "Escape" && createTarget) {
+        setCreateTarget(null);
+        return;
+      }
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof Element && target.closest(".canvas-panel"))
+      ) return;
+      if (event.key === "Escape" && pending) {
+        setPending(null);
+        setCursor(null);
+        return;
+      }
+      const shortcuts: Record<string, CanvasTool> = { v: "select", c: "connect", d: "device", n: "network" };
+      const next = shortcuts[event.key];
+      if (next) selectTool(next);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [canEdit, pending, createTarget, selectTool]);
+
+  // Центр ожидающего объекта — первый конец превью-линии. Позиция из
+  // layout, как у узла на канве; без записи в layout превью не рисуется.
+  const pendingCenter = useMemo(() => {
+    if (!pending) return null;
+    const point = pending.kind === "device"
+      ? (layout.devices ?? {})[pending.name]
+      : (layout.networks ?? {})[pending.name];
+    if (!point) return null;
+    const w = pending.kind === "device" ? DEVICE_W : NET_W;
+    const h = pending.kind === "device" ? DEVICE_H : NET_H;
+    return { x: point.x + w / 2, y: point.y + h / 2 };
+  }, [pending, layout]);
+
   const onPaneClick = useCallback((position: { x: number; y: number }) => {
-    if (tool === "device") guard(() => { editor.createDevice(position, "router"); });
-    if (tool === "network") guard(() => { editor.createNetwork(position); });
-  }, [tool, editor, canEdit]);
+    // Клик по пустому полю отменяет ожидающий объект (легаси setupTools).
+    setPending(null);
+    setCursor(null);
+    if (createTarget) {
+      setCreateTarget(null);
+      return;
+    }
+    if (tool !== "device" && tool !== "network") return;
+    guard(() => {
+      setCreateTarget({ kind: tool, position });
+      setCreateName("");
+      setCreateDeviceKind("router");
+    });
+  }, [tool, canEdit, createTarget]);
+
+  const create = () => {
+    if (!createTarget || !createName.trim()) return;
+    const name = createName.trim();
+    guard(() => {
+      if (createTarget.kind === "device") editor.createDevice(createTarget.position, createDeviceKind, name);
+      else editor.createNetwork(createTarget.position, name);
+      setCreateTarget(null);
+    });
+  };
 
   // Сборка пунктов меню: target описывает объект под курсором; операции —
   // через очередь редактора. Меню не открывается в read-only (паритет с
@@ -172,6 +283,10 @@ export default function TopologyPage() {
           topology={doc}
           layout={layout}
           editable={canEdit}
+          subnets={subnets.data?.subnets ?? []}
+          tool={tool}
+          pendingId={pendingId ?? undefined}
+          onConnectPick={onConnectPick}
           markOf={markOf}
           onMoveEnd={(viewport) => editor.setCamera(viewport)}
           onNodeDragStop={(id, position) => {
@@ -180,18 +295,29 @@ export default function TopologyPage() {
             if (kind === "device") editor.moveDevice(name, position);
             if (kind === "network") editor.moveNetwork(name, position);
           }}
-          onConnect={(connection) => guard(() => editor.createLink(
-            connection.source.replace("device:", ""),
-            connection.target.replace("device:", ""),
-          ))}
           // Источник истины о выделении — RF (рамка, Ctrl/Shift+клик и Del
           // из коробки); страница только подписывается на его изменения.
           onSelectionChange={setSelection}
           onPaneClick={onPaneClick}
+          onSceneMouseMove={pending ? setCursor : undefined}
           onDelete={(ids) => guard(() => editor.removeSelected(ids))}
           onNodeContextMenu={handleNodeContextMenu}
           onEdgeContextMenu={handleEdgeContextMenu}
+          onWaypointsChange={(edgeId, points) => {
+            // id ребра строит scene.ts: link:<a>|<b>#<offset>; attach-рёбра
+            // изгибов не имеют (бэкенд хранит waypoints только по парам устройств).
+            if (!edgeId.startsWith("link:")) return;
+            const rest = edgeId.slice(5, edgeId.lastIndexOf("#"));
+            const [a, b] = rest.split("|");
+            guard(() => editor.setLinkWaypoints(a, b, Number(edgeId.slice(edgeId.lastIndexOf("#") + 1)), points));
+          }}
         >
+          {/* Превью-линия connect-инструмента: от центра ожидающего объекта
+              к курсору (легаси previewWire). Пока курсор не замерян, линии
+              нет — один клик подсвечивает только сам узел. */}
+          {pendingCenter && cursor && (
+            <ConnectPreview from={pendingCenter} to={cursor} />
+          )}
           <div className="topo-toolbar">
             <button
               type="button"
@@ -226,7 +352,7 @@ export default function TopologyPage() {
               data-testid="tool-select"
               className={`tool${tool === "select" ? " active" : ""}`}
               title="Выбор и перемещение (V)"
-              onClick={() => setTool("select")}
+              onClick={() => selectTool("select")}
             >
               <SelectIcon />
             </button>
@@ -235,7 +361,7 @@ export default function TopologyPage() {
               data-testid="tool-connect"
               className={`tool${tool === "connect" ? " active" : ""}`}
               title="Соединить устройства/сети (C)"
-              onClick={() => setTool("connect")}
+              onClick={() => selectTool("connect")}
             >
               <ConnectIcon />
             </button>
@@ -244,7 +370,7 @@ export default function TopologyPage() {
               data-testid="tool-device"
               className={`tool${tool === "device" ? " active" : ""}`}
               title="Добавить устройство (D)"
-              onClick={() => guard(() => setTool("device"))}
+              onClick={() => guard(() => selectTool("device"))}
             >
               <DeviceToolIcon />
             </button>
@@ -253,7 +379,7 @@ export default function TopologyPage() {
               data-testid="tool-network"
               className={`tool${tool === "network" ? " active" : ""}`}
               title="Добавить сеть (N)"
-              onClick={() => guard(() => setTool("network"))}
+              onClick={() => guard(() => selectTool("network"))}
             >
               <NetworkToolIcon />
             </button>
@@ -265,7 +391,9 @@ export default function TopologyPage() {
               aria-live="polite"
               title={statusLabel}
               aria-label={statusLabel}
-            />
+            >
+              <SyncStatusIcon status={editor.status} />
+            </span>
           </div>
           {menu && <ContextMenu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
           {/* Панели редактирования — children канвы: координаты канвовые,
@@ -311,6 +439,35 @@ export default function TopologyPage() {
                   }
                 }}
               />
+            </CanvasPanel>
+          )}
+          {createTarget && (
+            <CanvasPanel
+              title={createTarget.kind === "device" ? "Новое устройство" : "Новая сеть"}
+              onClose={() => setCreateTarget(null)}
+              compact
+              testId="create-panel"
+              at={createTarget.position}
+            >
+              <form className="create-panel-form" onSubmit={(event) => { event.preventDefault(); create(); }}>
+                <label>
+                  Имя
+                  <input autoFocus value={createName} onChange={(event) => setCreateName(event.target.value)} />
+                </label>
+                {createTarget.kind === "device" && (
+                  <label>
+                    Тип
+                    <select value={createDeviceKind} onChange={(event) => setCreateDeviceKind(event.target.value as "router" | "switch")}>
+                      <option value="router">Роутер</option>
+                      <option value="switch">Свитч</option>
+                    </select>
+                  </label>
+                )}
+                <div className="modal-actions">
+                  <button type="button" onClick={() => setCreateTarget(null)}>Отмена</button>
+                  <button type="submit" className="primary" disabled={!createName.trim()}>Создать</button>
+                </div>
+              </form>
             </CanvasPanel>
           )}
         </TopologyCanvas>

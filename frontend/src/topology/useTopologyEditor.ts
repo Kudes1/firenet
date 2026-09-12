@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTopologyOperations, projectKeys } from "../api/queries";
-import type { DeviceDoc, LayoutPoint, NetworkDoc, TopologyDoc, TopologyOperation } from "../api/types";
+import type { DeviceDoc, LayoutDoc, LayoutPoint, NetworkDoc, TopologyDoc, TopologyOperation } from "../api/types";
+import { layoutLinkKey } from "../lib/links";
 import { useDraft } from "../draft/DraftContext";
 import { notify } from "../components/notify";
 import { defaultPoint } from "./scene";
@@ -9,6 +10,101 @@ import { defaultPoint } from "./scene";
 export type SyncStatus = "saved" | "dirty" | "saving" | "error";
 
 const FLUSH_DELAY_MS = 400;
+
+type OptimisticNode =
+  | { kind: "device"; node: DeviceDoc }
+  | { kind: "network"; node: NetworkDoc };
+
+function addOptimisticNode(queryClient: QueryClient, scope: string, value: OptimisticNode, position: LayoutPoint) {
+  const topologyKey = projectKeys.resource(scope, "topology");
+  void queryClient.cancelQueries({ queryKey: topologyKey });
+  const topology = queryClient.getQueryData<TopologyDoc>(topologyKey) ?? {
+    devices: null, links: null, networks: null, sets: null, unions: null,
+  };
+  if (value.kind === "device") {
+    queryClient.setQueryData<TopologyDoc>(topologyKey, {
+      ...topology,
+      devices: topology.devices?.some((device) => device.name === value.node.name)
+        ? topology.devices
+        : [...(topology.devices ?? []), value.node],
+    });
+  } else {
+    queryClient.setQueryData<TopologyDoc>(topologyKey, {
+      ...topology,
+      networks: topology.networks?.some((network) => network.name === value.node.name)
+        ? topology.networks
+        : [...(topology.networks ?? []), value.node],
+    });
+  }
+
+  const layoutKey = projectKeys.resource(scope, "layout");
+  void queryClient.cancelQueries({ queryKey: layoutKey });
+  const layout = queryClient.getQueryData<LayoutDoc>(layoutKey) ?? {};
+  if (value.kind === "device") {
+    queryClient.setQueryData<LayoutDoc>(layoutKey, {
+      ...layout,
+      devices: { ...(layout.devices ?? {}), [value.node.name]: position },
+    });
+  } else {
+    queryClient.setQueryData<LayoutDoc>(layoutKey, {
+      ...layout,
+      networks: { ...(layout.networks ?? {}), [value.node.name]: position },
+    });
+  }
+}
+
+function reapplyQueuedCreates(queryClient: QueryClient, scope: string, operations: TopologyOperation[]) {
+  const positions = new Map<string, LayoutPoint>();
+  for (const operation of operations) {
+    if (operation.kind === "set-device-position" && operation.deviceName && operation.position) {
+      positions.set(`device:${operation.deviceName}`, operation.position);
+    } else if (operation.kind === "set-network-position" && operation.networkName && operation.position) {
+      positions.set(`network:${operation.networkName}`, operation.position);
+    }
+  }
+  for (const operation of operations) {
+    if (operation.kind === "create-device" && operation.device) {
+      const position = positions.get(`device:${operation.device.name}`);
+      if (position) addOptimisticNode(queryClient, scope, { kind: "device", node: operation.device }, position);
+    } else if (operation.kind === "create-network" && operation.network) {
+      const position = positions.get(`network:${operation.network.name}`);
+      if (position) addOptimisticNode(queryClient, scope, { kind: "network", node: operation.network }, position);
+    }
+  }
+}
+
+function removeFailedCreates(queryClient: QueryClient, scope: string, operations: TopologyOperation[]) {
+  const devices = new Set<string>();
+  const networks = new Set<string>();
+  for (const operation of operations) {
+    if (operation.kind === "create-device" && operation.device) devices.add(operation.device.name);
+    if (operation.kind === "create-network" && operation.network) networks.add(operation.network.name);
+  }
+  if (devices.size || networks.size) {
+    const topologyKey = projectKeys.resource(scope, "topology");
+    const topology = queryClient.getQueryData<TopologyDoc>(topologyKey);
+    if (topology) {
+      queryClient.setQueryData<TopologyDoc>(topologyKey, {
+        ...topology,
+        devices: topology.devices?.filter((device) => !devices.has(device.name)) ?? topology.devices,
+        networks: topology.networks?.filter((network) => !networks.has(network.name)) ?? topology.networks,
+      });
+    }
+    const layoutKey = projectKeys.resource(scope, "layout");
+    const layout = queryClient.getQueryData<LayoutDoc>(layoutKey);
+    if (layout) {
+      const nextDevices = { ...(layout.devices ?? {}) };
+      const nextNetworks = { ...(layout.networks ?? {}) };
+      devices.forEach((name) => delete nextDevices[name]);
+      networks.forEach((name) => delete nextNetworks[name]);
+      queryClient.setQueryData<LayoutDoc>(layoutKey, {
+        ...layout,
+        devices: nextDevices,
+        networks: nextNetworks,
+      });
+    }
+  }
+}
 
 // Очередь операций редактора: drag узла, создание устройства, связи и т.п.
 // складываются в очередь и улетают одним запросом с дебаунсом — ровно та
@@ -20,6 +116,7 @@ export function useTopologyEditor() {
   const queryClient = useQueryClient();
   const queue = useRef<TopologyOperation[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlight = useRef<Promise<void> | null>(null);
   const [status, setStatus] = useState<SyncStatus>("saved");
 
   const flush = useCallback(async () => {
@@ -27,6 +124,7 @@ export function useTopologyEditor() {
       clearTimeout(timer.current);
       timer.current = null;
     }
+    if (inFlight.current) return inFlight.current;
     if (!queue.current.length) return;
     if (isReadOnly) {
       queue.current = [];
@@ -36,18 +134,31 @@ export function useTopologyEditor() {
     const batch = queue.current;
     queue.current = [];
     setStatus("saving");
-    try {
-      await ops.mutateAsync(batch);
-      setStatus("saved");
-    } catch (error) {
-      // reconcile из легаси-TopologySync: после провала записи (409 CAS,
-      // 422) канва больше не совпадает с сервером — перечитываем документ
-      // (заодно обновляется CAS-ревизия) и отбрасываем очередь, иначе
-      // каждая следующая операция тоже упадёт с устаревшей ревизией.
-      setStatus("error");
-      notify((error as Error).message);
-    }
-  }, [isReadOnly, ops]);
+    const request = (async () => {
+      try {
+        await ops.mutateAsync(batch);
+        reapplyQueuedCreates(queryClient, scope, queue.current);
+        setStatus(queue.current.length ? "dirty" : "saved");
+      } catch (error) {
+        // После провала записи (409 CAS, 422) канва может содержать optimistic-
+        // изменения — удаляем объекты этой batch и перечитываем topology и
+        // layout с сервера.
+        removeFailedCreates(queryClient, scope, batch);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: projectKeys.resource(scope, "topology") }),
+          queryClient.invalidateQueries({ queryKey: projectKeys.resource(scope, "layout") }),
+        ]);
+        reapplyQueuedCreates(queryClient, scope, queue.current);
+        setStatus("error");
+        notify((error as Error).message);
+      } finally {
+        inFlight.current = null;
+        if (queue.current.length) timer.current = setTimeout(() => void flush(), FLUSH_DELAY_MS);
+      }
+    })();
+    inFlight.current = request;
+    await request;
+  }, [isReadOnly, ops, queryClient, scope]);
 
   const enqueue = useCallback((operation: TopologyOperation) => {
     if (isReadOnly) {
@@ -75,20 +186,28 @@ export function useTopologyEditor() {
 
   const createDevice = useCallback((position: LayoutPoint, kind: DeviceDoc["kind"], name?: string) => {
     const device: DeviceDoc = { name: name ?? `device-${Date.now().toString(36)}`, kind };
+    if (!isReadOnly) addOptimisticNode(queryClient, scope, { kind: "device", node: device }, position);
     enqueue({ kind: "create-device", device });
     enqueue({ kind: "set-device-position", deviceName: device.name, position });
     return device;
-  }, [enqueue]);
+  }, [enqueue, isReadOnly, queryClient, scope]);
 
   const createNetwork = useCallback((position: LayoutPoint, name?: string) => {
     const network: NetworkDoc = { name: name ?? `network-${Date.now().toString(36)}` };
+    if (!isReadOnly) addOptimisticNode(queryClient, scope, { kind: "network", node: network }, position);
     enqueue({ kind: "create-network", network });
     enqueue({ kind: "set-network-position", networkName: network.name, position });
     return network;
-  }, [enqueue]);
+  }, [enqueue, isReadOnly, queryClient, scope]);
 
   const createLink = useCallback((a: string, b: string) => {
     enqueue({ kind: "create-link", link: { a: { device: a }, b: { device: b } } });
+  }, [enqueue]);
+
+  // attachNetwork — привязка устройства к сети (второй исход connect-
+  // инструмента). Пара network+device приходит уже разобранной (lib/connect).
+  const attachNetwork = useCallback((networkName: string, device: string) => {
+    enqueue({ kind: "attach-network", networkName, attach: { device } });
   }, [enqueue]);
 
   const removeSelected = useCallback((selection: string[]) => {
@@ -123,6 +242,23 @@ export function useTopologyEditor() {
     enqueue({ kind: "set-camera", camera: { x: camera.x, y: camera.y, z: camera.zoom } });
   }, [enqueue]);
 
+  // setLinkWaypoints заменяет точки изгиба одного дубликата связи (index —
+  // позиция среди резервных связей пары). Бэкендовская set-link-waypoints
+  // заменяет весь массив пары, поэтому из кэша layout берётся текущий состав
+  // (точки соседних дубликатов) и отсылается целиком. Эхо-апдейт кэша до
+  // flush: flush дебаунсится, и без него точка отрисовалась бы с опозданием
+  // и пропадала при перерисовках.
+  const setLinkWaypoints = useCallback((a: string, b: string, index: number, points: LayoutPoint[]) => {
+    const key = layoutLinkKey(a, b);
+    const doc = queryClient.getQueryData(projectKeys.resource(scope, "layout")) as LayoutDoc | undefined;
+    const all = [...(doc?.links?.[key] ?? [])];
+    while (all.length <= index) all.push([]);
+    all[index] = points;
+    queryClient.setQueryData(projectKeys.resource(scope, "layout"),
+      { ...(doc ?? { devices: {}, networks: {} }), links: { ...doc?.links, [key]: all } });
+    enqueue({ kind: "set-link-waypoints", link: { a: { device: a }, b: { device: b } }, waypoints: all });
+  }, [enqueue, queryClient, scope]);
+
   // Батч операций из форм редактирования (update-device + перенос union).
   const enqueueAll = useCallback((operations: TopologyOperation[]) => {
     operations.forEach(enqueue);
@@ -140,7 +276,7 @@ export function useTopologyEditor() {
 
   return {
     status, flush, moveDevice, moveNetwork, createDevice, createNetwork,
-    createLink, removeSelected, setUnion, enqueueAll, deleteLink, detachNetwork,
-    setCamera, nextDevicePoint: (index: number) => defaultPoint("device", index),
+    createLink, attachNetwork, removeSelected, setUnion, enqueueAll, deleteLink, detachNetwork,
+    setCamera, setLinkWaypoints, nextDevicePoint: (index: number) => defaultPoint("device", index),
   };
 }

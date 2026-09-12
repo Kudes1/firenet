@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import CanvasPanel from "./CanvasPanel";
+import { ViewportContext } from "./viewport";
 
 function renderPanel(props: Partial<Parameters<typeof CanvasPanel>[0]> = {}) {
   const onClose = vi.fn();
@@ -92,5 +93,72 @@ describe("CanvasPanel", () => {
     const panel = document.querySelector(".canvas-panel") as HTMLElement;
     expect(panel.style.left).toBe("500px");
     expect(panel.style.top).toBe("0px");
+  });
+
+  // Панель привязана к координатам сцены: экранная позиция = якорь × zoom +
+  // transform камеры. При transform [200, 100, 2] якорь (120, 80) даёт
+  // экран (440, 260).
+  it("maps the scene anchor through the camera transform", () => {
+    render(
+      <ViewportContext.Provider value={[200, 100, 2]}>
+        <div className="canvas-wrap">
+          <CanvasPanel title="Изменить устройство r1" onClose={vi.fn()} at={{ x: 120, y: 80 }}>
+            <input />
+          </CanvasPanel>
+        </div>
+      </ViewportContext.Provider>,
+    );
+    const panel = document.querySelector(".canvas-panel") as HTMLElement;
+    expect(panel.style.left).toBe("440px");
+    expect(panel.style.top).toBe("260px");
+  });
+
+  it("repositions when the camera moves", () => {
+    const { rerender } = render(
+      <ViewportContext.Provider value={[0, 0, 1]}>
+        <div className="canvas-wrap">
+          <CanvasPanel title="Изменить устройство r1" onClose={vi.fn()} at={{ x: 120, y: 80 }}>
+            <input />
+          </CanvasPanel>
+        </div>
+      </ViewportContext.Provider>,
+    );
+    const panel = document.querySelector(".canvas-panel") as HTMLElement;
+    expect(panel.style.left).toBe("120px");
+    rerender(
+      <ViewportContext.Provider value={[-70, 40, 1]}>
+        <div className="canvas-wrap">
+          <CanvasPanel title="Изменить устройство r1" onClose={vi.fn()} at={{ x: 120, y: 80 }}>
+            <input />
+          </CanvasPanel>
+        </div>
+      </ViewportContext.Provider>,
+    );
+    expect(panel.style.left).toBe("50px");
+    expect(panel.style.top).toBe("120px");
+  });
+
+  // Драг при zoom = 2: экранные 60px = 30px сцены. Якорь (120, 80),
+  // transform [0, 0, 2] → экран (240, 160); мышь +60 → экран (300, 220).
+  it("divides the drag delta by zoom", () => {
+    render(
+      <ViewportContext.Provider value={[0, 0, 2]}>
+        <div className="canvas-wrap">
+          <CanvasPanel title="Изменить устройство r1" onClose={vi.fn()} at={{ x: 120, y: 80 }}>
+            <input />
+          </CanvasPanel>
+        </div>
+      </ViewportContext.Provider>,
+    );
+    mockRects(new DOMRect(240, 160, 300, 200), new DOMRect(0, 0, 800, 600));
+    const header = screen.getByText("Изменить устройство r1").closest(".canvas-panel-header")!;
+    fireEvent.mouseDown(header, { clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(window, { clientX: 160, clientY: 130 });
+    fireEvent.mouseUp(window);
+    const panel = document.querySelector(".canvas-panel") as HTMLElement;
+    // Якорь 120 + 60/2 = 150 сцены → экран 150 × 2 = 300.
+    expect(panel.style.left).toBe("300px");
+    // 80 + 30/2 = 95 сцены → экран 190.
+    expect(panel.style.top).toBe("190px");
   });
 });

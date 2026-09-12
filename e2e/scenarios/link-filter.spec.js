@@ -95,7 +95,9 @@ test("связь становится фильтрованной с экспор
     const f = doc.topology.links[0].filter;
     return !!f && f.aExports.includes(netA) && f.bExports.includes(netB);
   });
-  await dialog.getByRole("button", { name: "Закрыть" }).click();
+  // «Закрыть» встречается дважды: крестик в хедере (aria-label) и кнопка
+  // в футере модалки — берём футер.
+  await dialog.locator(".modal-footer").getByRole("button", { name: "Закрыть" }).click();
 
   // Возврат в обычную из таблицы.
   await row.getByRole("button", { name: "Обычная" }).click();

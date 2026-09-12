@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import Modal from "./Modal";
+
+const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 function renderModal(props: Partial<Parameters<typeof Modal>[0]> = {}) {
   const onClose = vi.fn();
@@ -52,6 +56,78 @@ describe("Modal", () => {
     });
     fireEvent.click(dialog, { clientX: 5, clientY: 5 });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("keeps a non-modal dialog open when clicking outside", () => {
+    const show = vi.spyOn(HTMLDialogElement.prototype, "show");
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
+    const { onClose } = renderModal({ modal: false });
+    const dialog = screen.getByRole("dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => new DOMRect(200, 150, 300, 200),
+    });
+    fireEvent.click(dialog, { clientX: 5, clientY: 5 });
+    expect(show).toHaveBeenCalled();
+    expect(showModal).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    show.mockRestore();
+    showModal.mockRestore();
+  });
+
+  it("resizes a resizable dialog and persists its dimensions", () => {
+    const storageKey = "ui.modal.test.size";
+    renderModal({ resizable: true, resizeStorageKey: storageKey });
+    const dialog = screen.getByRole("dialog") as HTMLDialogElement;
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => new DOMRect(200, 150, 300, 200),
+    });
+    Object.defineProperty(window, "innerWidth", { value: 800, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 600, configurable: true });
+
+    const handle = dialog.querySelector(".modal-resize-handle");
+    if (!handle) throw new Error("resize handle is missing");
+    fireEvent.mouseDown(handle, { clientX: 500, clientY: 350 });
+    fireEvent.mouseMove(window, { clientX: 530, clientY: 380 });
+    fireEvent.mouseMove(window, { clientX: 550, clientY: 400 });
+    fireEvent.mouseUp(window);
+
+    expect(dialog.style.width).toBe("350px");
+    expect(dialog.style.height).toBe("250px");
+    expect(localStorage.getItem(storageKey)).toBe(JSON.stringify({ width: 350, height: 250 }));
+  });
+
+  it("restores persisted dimensions for a resizable dialog", () => {
+    const storageKey = "ui.modal.test.restored-size";
+    localStorage.setItem(storageKey, JSON.stringify({ width: 410, height: 290 }));
+
+    renderModal({ resizable: true, resizeStorageKey: storageKey });
+
+    const dialog = screen.getByRole("dialog") as HTMLDialogElement;
+    expect(dialog.style.width).toBe("410px");
+    expect(dialog.style.height).toBe("290px");
+  });
+
+  it("puts the resize handle below the body's scrollbar", () => {
+    renderModal({ resizable: true });
+    const dialog = screen.getByRole("dialog");
+    const body = dialog.querySelector(".modal-body");
+    const corner = dialog.querySelector(".modal-resize-corner");
+
+    expect(corner).toBeInTheDocument();
+    expect(corner?.previousElementSibling).toBe(body);
+    expect(corner?.querySelector(".modal-resize-handle")).toBeInTheDocument();
+    expect(styles).toMatch(
+      /dialog\.modal-resizable \.modal-resize-corner \{[^}]*flex:\s*0 0 16px;/,
+    );
+    expect(styles).toMatch(
+      /dialog\.modal-resizable \.modal-resize-handle \{[^}]*right:\s*4px;/,
+    );
+  });
+
+  it("keeps modal content close to the body's scrollbar", () => {
+    expect(styles).toMatch(
+      /dialog\.modal \.modal-body \{[^}]*padding-right:\s*var\(--space-2\);/,
+    );
   });
 
   it("ignores clicks inside the dialog", () => {

@@ -13,18 +13,29 @@ describe("Combo", () => {
     expect(screen.getByRole("button", { name: "guest" })).toBeInTheDocument();
   });
 
-  it("renders the suggestions list outside the combo container (portal to body)", async () => {
+  it("renders the suggestions list outside a scrollable member list", async () => {
     const user = userEvent.setup();
-    render(<Combo items={["lan"]} onPick={vi.fn()} />);
+    render(
+      <Modal open title="Связь" onClose={vi.fn()}>
+        <fieldset>
+          <legend>r1</legend>
+          <div className="member-list">
+            <Combo items={["lan"]} onPick={vi.fn()} />
+          </div>
+        </fieldset>
+      </Modal>,
+    );
     await user.click(screen.getByRole("textbox"));
-    const combo = document.querySelector(".member-combo")!;
     const list = document.querySelector(".member-suggestions")!;
+    const memberList = document.querySelector(".member-list")!;
+    const fieldset = document.querySelector("fieldset")!;
     expect(list).toBeTruthy();
-    expect(combo.contains(list)).toBe(false);
-    expect(document.body.contains(list)).toBe(true);
+    expect(memberList.contains(list)).toBe(false);
+    expect(fieldset.contains(list)).toBe(true);
+    expect(screen.getByRole("dialog").contains(list)).toBe(true);
   });
 
-  it("renders the list inside the dialog when used in a modal (top layer)", async () => {
+  it("renders the list inside the dialog when used in a modal", async () => {
     const user = userEvent.setup();
     render(
       <Modal open title="Сеть" onClose={vi.fn()}>
@@ -65,7 +76,7 @@ describe("Combo", () => {
     expect(list.style.left).toBe("100px"); // 300 - 200
   });
 
-  it("portals suggestions into a canvas panel when used inside one", async () => {
+  it("renders the list inside a canvas panel when used in one", async () => {
     const user = userEvent.setup();
     render(
       <div className="canvas-wrap">
@@ -85,7 +96,7 @@ describe("Combo", () => {
     const user = userEvent.setup();
     const { container } = render(<Combo items={["lan"]} onPick={vi.fn()} />);
     const input = screen.getByRole("textbox");
-    // jsdom: rect инпута задаём вручную, портал должен использовать его.
+    // jsdom: rect инпута задаём вручную, список должен использовать его.
     Object.defineProperty(input, "getBoundingClientRect", {
       value: () => new DOMRect(120, 90, 200, 30),
       configurable: true,

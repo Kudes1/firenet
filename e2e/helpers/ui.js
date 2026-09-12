@@ -52,27 +52,36 @@ export function activateTool(page, tool) {
   return page.locator(`[data-testid="tool-${tool}"]`).click();
 }
 
-// Инструменты device/network создают узел кликом по панели; имя генерирует
-// редактор (легаси-попапа с вводом имени нет). Имя извлекается из testid
-// узла (rf__node-device:<name> / rf__node-network:<name>), а не из текста.
-export async function createDeviceNode(page, at) {
+// Инструменты device/network открывают диалог перед созданием. Имя по
+// умолчанию уникально для параллельных воркеров, но сценарий может задать
+// своё для проверки типа устройства.
+export async function createDeviceNode(page, at, { name = uniqueName("device"), kind = "router" } = {}) {
   await activateTool(page, "device");
   const before = await nodeIds(page);
   await canvasClick(page, at.x, at.y);
+  await page.getByLabel("Имя").fill(name);
+  await page.getByLabel("Тип").selectOption(kind);
+  await page.getByRole("button", { name: "Создать" }).click();
   await expect
     .poll(() => nodeIds(page), { timeout: 5_000, message: "новое устройство не появилось на канве" })
     .not.toEqual(before);
-  return diffNames(before, await nodeIds(page)).map(stripKind).at(-1);
+  return name;
 }
 
-export async function createNetworkNode(page, at) {
+export async function createNetworkNode(page, at, { name = uniqueName("network") } = {}) {
   await activateTool(page, "network");
   const before = await nodeIds(page);
   await canvasClick(page, at.x, at.y);
+  await page.getByLabel("Имя").fill(name);
+  await page.getByRole("button", { name: "Создать" }).click();
   await expect
     .poll(() => nodeIds(page), { timeout: 5_000, message: "новая сеть не появилась на канве" })
     .not.toEqual(before);
-  return diffNames(before, await nodeIds(page)).map(stripKind).at(-1);
+  return name;
+}
+
+function uniqueName(kind) {
+  return `${kind}-${Math.random().toString(36).slice(2)}`;
 }
 
 async function nodeIds(page) {
@@ -80,20 +89,19 @@ async function nodeIds(page) {
     .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-id")));
 }
 
-// data-id узла — «device:<имя>» / «network:<имя>»; helper возвращает имя.
-function stripKind(id) {
-  return id.replace(/^(device|network):/, "");
-}
-
-function diffNames(before, after) {
-  return after.filter((n) => !before.includes(n));
-}
-
-// Связь: connect-инструмент, клик по телам двух узлов (устройств).
+// Связь: connect-инструмент, клик по телам двух узлов (устройств). Хэндлов
+// на узлах нет — первый клик запоминает объект, второй создаёт связь.
 export async function linkDevices(page, a, b) {
   await activateTool(page, "connect");
-  await page.locator(`[data-testid="rf__node-device:${a}"] .react-flow__handle.source`).click();
-  await page.locator(`[data-testid="rf__node-device:${b}"] .react-flow__handle.target`).click();
+  await page.locator(`[data-testid="rf__node-device:${a}"]`).click();
+  await page.locator(`[data-testid="rf__node-device:${b}"]`).click();
+}
+
+// Привязка сети к устройству тем же инструментом: сеть → устройство.
+export async function attachNetwork(page, network, device) {
+  await activateTool(page, "connect");
+  await page.locator(`[data-testid="rf__node-network:${network}"]`).click();
+  await page.locator(`[data-testid="rf__node-device:${device}"]`).click();
 }
 
 export async function waitTopology(request, draftId, predicate) {

@@ -79,6 +79,35 @@ export const NetworkToolIcon = () => (
   </svg>
 );
 
+export const DiagnosePathIcon = () => (
+  <svg {...toolOpen}>
+    <circle cx="5" cy="18" r="2" />
+    <circle cx="19" cy="6" r="2" />
+    <path d="M7 17c4-1 3-8 10-10" />
+  </svg>
+);
+
+export const DiagnoseSpreadIcon = () => (
+  <svg {...toolOpen}>
+    <circle cx="12" cy="12" r="2.5" />
+    <circle cx="5" cy="5" r="1.5" />
+    <circle cx="19" cy="5" r="1.5" />
+    <circle cx="5" cy="19" r="1.5" />
+    <circle cx="19" cy="19" r="1.5" />
+    <path d="m10.2 10.2-4-4m7.6 4 4-4m-7.6 3.6-4 4m7.6-4 4 4" />
+  </svg>
+);
+
+export const SyncStatusIcon = ({ status }: { status: "saved" | "dirty" | "saving" | "error" }) => (
+  <svg {...toolOpen}>
+    <path d="M7 18h10.5a3.5 3.5 0 0 0 .35-6.98A6 6 0 0 0 6.2 11.6 3.5 3.5 0 0 0 7 18z" />
+    {status === "saved" && <path d="m9 14 2 2 4-4" />}
+    {status === "dirty" && <circle cx="12" cy="14" r="1" fill="currentColor" stroke="none" />}
+    {status === "saving" && <path d="M12 10v4l2 1" />}
+    {status === "error" && <path d="M12 10v3m0 2v.1" />}
+  </svg>
+);
+
 export const ResetIcon = () => (
   <svg {...toolOpen} strokeWidth={1.3}>
     <path d="M6 6l12 12M18 6L6 18" />

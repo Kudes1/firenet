@@ -83,8 +83,12 @@ export default function LinksPage() {
     {
       key: "actions",
       title: "",
+      filterReset: true,
       render: (r) => (r.filter ? (
-        <button type="button" className="icon-btn edit" title={`Изменить фильтр связи ${r.a} ↔ ${r.b}`} onClick={() => open(r.index)}><EditIcon /></button>
+        <>
+          <button type="button" className="icon-btn edit" title={`Изменить фильтр связи ${r.a} ↔ ${r.b}`} onClick={() => open(r.index)}><EditIcon /></button>
+          <button type="button" className="btn-link" title={`Вернуть обычную связь ${r.a} ↔ ${r.b}`} onClick={() => setFilter(r, undefined)}>Обычная</button>
+        </>
       ) : (
         <button type="button" className="btn-link" title={`Сделать фильтрованной связь ${r.a} ↔ ${r.b}`} onClick={() => setFilter(r, { aExports: [], bExports: [] })}>Фильтровать</button>
       )),

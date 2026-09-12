@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { server } from "../test/msw";
@@ -33,12 +33,76 @@ beforeEach(() => {
 });
 
 describe("DiagnosePage", () => {
+  it("renders accessible tool buttons with closed modals", async () => {
+    renderPage(<DiagnosePage />, "/ui/diagnose");
+
+    const pathTool = screen.getByRole("button", { name: "Диагностика пути" });
+    const spreadTool = screen.getByRole("button", { name: "Распространение" });
+    expect(pathTool).toHaveAttribute("aria-pressed", "false");
+    expect(spreadTool).toHaveAttribute("aria-pressed", "false");
+    expect(pathTool.querySelector("svg")).toBeInTheDocument();
+    expect(spreadTool.querySelector("svg")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens and toggles the path tool modal", async () => {
+    const { user } = renderPage(<DiagnosePage />, "/ui/diagnose");
+    const pathTool = screen.getByRole("button", { name: "Диагностика пути" });
+
+    await user.click(pathTool);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveAttribute("open");
+    expect(dialog).toHaveClass("modal-compact");
+    expect(dialog.querySelector(".modal-resize-handle")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Диагностика пути" })).toBeInTheDocument();
+    expect(pathTool).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(pathTool);
+    await waitFor(() => expect(dialog).not.toHaveAttribute("open"));
+    expect(pathTool).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps the diagnostic panel open when clicking the canvas", async () => {
+    const { user } = renderPage(<DiagnosePage />, "/ui/diagnose");
+    await user.click(screen.getByRole("button", { name: "Диагностика пути" }));
+    const dialog = await screen.findByRole("dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => new DOMRect(200, 150, 300, 200),
+    });
+
+    fireEvent.click(dialog, { clientX: 5, clientY: 5 });
+
+    expect(dialog).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Диагностика пути" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("switches the open modal when another tool is selected", async () => {
+    const { user } = renderPage(<DiagnosePage />, "/ui/diagnose");
+    await user.click(screen.getByRole("button", { name: "Диагностика пути" }));
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(screen.getByRole("button", { name: "Распространение" }));
+    expect(dialog).toHaveTextContent("Распространение сети");
+    expect(dialog).not.toHaveClass("modal-compact");
+    expect(screen.getByRole("button", { name: "Распространение" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Диагностика пути" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("renders the read-only map", async () => {
     renderPage(<DiagnosePage />, "/ui/diagnose");
     // testid на обёртке RF — rf__node-<id> (см. Task 18, «подводные камни»):
     // внутренний div кастомного узла testid не несёт.
     expect(await screen.findByTestId("rf__node-device:r1")).toBeInTheDocument();
     expect(document.querySelector(".react-flow__handle")).toBeNull();
+  });
+
+  it("shows the member subnet details when a network is clicked", async () => {
+    renderPage(<DiagnosePage />, "/ui/diagnose");
+
+    fireEvent.click(await screen.findByTestId("rf__node-network:office"));
+
+    expect(screen.getByTestId("network-info")).toHaveTextContent("lan");
+    expect(screen.getByTestId("network-info")).toHaveTextContent("10.0.0.0/24");
   });
 
   it("runs a diagnose request and shows the verdict", async () => {
@@ -48,18 +112,21 @@ describe("DiagnosePage", () => {
       return HttpResponse.json(REPORT);
     }));
     const { user } = renderPage(<DiagnosePage />, "/ui/diagnose");
+    await user.click(screen.getByRole("button", { name: "Диагностика пути" }));
     await user.type(await screen.findByLabelText("Источник"), "10.0.0.5");
     await user.type(screen.getByLabelText("Назначение"), "10.0.1.5");
     await user.click(screen.getByRole("button", { name: "Проверить путь" }));
 
     expect(await screen.findByText(/путей: 1/)).toBeInTheDocument();
     expect(screen.getByText("разрешено")).toBeInTheDocument();
+    expect(screen.getByTestId("diag-report").closest("dialog")).toBe(screen.getByRole("dialog"));
     expect(body).toMatchObject({ src: "10.0.0.5", dst: "10.0.1.5", proto: "", dstPorts: [] });
   });
 
   it("marks the path nodes on the map", async () => {
     server.use(http.post("/api/versions/current/diagnose", () => HttpResponse.json(REPORT)));
     const { user } = renderPage(<DiagnosePage />, "/ui/diagnose");
+    await user.click(screen.getByRole("button", { name: "Диагностика пути" }));
     await user.type(await screen.findByLabelText("Источник"), "10.0.0.5");
     await user.type(screen.getByLabelText("Назначение"), "10.0.1.5");
     await user.click(screen.getByRole("button", { name: "Проверить путь" }));
@@ -72,6 +139,7 @@ describe("DiagnosePage", () => {
       ...REPORT, paths: [], note: "недостижимо",
     })));
     const { user } = renderPage(<DiagnosePage />, "/ui/diagnose");
+    await user.click(screen.getByRole("button", { name: "Диагностика пути" }));
     await user.type(await screen.findByLabelText("Источник"), "10.0.0.5");
     await user.type(screen.getByLabelText("Назначение"), "10.9.9.9");
     await user.click(screen.getByRole("button", { name: "Проверить путь" }));
@@ -85,15 +153,17 @@ describe("DiagnosePage", () => {
       mark: REPORT.mapMark,
     })));
     const { user } = renderPage(<DiagnosePage />, "/ui/diagnose");
-    await user.click(await screen.findByTitle("Распространение"));
+    await user.click(screen.getByRole("button", { name: "Распространение" }));
     await user.type(await screen.findByLabelText("Источник (сеть, подсеть или IP)"), "lan");
     await user.click(screen.getByRole("button", { name: "Проверить доступность" }));
     expect(await screen.findByText(/Достижимо 1 из 1/)).toBeInTheDocument();
+    expect(screen.getByTestId("spread-report").closest("dialog")).toBe(screen.getByRole("dialog"));
   });
 
   it("restores the form from localStorage", async () => {
     localStorage.setItem(storageKeys.diagForm, JSON.stringify({ src: "10.0.0.5", dst: "10.0.1.5", proto: "tcp", dstPorts: "80" }));
-    renderPage(<DiagnosePage />, "/ui/diagnose");
+    const { user } = renderPage(<DiagnosePage />, "/ui/diagnose");
+    await user.click(screen.getByRole("button", { name: "Диагностика пути" }));
     expect(await screen.findByLabelText("Источник")).toHaveValue("10.0.0.5");
     expect(screen.getByLabelText("Порты назначения")).toHaveValue("80");
   });

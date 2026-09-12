@@ -9,9 +9,9 @@ type Props = {
 
 // Комбобокс с клавиатурной навигацией (↑/↓/Enter/Esc) — заменяет
 // member-combo из легаси-страниц. Список кандидатов фильтруется на месте.
-// Список рендерится порталом (в открытый <dialog> в модалке, иначе в body):
-// он рисуется поверх модалок и скролл-контейнеров, а прокрутка возможна
-// только в самом длинном списке, не в модальном окне.
+// Список рендерится порталом за пределами скролл-контейнера участников, но
+// остаётся в ближайшем label/fieldset для сохранения связи с полем. Если их
+// нет, используются открытый <dialog>, .canvas-panel или body.
 export default function Combo({ items, placeholder, onPick }: Props) {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -37,9 +37,8 @@ export default function Combo({ items, placeholder, onPick }: Props) {
     // Портал кладёт список в открытый <dialog>, а dialog.modal всегда несёт
     // inline translate (даже 0px 0px) — он становится containing block для
     // позиционированных потомков. Поэтому внутри диалога клиентские
-    // координаты пересчитываются относительно его коробки, и позиция
-    // остаётся absolute; вне диалога это обычный fixed.
-    // То же для .canvas-panel (позиционированный контейнер в канве).
+    // координаты пересчитываются относительно его коробки, а вне него
+    // используется обычный fixed.
     const dialog = input.closest("dialog[open], .canvas-panel");
     if (dialog) {
       const d = dialog.getBoundingClientRect();
@@ -63,10 +62,7 @@ export default function Combo({ items, placeholder, onPick }: Props) {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
-  // Портал: в открытый <dialog>, если Combo используется в модалке — список
-  // попадает в top layer и рисуется поверх backdrop; иначе в body, чтобы
-  // его не обрезали скролл-контейнеры страницы.
-  const portalTarget = inputRef.current?.closest("dialog[open], .canvas-panel") ?? document.body;
+  const portalTarget = inputRef.current?.closest("label, fieldset, dialog[open], .canvas-panel") ?? document.body;
 
   return (
     <div className="member-combo">

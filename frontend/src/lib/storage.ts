@@ -8,4 +8,5 @@ export const storageKeys = {
   lastDraftId: "ui.draft.lastId", // localStorage — последний драфт для нового таба
   draftReadonly: "ui.draft.readonly", // sessionStorage — таб сознательно на текущей версии
   diagForm: "ui.diag.form", // localStorage — сохранённая форма диагностики
+  diagModalSize: "ui.diag.modal.size", // localStorage — размер окна диагностики
 } as const;

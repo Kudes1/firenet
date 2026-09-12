@@ -80,6 +80,12 @@ describe("TopologyCanvas", () => {
     expect(pattern?.getAttribute("height")).toBe("24");
   });
 
+  it("hides the React Flow attribution", async () => {
+    render(<TopologyCanvas topology={topology} layout={layout} editable={false} />);
+    await screen.findByTestId("rf__background");
+    expect(document.querySelector(".react-flow__attribution")).toBeNull();
+  });
+
   it("creates a node on pane click only, not on node click", async () => {
     const onPaneClick = vi.fn();
     render(<TopologyCanvas topology={topology} layout={layout} editable onPaneClick={onPaneClick} />);
@@ -212,6 +218,86 @@ describe("TopologyCanvas", () => {
     expect(d.startsWith("M")).toBe(true);
     expect(d.endsWith("Z")).toBe(true);
     expect(d.split("Q").length - 1).toBeGreaterThanOrEqual(18);
+  });
+
+  it("opens network info with member subnet names and CIDRs", async () => {
+    render(
+      <TopologyCanvas
+        topology={topology}
+        layout={layout}
+        editable={false}
+        subnets={[{ name: "lan", cidr: "10.0.0.0/24" }]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("rf__node-network:office"));
+
+    const info = screen.getByTestId("network-info");
+    expect(screen.getByTestId("rf__node-network:office").className).toContain("selected");
+    expect(info).toHaveTextContent("office");
+    expect(info).toHaveTextContent("lan");
+    expect(info).toHaveTextContent("10.0.0.0/24");
+  });
+
+  it("switches network info when another network is clicked", async () => {
+    const secondTopology = {
+      ...topology,
+      networks: [...(topology.networks ?? []), { name: "guest", subnets: ["guests"], attach: [] }],
+    };
+    const secondLayout = {
+      ...layout,
+      networks: { ...layout.networks, guest: { x: 300, y: 200 } },
+    };
+    render(
+      <TopologyCanvas
+        topology={secondTopology}
+        layout={secondLayout}
+        editable={false}
+        subnets={[
+          { name: "lan", cidr: "10.0.0.0/24" },
+          { name: "guests", cidr: "10.0.1.0/24" },
+        ]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId("rf__node-network:office"));
+    fireEvent.click(screen.getByTestId("rf__node-network:guest"));
+
+    expect(screen.getByTestId("network-info")).toHaveTextContent("guests");
+    expect(screen.getByTestId("network-info")).toHaveTextContent("10.0.1.0/24");
+    expect(screen.getByTestId("network-info")).not.toHaveTextContent("10.0.0.0/24");
+  });
+
+  it("closes network info when the canvas background is clicked", async () => {
+    render(
+      <TopologyCanvas
+        topology={topology}
+        layout={layout}
+        editable={false}
+        subnets={[{ name: "lan", cidr: "10.0.0.0/24" }]}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("rf__node-network:office"));
+
+    fireEvent.click(document.querySelector(".react-flow__pane")!);
+
+    expect(screen.queryByTestId("network-info")).not.toBeInTheDocument();
+  });
+
+  it("closes network info on Escape", async () => {
+    render(
+      <TopologyCanvas
+        topology={topology}
+        layout={layout}
+        editable={false}
+        subnets={[{ name: "lan", cidr: "10.0.0.0/24" }]}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("rf__node-network:office"));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByTestId("network-info")).not.toBeInTheDocument();
   });
 
   // Контур объединения — подложка-прямоугольник вокруг участников с подписью

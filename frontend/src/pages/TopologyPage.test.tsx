@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LayoutDoc } from "../api/types";
@@ -30,6 +30,34 @@ function useRichLayout() {
   server.use(http.get("/api/drafts/d1/layout", () => HttpResponse.json(richLayout)));
 }
 
+// Документ без связей: фикстурная topology уже содержит r1–sw1, поэтому
+// создание связи проверяется на своей подмене (msw применяется до рендера).
+function useUnlinkedTopology() {
+  server.use(http.get("/api/drafts/d1/topology", () => HttpResponse.json({
+    devices: [{ name: "r1", kind: "router" }, { name: "sw1", kind: "switch" }],
+    links: [],
+    networks: [{ name: "office" }],
+    sets: [],
+    unions: [],
+  })));
+}
+
+// Клик по узлу: user.click уходит в d3-drag, который в jsdom падает на
+// event.view === null, поэтому клики по канве идут через fireEvent.
+async function pickAsync(testId: string) {
+  fireEvent.click(await screen.findByTestId(testId));
+}
+
+// Тело ушедшей операции: страница дебаунсит flush на 400 мс.
+function captureOperations() {
+  const bodies: unknown[] = [];
+  server.use(http.post("/api/drafts/d1/topology/operations", async ({ request }) => {
+    bodies.push(await request.json());
+    return HttpResponse.json({ topology: {}, layout: {} });
+  }));
+  return bodies;
+}
+
 describe("TopologyPage", () => {
   it("renders the canvas with devices and networks", async () => {
     useRichLayout();
@@ -40,10 +68,173 @@ describe("TopologyPage", () => {
     expect(screen.getByTestId("rf__node-network:office")).toBeInTheDocument();
   });
 
+  it("shows the member subnet details when a network is clicked", async () => {
+    useRichLayout();
+    renderPage(<TopologyPage />, "/ui/topology", "d1");
+
+    fireEvent.click(await screen.findByTestId("rf__node-network:office"));
+
+    expect(screen.getByTestId("network-info")).toHaveTextContent("lan");
+    expect(screen.getByTestId("network-info")).toHaveTextContent("10.0.0.0/24");
+  });
+
   it("starts in the select tool", async () => {
     renderPage(<TopologyPage />, "/ui/topology", "d1");
     await screen.findByTestId("tool-select");
     expect(screen.getByTestId("tool-select").className).toContain("active");
+  });
+
+  it("shows an icon for the current server sync status", async () => {
+    renderPage(<TopologyPage />, "/ui/topology", "d1");
+    const status = await screen.findByRole("status", { name: "Сохранено" });
+    expect(status.querySelector("svg")).toBeInTheDocument();
+  });
+
+  it("creates a switch with the name entered before placing it", async () => {
+    let body: unknown;
+    server.use(http.post("/api/drafts/d1/topology/operations/batch", async ({ request }) => {
+      body = await request.json();
+      return HttpResponse.json({
+        topology: {
+          devices: [{ name: "core-sw", kind: "switch" }],
+          links: [], networks: [], sets: [], unions: [],
+        },
+        layout: {
+          devices: { "core-sw": { x: 200, y: 100 } }, networks: {}, links: {},
+          camera: { x: 0, y: 0, z: 1 },
+        },
+      });
+    }));
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await user.click(await screen.findByTestId("tool-device"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 200, clientY: 100 });
+    expect(screen.getByTestId("create-panel")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.type(await screen.findByLabelText("Имя"), "core-sw");
+    await user.selectOptions(screen.getByLabelText("Тип"), "switch");
+    await user.click(screen.getByRole("button", { name: "Создать" }));
+    expect(screen.getByTestId("rf__node-device:core-sw")).toBeInTheDocument();
+    await waitFor(() => expect(body).toEqual({ operations: [
+      { kind: "create-device", device: { name: "core-sw", kind: "switch" } },
+      { kind: "set-device-position", deviceName: "core-sw", position: expect.any(Object) },
+    ] }), { timeout: 2000 });
+    expect(screen.getByTestId("rf__node-device:core-sw")).toBeInTheDocument();
+    expect(screen.getByTestId("tool-device").className).toContain("active");
+  });
+
+  it("keeps an optimistic device when the initial topology request resolves later", async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+    server.use(http.get("/api/drafts/d1/topology", async () => {
+      requestStarted();
+      await blocked;
+      return HttpResponse.json({
+        devices: [], links: [], networks: [], sets: [], unions: [],
+      });
+    }));
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await started;
+    await user.click(await screen.findByTestId("tool-device"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 200, clientY: 100 });
+    await user.type(await screen.findByLabelText("Имя"), "late-device");
+    await user.click(screen.getByRole("button", { name: "Создать" }));
+    expect(screen.getByTestId("rf__node-device:late-device")).toBeInTheDocument();
+
+    await act(async () => { release(); });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitFor(() => expect(screen.getByTestId("rf__node-device:late-device")).toBeInTheDocument());
+  });
+
+  it("removes an optimistically created device after a failed save", async () => {
+    server.use(http.post("/api/drafts/d1/topology/operations/batch", () =>
+      HttpResponse.json({ error: "name already exists" }, { status: 422 })));
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await user.click(await screen.findByTestId("tool-device"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 200, clientY: 100 });
+    await user.type(await screen.findByLabelText("Имя"), "temporary");
+    await user.click(screen.getByRole("button", { name: "Создать" }));
+
+    expect(screen.getByTestId("rf__node-device:temporary")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("rf__node-device:temporary")).toBeNull(), { timeout: 2000 });
+  });
+
+  it("removes a failed optimistic device when another is created during rollback", async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let refetchStarted!: () => void;
+    const refetch = new Promise<void>((resolve) => { refetchStarted = resolve; });
+    let topologyRequests = 0;
+    server.use(
+      http.get("/api/drafts/d1/topology", async () => {
+        topologyRequests += 1;
+        if (topologyRequests === 2) {
+          refetchStarted();
+          await blocked;
+        }
+        return HttpResponse.json(topologyRequests === 1 ? {
+          devices: [{ name: "r1", kind: "router" }], links: [], networks: [], sets: [], unions: [],
+        } : { devices: [], links: [], networks: [], sets: [], unions: [] });
+      }),
+      http.post("/api/drafts/d1/topology/operations/batch", () =>
+        HttpResponse.json({ error: "name already exists" }, { status: 422 })),
+    );
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await screen.findByTestId("rf__node-device:r1");
+    await user.click(await screen.findByTestId("tool-device"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 200, clientY: 100 });
+    await user.type(await screen.findByLabelText("Имя"), "failed-first");
+    await user.click(screen.getByRole("button", { name: "Создать" }));
+    expect(screen.getByTestId("rf__node-device:failed-first")).toBeInTheDocument();
+    await act(async () => { await refetch; });
+
+    await user.click(screen.getByTestId("tool-device"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 300, clientY: 200 });
+    await user.type(await screen.findByLabelText("Имя"), "kept-second");
+    await user.click(screen.getByRole("button", { name: "Создать" }));
+    expect(screen.getByTestId("rf__node-device:kept-second")).toBeInTheDocument();
+    await act(async () => { release(); });
+
+    await waitFor(() => expect(screen.queryByTestId("rf__node-device:failed-first")).toBeNull(), { timeout: 2000 });
+    expect(screen.getByTestId("rf__node-device:kept-second")).toBeInTheDocument();
+  });
+
+  it("does not create a network when its dialog is cancelled", async () => {
+    let body: unknown;
+    server.use(http.post("/api/drafts/d1/topology/operations/batch", async ({ request }) => {
+      body = await request.json();
+      return HttpResponse.json({ topology: {}, layout: {} });
+    }));
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await user.click(await screen.findByTestId("tool-network"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 200, clientY: 100 });
+    expect(screen.getByTestId("create-panel")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.type(await screen.findByLabelText("Имя"), "guest");
+    expect(screen.queryByLabelText("Тип")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(body).toBeUndefined();
+    expect(screen.getByTestId("tool-network").className).toContain("active");
+  });
+
+  it("closes the creation panel when the canvas is clicked outside it", async () => {
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await user.click(await screen.findByTestId("tool-network"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 200, clientY: 100 });
+    expect(screen.getByTestId("create-panel")).toBeInTheDocument();
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 500, clientY: 400 });
+    expect(screen.queryByTestId("create-panel")).toBeNull();
+  });
+
+  it("closes the creation panel with Escape", async () => {
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await user.click(await screen.findByTestId("tool-device"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 200, clientY: 100 });
+    await user.type(await screen.findByLabelText("Имя"), "edge-r1");
+    fireEvent.keyDown(screen.getByLabelText("Имя"), { key: "Escape" });
+    expect(screen.queryByTestId("create-panel")).toBeNull();
   });
 
   it("warns instead of creating when read-only", async () => {
@@ -84,6 +275,119 @@ describe("TopologyPage", () => {
     // flush дебаунсится на 400 мс — ждём отправку операции.
     await waitFor(() => expect(body).toEqual({ kind: "delete-device", deviceName: "r1" }), { timeout: 2000 });
     void user;
+  });
+
+  // --- connect-инструмент: клик по первому объекту, клик по второму ---
+
+  it("creates a link between two devices", async () => {
+    useRichLayout();
+    useUnlinkedTopology();
+    const bodies = captureOperations();
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await screen.findByTestId("tool-connect");
+    await user.click(screen.getByTestId("tool-connect"));
+    await pickAsync("rf__node-device:r1");
+    // Первый клик только запоминает объект: узел подсвечен, операции нет.
+    expect(screen.getByTestId("rf__node-device:r1").className).toContain("pending");
+    expect(bodies).toEqual([]);
+    await pickAsync("rf__node-device:sw1");
+    await waitFor(() => expect(bodies).toEqual([
+      { kind: "create-link", link: { a: { device: "r1" }, b: { device: "sw1" } } },
+    ]), { timeout: 2000 });
+  });
+
+  it("attaches a network to a device", async () => {
+    useRichLayout();
+    const bodies = captureOperations();
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await screen.findByTestId("tool-connect");
+    await user.click(screen.getByTestId("tool-connect"));
+    await pickAsync("rf__node-network:office");
+    await pickAsync("rf__node-device:r1");
+    await waitFor(() => expect(bodies).toEqual([
+      { kind: "attach-network", networkName: "office", attach: { device: "r1" } },
+    ]), { timeout: 2000 });
+  });
+
+  it("warns when the devices are already linked", async () => {
+    useRichLayout();
+    const bodies = captureOperations();
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await screen.findByTestId("tool-connect");
+    await user.click(screen.getByTestId("tool-connect"));
+    // Связь r1–sw1 уже есть в фикстуре topology.
+    await pickAsync("rf__node-device:r1");
+    await pickAsync("rf__node-device:sw1");
+    expect(await screen.findByTestId("banner")).toHaveTextContent("уже соединены");
+    expect(bodies).toEqual([]);
+    // Предупреждение снимает выбор: следующий клик снова начинает пару.
+    expect(screen.getByTestId("rf__node-device:r1").className).not.toContain("pending");
+  });
+
+  it("warns that networks cannot be linked to each other", async () => {
+    useRichLayout();
+    // Вторую сеть добавляем и в документ, и в layout: без позиции узел на
+    // канву не попадает, без записи в doc сеть не видна connect-логике.
+    server.use(http.get("/api/drafts/d1/topology", () => HttpResponse.json({
+      devices: [{ name: "r1", kind: "router" }],
+      links: [],
+      networks: [{ name: "office" }, { name: "guest" }],
+      sets: [],
+      unions: [],
+    })));
+    server.use(http.get("/api/drafts/d1/layout", () => HttpResponse.json({
+      devices: { r1: { x: 0, y: 0 } },
+      networks: { office: { x: 0, y: 200 }, guest: { x: 300, y: 200 } },
+      links: {},
+      camera: { x: 0, y: 0, z: 1 },
+    })));
+    const bodies = captureOperations();
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await screen.findByTestId("tool-connect");
+    await user.click(screen.getByTestId("tool-connect"));
+    await pickAsync("rf__node-network:office");
+    await pickAsync("rf__node-network:guest");
+    expect(await screen.findByTestId("banner")).toHaveTextContent("не могут быть соединены напрямую");
+    expect(bodies).toEqual([]);
+  });
+
+  it("cancels the pending pick on a pane click", async () => {
+    useRichLayout();
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await screen.findByTestId("tool-connect");
+    await user.click(screen.getByTestId("tool-connect"));
+    await pickAsync("rf__node-device:r1");
+    expect(screen.getByTestId("rf__node-device:r1").className).toContain("pending");
+    // Клик по пустому полю канвы (панель под узлами).
+    fireEvent.click(document.querySelector(".react-flow__pane")!);
+    expect(screen.getByTestId("rf__node-device:r1").className).not.toContain("pending");
+  });
+
+  it("does not select the node while connecting", async () => {
+    useRichLayout();
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await screen.findByTestId("tool-connect");
+    await user.click(screen.getByTestId("tool-connect"));
+    await pickAsync("rf__node-device:r1");
+    // Клик адресован соединению, а не выделению (паритет с легаси).
+    expect(screen.getByTestId("rf__node-device:r1").className).not.toContain("selected");
+  });
+
+  it("switches tools with keyboard shortcuts", async () => {
+    renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await screen.findByTestId("tool-select");
+    fireEvent.keyDown(document.body, { key: "c" });
+    expect(screen.getByTestId("tool-connect").className).toContain("active");
+    fireEvent.keyDown(document.body, { key: "v" });
+    expect(screen.getByTestId("tool-select").className).toContain("active");
+  });
+
+  it("ignores tool shortcuts typed into a field", async () => {
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await screen.findByTestId("topo-search-toggle");
+    await user.click(screen.getByTestId("topo-search-toggle"));
+    fireEvent.keyDown(screen.getByPlaceholderText(/поиск/), { key: "c" });
+    expect(screen.getByTestId("tool-select").className).toContain("active");
   });
 
   // --- контекстное меню (паритет с легаси setupContextMenu) ---

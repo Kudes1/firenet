@@ -18,17 +18,18 @@ async function freshDraft(page, request, name) {
 test("создание роутера, свитча и сети инструментами канваса", async ({ page, request }) => {
   const id = await freshDraft(page, request, "create-objects");
 
-  const r1 = await createDeviceNode(page, { x: 400, y: 300 });
-  const r2 = await createDeviceNode(page, { x: 700, y: 300 });
-  const net1 = await createNetworkNode(page, { x: 550, y: 550 });
+  const r1 = await createDeviceNode(page, { x: 400, y: 300 }, { name: "r1", kind: "router" });
+  const sw1 = await createDeviceNode(page, { x: 700, y: 300 }, { name: "sw1", kind: "switch" });
+  const net1 = await createNetworkNode(page, { x: 550, y: 550 }, { name: "office" });
 
   await waitTopology(request, id, (doc) => {
     const t = doc.topology;
     return t.devices.length === 2 && t.networks.some((n) => n.name === net1);
   });
 
-  // Инструмент device создаёт роутеры (вид по умолчанию).
   const doc = (await getTopology(request, id)).topology;
-  expect(doc.devices.map((d) => d.kind)).toEqual(["router", "router"]);
-  expect(r1).not.toEqual(r2);
+  expect(doc.devices).toEqual([
+    expect.objectContaining({ name: r1, kind: "router" }),
+    expect.objectContaining({ name: sw1, kind: "switch" }),
+  ]);
 });

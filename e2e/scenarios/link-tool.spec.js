@@ -1,7 +1,8 @@
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { login, createDraft, op } from "../helpers/api.js";
 import {
-  loginViaUI, openWithDraft, createDeviceNode, linkDevices, waitTopology,
+  loginViaUI, openWithDraft, createDeviceNode, createNetworkNode,
+  linkDevices, attachNetwork, waitTopology,
 } from "../helpers/ui.js";
 
 async function freshDraft(page, request, name) {
@@ -21,12 +22,38 @@ test("connect-инструмент: связь устройство–устро
   const r1 = await createDeviceNode(page, { x: 400, y: 300 });
   const r2 = await createDeviceNode(page, { x: 700, y: 300 });
 
-  // Связь через click-connect React Flow: клик по source-хэндлу первого
-  // узла, затем по target-хэндлу второго.
+  // Connect-инструмент: клик по первому устройству, клик по второму.
   await linkDevices(page, r1, r2);
 
   await waitTopology(request, id, (doc) => {
     const t = doc.topology;
     return t.links.some((l) => l.a.device === r1 && l.b.device === r2);
   });
+});
+
+test("connect-инструмент: привязка сети к устройству", async ({ page, request }) => {
+  const id = await freshDraft(page, request, "attach-tool");
+
+  const r1 = await createDeviceNode(page, { x: 400, y: 300 });
+  const net = await createNetworkNode(page, { x: 700, y: 500 });
+
+  await attachNetwork(page, net, r1);
+
+  await waitTopology(request, id, (doc) =>
+    (doc.topology.networks || []).some((n) => n.name === net && (n.attach || []).some((a) => a.device === r1)));
+});
+
+test("connect-инструмент: повторная связь не дублируется", async ({ page, request }) => {
+  const id = await freshDraft(page, request, "link-twice");
+
+  const r1 = await createDeviceNode(page, { x: 400, y: 300 });
+  const r2 = await createDeviceNode(page, { x: 700, y: 300 });
+
+  await linkDevices(page, r1, r2);
+  await waitTopology(request, id, (doc) => (doc.topology.links || []).length === 1);
+
+  // Второй раз та же пара: баннер «уже соединены», документ не меняется.
+  await linkDevices(page, r1, r2);
+  await expect(page.locator('[data-testid="banner"]')).toContainText("уже соединены");
+  await waitTopology(request, id, (doc) => (doc.topology.links || []).length === 1);
 });

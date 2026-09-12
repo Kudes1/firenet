@@ -112,6 +112,7 @@ export default function SetsPage() {
     {
       key: "actions",
       title: "",
+      filterReset: true,
       render: (r) => (
         <>
           <button type="button" className="icon-btn edit" title={`Изменить набор ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>

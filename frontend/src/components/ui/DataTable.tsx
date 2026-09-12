@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
+import { ResetIcon, SearchIcon } from "../icons";
 
 export type Column<T> = {
   key: string;
@@ -6,6 +7,8 @@ export type Column<T> = {
   render: (row: T) => React.ReactNode;
   // Без filter колонка не участвует в поиске (например, кнопки действий).
   filter?: (row: T, query: string) => boolean;
+  // Показывает кнопку сброса фильтров в этой колонке.
+  filterReset?: boolean;
   width?: string;
 };
 
@@ -24,12 +27,14 @@ type Props<T> = {
 export default function DataTable<T>({ columns, rows, rowKey, empty, actions, hint }: Props<T>) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const searchRowId = useId();
 
   const searchable = useMemo(() => columns.filter((c) => c.filter), [columns]);
   const visible = useMemo(
-    () => rows.filter((row) => searchable.every((c) => !filters[c.key] || c.filter!(row, filters[c.key]))),
-    [rows, filters, searchable],
+    () => searchOpen ? rows.filter((row) => searchable.every((c) => !filters[c.key] || c.filter!(row, filters[c.key]))) : rows,
+    [rows, filters, searchable, searchOpen],
   );
+  const searchLabel = searchOpen ? "Закрыть поиск" : "Открыть поиск";
 
   return (
     <div className="table-wrap">
@@ -37,11 +42,19 @@ export default function DataTable<T>({ columns, rows, rowKey, empty, actions, hi
         <div className="toolbar-text">{hint}</div>
         <div className="toolbar-actions">
           {searchable.length > 0 && (
-            <button type="button" className="btn-search secondary" title="Поиск" onClick={() => setSearchOpen(!searchOpen)}>
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
-                <circle cx="6.5" cy="6.5" r="4.25" />
-                <path d="m13.2 13.2-4.3-4.3" />
-              </svg>
+            <button
+              type="button"
+              className={`btn-search secondary${searchOpen ? " search-active" : ""}`}
+              title={searchLabel}
+              aria-label={searchLabel}
+              aria-expanded={searchOpen}
+              aria-controls={searchOpen ? searchRowId : undefined}
+              onClick={() => setSearchOpen((open) => !open)}
+            >
+              <span className="search-toggle-icon" aria-hidden="true">
+                <SearchIcon />
+                {searchOpen && <span className="search-toggle-close"><ResetIcon /></span>}
+              </span>
             </button>
           )}
           {actions}
@@ -54,7 +67,7 @@ export default function DataTable<T>({ columns, rows, rowKey, empty, actions, hi
         <thead>
           <tr>{columns.map((c) => <th key={c.key}>{c.title}</th>)}</tr>
           {searchOpen && (
-            <tr className="search-row">
+            <tr id={searchRowId} className="search-row">
               {columns.map((c) => (
                 <th key={c.key}>
                   {c.filter && (
@@ -63,6 +76,11 @@ export default function DataTable<T>({ columns, rows, rowKey, empty, actions, hi
                       value={filters[c.key] ?? ""}
                       onChange={(e) => setFilters({ ...filters, [c.key]: e.target.value })}
                     />
+                  )}
+                  {c.filterReset && (
+                    <button type="button" className="icon-btn reset-search" title="Сбросить фильтры" aria-label="Сбросить фильтры" onClick={() => setFilters({})}>
+                      <ResetIcon />
+                    </button>
                   )}
                 </th>
               ))}
