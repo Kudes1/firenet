@@ -75,7 +75,7 @@ test("связь становится фильтрованной с экспор
   // React-версии нет. «Фильтровать» переводит связь в фильтрованный режим
   // сразу (без модалки); экспорты задаются через «Изменить фильтр».
   await openTablePage(page, id, "/ui/links");
-  const row = page.locator("tbody tr", { hasText: `${r1} ↔ ${r2}` });
+  const row = page.locator("tbody tr").filter({ hasText: r1 }).filter({ hasText: r2 });
   await row.getByRole("button", { name: "Фильтровать" }).click();
   await row.locator(".icon-btn.edit").click();
   const dialog = page.locator('dialog.modal[open]');
