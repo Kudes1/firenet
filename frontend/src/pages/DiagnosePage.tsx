@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDiagnose, useProjectResource, useSpread } from "../api/queries";
 import type { DiagnoseReport, LayoutDoc, MapMark, SpreadResult, SubnetsDoc, TopologyDoc } from "../api/types";
-import { layoutLinkKey } from "../lib/links";
+import { diagnosticMarkOf } from "../lib/diagnoseMarks";
 import TopologyCanvas from "../topology/TopologyCanvas";
 import { notify } from "../components/notify";
 import { DiagnosePathIcon, DiagnoseSpreadIcon, ResetIcon } from "../components/icons";
@@ -81,30 +81,10 @@ export default function DiagnosePage() {
     setActiveTool((current) => current === tool ? null : tool);
   };
 
-  // Ключи okE/halfE/denyE приходят с NUL-разделителем — тот же формат, что
-  // использовала самописная канва. Рёбра в канве живут под id
-  // link:<канонический ключ>#<offset> (buildScene в Task 17/18), поэтому
-  // здесь ключ строится без суффикса, а markOf сопоставляет по префиксу.
-  const mark = useMemo(() => buildMark(report?.mapMark ?? spreadMark), [report, spreadMark]);
-
-  // Узлы в канве имеют id ровно device:<имя>/network:<имя>, так что на них
-  // mark ставится прямым соответствием. Рёбра же идут с суффиксом
-  // «#<offset>» (параллельные связи), поэтому ищем по префиксу
-  // link:<ключ>, где <ключ> — из mapMark (NUL-разделитель → layoutLinkKey).
-  const markOf = useCallback((id: string) => {
-    const direct = mark.get(id);
-    if (direct) return direct;
-    if (id.startsWith("link:")) {
-      const base = id.slice(0, id.lastIndexOf("#"));
-      const fromBase = mark.get(base);
-      if (fromBase) return fromBase;
-      const slash = id.indexOf(":");
-      const a = id.slice(slash + 1, id.indexOf("|"));
-      const b = id.slice(id.indexOf("|") + 1, id.lastIndexOf("#"));
-      return mark.get(`link:${layoutLinkKey(a, b)}`);
-    }
-    return undefined;
-  }, [mark]);
+  const markOf = useMemo(
+    () => diagnosticMarkOf(report?.mapMark ?? spreadMark),
+    [report?.mapMark, spreadMark],
+  );
 
   return (
     <main className="page" data-testid="page-diagnose">
@@ -268,29 +248,4 @@ function readForm(): Form {
   } catch {
     return { src: "", dst: "", proto: "", dstPorts: "" };
   }
-}
-
-// mapMark приходит с сервера в виде списков имён; здесь он превращается в
-// соответствие «id узла/ребра → класс подсветки». Узлы индексируются точно
-// (device:<имя>, network:<имя>), рёбра — по каноническому ключу без
-// суффикса #<offset> (см. markOf выше).
-function buildMark(mark: MapMark | null | undefined): Map<string, string> {
-  const result = new Map<string, string>();
-  if (!mark) return result;
-  for (const id of mark.ok ?? []) result.set(id, "diag-flow-ok");
-  for (const id of mark.half ?? []) result.set(id, "diag-flow-half");
-  for (const name of Object.keys(mark.deny ?? {})) result.set(`device:${name}`, "diag-flow-deny");
-  for (const key of mark.okE ?? []) {
-    const [a, b] = key.split("\0");
-    if (a && b) result.set(`link:${layoutLinkKey(a, b)}`, "diag-flow-ok");
-  }
-  for (const key of mark.halfE ?? []) {
-    const [a, b] = key.split("\0");
-    if (a && b) result.set(`link:${layoutLinkKey(a, b)}`, "diag-flow-half");
-  }
-  for (const key of mark.denyE ?? []) {
-    const [a, b] = key.split("\0");
-    if (a && b) result.set(`link:${layoutLinkKey(a, b)}`, "diag-flow-deny");
-  }
-  return result;
 }

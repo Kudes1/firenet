@@ -41,6 +41,21 @@ describe("LinkEdge waypoints", () => {
     expect(hit()).toBeNull();
   });
 
+  it("applies diagnostic marks to the visible edge path", async () => {
+    render(
+      <TopologyCanvas
+        topology={topology}
+        layout={layout}
+        editable={false}
+        markOf={(id) => id === "link:r1|sw1#0" ? "diag-flow-ok diag-dim" : undefined}
+      />,
+    );
+    const edge = await screen.findByTestId("link:r1|sw1#0");
+    const classes = edge.querySelector(".react-flow__edge-path")?.getAttribute("class");
+    expect(classes).toContain("diag-flow-ok");
+    expect(classes).toContain("diag-dim");
+  });
+
   it("shows waypoint handles only after selecting the edge", async () => {
     const withBend: LayoutDoc = {
       ...layout, links: { "r1|sw1": [[{ x: 220, y: 30 }]] },

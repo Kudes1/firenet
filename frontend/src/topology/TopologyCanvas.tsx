@@ -171,9 +171,9 @@ function TopologyCanvasInner({
       selectable: false,
       selectablePriority: 0,
       zIndex: -1,
-      className: "union-outline",
+      className: ["union-outline", markOf?.(`union:${b.name}`)].filter(Boolean).join(" "),
     })),
-    [topology, livePositions],
+    [topology, livePositions, markOf],
   );
 
   // Пока узел тащат, applyNodeChanges обновляет только позиции узлов; рёбра
@@ -212,7 +212,7 @@ function TopologyCanvasInner({
       const from = centerOf.get(e.source) ?? e.data.from;
       const to = centerOf.get(e.target) ?? e.data.to;
       const mark = markOf?.(e.id);
-      const base = { ...e, data: { ...e.data, from, to } };
+      const base = { ...e, data: { ...e.data, from, to, diagnosticMark: mark } };
       return mark ? { ...base, className: mark } : base;
     });
   }, [rfEdges, rfNodes, markOf]);

@@ -60,13 +60,18 @@ describe("TopologyCanvas", () => {
         topology={topology}
         layout={layout}
         editable={false}
-        markOf={(id) => (id === "device:r1" ? "diag-flow-ok" : undefined)}
+        markOf={(id) => {
+          if (id === "device:r1") return "diag-flow-ok";
+          if (id === "union:u1") return "diag-dim";
+          return undefined;
+        }}
       />,
     );
     // RF кладёт className объекта узла на обёртку rf__node-<id>, а НЕ на
     // внутренний div кастомного компонента (см. «известные подводные камни»).
     const node = await screen.findByTestId("rf__node-device:r1");
     expect(node.className).toContain("diag-flow-ok");
+    expect(screen.getByTestId("rf__node-union:u1").className).toContain("diag-dim");
   });
 
   // Фон канвы — один слой точек от <Background /> RF. Шаг 24px — размер

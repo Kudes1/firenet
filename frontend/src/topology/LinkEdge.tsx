@@ -46,9 +46,9 @@ function projectOnSegment(p: { x: number; y: number }, a: { x: number; y: number
 // корневой <g>. data-* в тип BaseEdgeProps не входит, поэтому обёртка <g>
 // нужна и ради testid (см. камни в шапке Task 18).
 export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
-  const { offset = 0, filtered = false, waypoints, from, to } = (data ?? {}) as {
+  const { offset = 0, filtered = false, waypoints, from, to, diagnosticMark } = (data ?? {}) as {
     offset?: number; filtered?: boolean; waypoints?: Array<{ x: number; y: number }>;
-    from?: { x: number; y: number }; to?: { x: number; y: number };
+    from?: { x: number; y: number }; to?: { x: number; y: number }; diagnosticMark?: string;
   };
   const actions = useEdgeActions();
   const { screenToFlowPosition } = useReactFlow();
@@ -128,7 +128,7 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
           strokeWidth: selected ? 2.5 : 1.5,
           strokeDasharray: filtered ? "6 4" : undefined,
         }}
-        className={filtered ? "link-edge filtered" : "link-edge"}
+        className={[filtered ? "link-edge filtered" : "link-edge", diagnosticMark].filter(Boolean).join(" ")}
       />
       {editable && (
         <>

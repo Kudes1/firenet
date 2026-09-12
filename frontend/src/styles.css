@@ -10,6 +10,9 @@
   --danger-fg: #ffffff;
   --success: #16a34a;
   --success-fg: #ffffff;
+  --diag-flow-ok: #10b981;
+  --diag-flow-half: #f59e0b;
+  --diag-flow-deny: #ef4444;
   --panel-bg: #f6f6f8;
   --panel-bg-hover: #ececf0;
   --shadow: 0 4px 14px rgba(20, 20, 30, 0.1);
@@ -393,6 +396,31 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .react-flow__node.search-dim { opacity: 0.35; }
 /* Первый объект connect-инструмента (легаси pending: контур accent, толще). */
 .react-flow__node.pending .topo-node { border-color: var(--accent) !important; border-width: 3px; }
+/* Диагностика: цвета и толщина совпадают с легаси Canvas2D. Класс ставится
+   на обёртку React Flow, а для рёбер дополнительно передаётся на SVG path. */
+.react-flow__node.diag-flow-ok .topo-node { border-color: var(--diag-flow-ok) !important; border-width: 2.5px; }
+.react-flow__node.diag-flow-half .topo-node { border-color: var(--diag-flow-half) !important; border-width: 2.5px; }
+.react-flow__node.diag-flow-deny .topo-node { border-color: var(--diag-flow-deny) !important; border-width: 2.5px; }
+.react-flow__node.diag-flow-ok .net-cloud-outline { stroke: var(--diag-flow-ok) !important; stroke-width: 2.5 !important; }
+.react-flow__node.diag-flow-half .net-cloud-outline { stroke: var(--diag-flow-half) !important; stroke-width: 2.5 !important; }
+.react-flow__node.diag-flow-deny .net-cloud-outline { stroke: var(--diag-flow-deny) !important; stroke-width: 2.5 !important; }
+.react-flow__node.diag-dim { opacity: 0.35; }
+.react-flow__edge-path.diag-flow-ok,
+.react-flow__edge.diag-flow-ok .react-flow__edge-path {
+  stroke: var(--diag-flow-ok) !important;
+  stroke-width: 4px !important;
+}
+.react-flow__edge-path.diag-flow-half,
+.react-flow__edge.diag-flow-half .react-flow__edge-path {
+  stroke: var(--diag-flow-half) !important;
+  stroke-width: 4px !important;
+}
+.react-flow__edge-path.diag-flow-deny,
+.react-flow__edge.diag-flow-deny .react-flow__edge-path {
+  stroke: var(--diag-flow-deny) !important;
+  stroke-width: 4px !important;
+}
+.react-flow__edge-path.diag-dim { opacity: 0.35; }
 /* Превью-линия связи от ожидающего объекта к курсору (легаси previewWire).
    Оверлей на всю канву поверх узлов, но под тулбаром и панелями. */
 .connect-preview {
