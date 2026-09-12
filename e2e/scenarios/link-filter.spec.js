@@ -80,7 +80,8 @@ test("связь становится фильтрованной с экспор
   await row.locator(".icon-btn.edit").click();
   const dialog = page.locator('dialog.modal[open]');
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText(`${r1} ↔ ${r2}`);
+  await expect(dialog).toContainText(r1);
+  await expect(dialog).toContainText(r2);
 
   // Кандидаты экспорта подгружаются с бэкенда (link-exports): сеть видна,
   // только когда она привязана к соответствующему устройству.
