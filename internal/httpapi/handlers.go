@@ -349,7 +349,12 @@ func (h *handlers) writeLinkExports(w http.ResponseWriter, r *http.Request, doc 
 	}
 	l := topo.Links[idx]
 	dev := l.A.Device
-	if side == "b" {
+	if byPair {
+		dev = a[0]
+		if side == "b" {
+			dev = b[0]
+		}
+	} else if side == "b" {
 		dev = l.B.Device
 	}
 	names, err := graph.ReachableEntities(topo, dev, idx)

@@ -1177,6 +1177,20 @@ func TestGetLinkExports_ResolvesByEndpointPair(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
 	}
+
+	// For endpoint-pair requests, side follows the requested a/b order,
+	// which is what the canonicalized links form displays.
+	rec = doJSON(t, h, http.MethodGet, draftPath(draftID, "link-exports?a=r2&b=r1&side=a"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want = []EntityDoc{{Name: "n-dmz"}, {Name: "dmz", CIDR: "10.0.1.0/24"}}
+	if !slices.EqualFunc(got.Entities, want, func(a, b EntityDoc) bool { return a == b }) {
+		t.Fatalf("entities = %+v, want %+v", got.Entities, want)
+	}
 }
 
 func TestGetLinkExports_LegacyIndexQueryStillWorks(t *testing.T) {
