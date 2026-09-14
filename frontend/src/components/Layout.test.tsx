@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
-import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { server } from "../test/msw";
 import * as fx from "../api/fixtures";
 import { storageKeys } from "../lib/storage";
@@ -14,11 +14,6 @@ import Layout from "./Layout";
 const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 beforeAll(() => server.listen());
-beforeEach(() => {
-  // jsdom не реализует window.matchMedia (только браузеры), а initialTheme
-  // из Sidebar вызывает его при монтировании — стабим, чтобы не падал.
-  vi.stubGlobal("matchMedia", () => ({ matches: false }));
-});
 afterEach(() => {
   server.resetHandlers();
   sessionStorage.clear();

@@ -20,6 +20,11 @@ describe("theme", () => {
     expect(initialTheme()).toBe("dark");
   });
 
+  it("defaults to light when an invalid preference was saved", () => {
+    localStorage.setItem("ui.theme", "system");
+    expect(initialTheme()).toBe("light");
+  });
+
   it("applies and persists the selected theme", () => {
     applyTheme("dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
