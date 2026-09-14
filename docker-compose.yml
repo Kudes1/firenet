@@ -17,6 +17,7 @@ services:
   backend:
     build:
       context: ./backend
+      target: runtime
     restart: unless-stopped
     depends_on:
       db:
@@ -27,6 +28,17 @@ services:
       FIRENET_ADMIN_PASSWORD: ${FIRENET_ADMIN_PASSWORD:?set FIRENET_ADMIN_PASSWORD in .env}
     ports:
       - "127.0.0.1:8787:8787"
+
+  backend-test:
+    profiles: ["test"]
+    build:
+      context: ./backend
+      target: test
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      FIRENET_TEST_DATABASE_URL: postgres://firenet:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/firenet?sslmode=disable
 
   frontend:
     build:

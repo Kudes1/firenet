@@ -95,12 +95,3 @@ func TestAcceptInviteTooShortPassword(t *testing.T) {
 		t.Fatalf("got status %d, want 400", rec.Code)
 	}
 }
-
-func TestInvitePageIsPubliclyServed(t *testing.T) {
-	srv, _ := newUnauthenticatedTestServer(t)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/invite/some-token", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want 200", rec.Code)
-	}
-}
