@@ -36,10 +36,6 @@ func Open(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
-	if err := db.Migrate(ctx, pool); err != nil {
-		pool.Close()
-		t.Fatalf("migrate test database: %v", err)
-	}
 
 	lockConn, err := pool.Acquire(ctx)
 	if err != nil {
@@ -50,6 +46,12 @@ func Open(t *testing.T) *pgxpool.Pool {
 		lockConn.Release()
 		pool.Close()
 		t.Fatalf("acquire test database lock: %v", err)
+	}
+	if err := db.Migrate(ctx, pool); err != nil {
+		_, _ = lockConn.Exec(ctx, "SELECT pg_advisory_unlock($1)", testDBLockKey)
+		lockConn.Release()
+		pool.Close()
+		t.Fatalf("migrate test database: %v", err)
 	}
 
 	t.Cleanup(func() {

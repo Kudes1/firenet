@@ -4,9 +4,9 @@
 
 **Goal:** Вынести Go-бэкенд в `backend/` и перевести запуск, сборку и юнит-тесты на docker compose так, чтобы на хосте не требовались Go и Node.
 
-**Architecture:** `go.mod`/`go.sum`, `cmd/`, `internal/`, `Dockerfile` и `.dockerignore` переезжают в `backend/` (module path `github.com/kudes1/firenet` не меняется). `docker-compose.yml`, `Makefile`, `nginx/`, документация остаются в корне. В Dockerfile'ах бэкенда и фронтенда добавляются `test`-стейджи, в compose — сервисы под профилем `test`. Makefile оборачивает compose; e2e на переходный период остаётся хостовым.
+**Architecture:** `go.mod`/`go.sum`, `cmd/`, `internal/`, `Dockerfile` и `.dockerignore` переезжают в `backend/` (module path `github.com/kudes1/firenet` не меняется). `docker-compose.yml`, `Makefile`, `nginx/`, документация остаются в корне. В Dockerfile'ах бэкенда и фронтенда добавляются `test`-стейджи, в compose — сервисы под профилем `test`. Makefile оборачивает compose; e2e на переходный период остаётся гибридным: Playwright, Node/Vite и `bin/firenet` работают на хосте, PostgreSQL запускается в Docker.
 
-**Tech Stack:** Go 1.25, Docker Compose 5.5.1, postgres:16-alpine, Vite/React (Vitest), Playwright (хостовое исключение).
+**Tech Stack:** Go 1.25, Docker Compose 5.5.1, postgres:16-alpine, Vite/React (Vitest), Playwright (временное гибридное исключение для e2e).
 
 **Spec:** `docs/superpowers/specs/2026-09-14-backend-subdir-docker-first-design.md`
 
@@ -15,9 +15,9 @@
 - Module path остаётся `github.com/kudes1/firenet` — ни один Go-импорт не редактируется.
 - `docker-compose.yml`, `Makefile`, `nginx/firenet.conf`, `frontend/`, `e2e/`, `docs/` остаются в корне.
 - Хостовая сборка Go/Node не предполагается: все цели Makefile, кроме `test-e2e`, не вызывают `go`/`npm` на хосте.
-- `test-e2e` — единственное задокументированное исключение: требует Node и `npx playwright`, зависит от `bin/firenet`.
+- `test-e2e` — единственное задокументированное гибридное исключение: Playwright, Node/Vite и `bin/firenet` запускаются на хосте, PostgreSQL — во временном Docker-контейнере; нужны Docker, Node, зависимости `frontend/` и `e2e/`, `npx playwright` и Chromium.
 - API-контракт, миграции, `internal/*` по смыслу не меняются — это только переезд и упаковка.
-- Каждая задача заканчивается рабочим состоянием репозитория и отдельным коммитом.
+- Каждая задача заканчивается рабочим состоянием репозитория и отдельным коммитом. Единственное явное исключение — `make test-e2e` между Task 1 и Task 2 (см. пометку в Task 1, Step 4).
 
 ---
 
@@ -109,6 +109,15 @@ dev:
 	docker compose up -d --build
 ```
 
+> **Известное временное исключение:** `test-e2e` в этом шаге всё ещё зависит
+> от старого `build` (`test-e2e: build`), а новый `build` собирает только
+> docker-образ и больше **не создаёт `bin/firenet`**. `e2e/global-setup.js`
+> спавнит `bin/firenet`, поэтому между Task 1 и Task 2 хостовый e2e может
+> использовать устаревший бинарь или упасть на чистом клоне (`bin/` в
+> `.gitignore`). Это осознанная переходная дырка: Task 2 (Step 3) меняет
+> зависимость на `test-e2e: bin` и добавляет саму цель `bin`. До Task 2
+> `make test-e2e` не считается валидным; остальные цели Task 1 рабочие.
+
 - [ ] **Step 5: Собрать образ**
 
 Run: `docker compose build backend`
@@ -142,7 +151,7 @@ git commit -m "refactor(backend): move Go module into backend/ subdir"
 
 **Files:**
 - Modify: `backend/Dockerfile` (добавить стейдж `test` в конец)
-- Modify: `docker-compose.yml` (добавить `backend-test`)
+- Modify: `docker-compose.yml` (добавить `target: runtime` сервису `backend`; добавить `backend-test`)
 - Modify: `Makefile` (добавить `bin`, `test`, `vet`, `fmt`, `tidy`; `test-e2e` зависит от `bin`)
 
 **Interfaces:**
@@ -162,9 +171,27 @@ COPY . .
 CMD ["go", "test", "./..."]
 ```
 
-- [ ] **Step 2: Добавить сервис `backend-test` в `docker-compose.yml`**
+> **Важно:** без `--target` docker собирает последний стейдж, поэтому после
+> добавления `test` в конец дефолтной сборкой станет он. Чтобы сервис
+> `backend` по-прежнему запускал `runtime`, Step 2 явно фиксирует
+> `target: runtime` (как у сервиса `frontend`). Без этого `docker compose
+> up -d --build` поднимет golang-образ и выполнит `go test`, а не сервер.
 
-Дописать в блок `services` (например, после сервиса `backend`):
+- [ ] **Step 2: Добавить `target: runtime` сервису `backend` и сервис `backend-test`**
+
+В `docker-compose.yml` у сервиса `backend` дополнить блок `build`:
+
+```yaml
+  backend:
+    build:
+      context: ./backend
+      target: runtime
+```
+
+Остальные поля сервиса `backend` не трогать (существующие `restart`,
+`depends_on`, `environment`, `ports` остаются как есть).
+
+Затем дописать в блок `services` (например, после сервиса `backend`):
 
 ```yaml
   backend-test:
@@ -285,7 +312,7 @@ git commit -m "build(backend): docker test stage and make targets"
 ### Task 3: Frontend test-стейдж и compose-сервис
 
 **Files:**
-- Modify: `frontend/Dockerfile` (добавить стейдж `test` после `deps`)
+- Modify: `frontend/Dockerfile` (добавить стейдж `test` в конец файла, после `runtime`)
 - Modify: `docker-compose.yml` (добавить `frontend-test`)
 - Modify: `Makefile` (`fe-test` через docker)
 
@@ -304,6 +331,13 @@ CMD ["sh", "-c", "npm run typecheck && npm test"]
 ```
 
 Стейджи `build` и `runtime` не трогать. Стейдж `test` повторяет `build` по копированию, но гоняет typecheck и тесты — это сохраняет прежнюю проверку `npm run typecheck && npm test`.
+
+> **Важно:** стейдж `test` дописывается именно **в конец** файла, а не сразу
+> за `deps`. Если вставить его между `deps` и `build`, он станет последним
+> стейджем, и дефолтная сборка начнёт гонять `npm run typecheck && npm test`
+> вместо `npm run build` (в том числе через `fe-build` → `docker compose
+> build frontend`). Сервис `frontend` спасает явный `target:
+> ${FRONTEND_TARGET:-runtime}`, но дефолтным стейджем `test` быть не должен.
 
 - [ ] **Step 2: Добавить сервис `frontend-test` в `docker-compose.yml`**
 
@@ -401,10 +435,19 @@ No linter beyond `go vet` is configured — don't try golangci-lint.
  5. `make test-e2e` — E2E-сценарии Playwright.
 
 Хостовые Go и Node не предполагаются: всё, кроме `test-e2e`, выполняется
-в docker compose. `make test-e2e` — единственное исключение: ему нужны
-Node, `npx playwright` и уже установленный chromium (первый запуск:
-`cd e2e && npm install && npx playwright install chromium`). Цель собирает
-`bin/firenet` через `make bin` (извлечение бинаря из образа).
+в docker compose. `make test-e2e` — временное гибридное исключение:
+Playwright, Node/Vite и `bin/firenet` запускаются на хосте, а PostgreSQL
+поднимается в Docker из `e2e/global-setup.js`. Нужны Docker, Node,
+зависимости `frontend/` и `e2e/`, `npx playwright` и Chromium. Первый
+запуск:
+
+```sh
+cd frontend && npm ci
+cd ../e2e && npm ci && npx playwright install chromium
+cd ..
+```
+
+Цель собирает `bin/firenet` через `make bin` (извлечение бинаря из образа).
 
 No linter beyond `go vet` is configured — don't try golangci-lint.
 ```
@@ -510,8 +553,12 @@ make vet        # go vet в контейнере
 make fmt        # gofmt (пишет в backend/ на хосте)
 make test       # Go-тесты в контейнере, с Postgres из compose
 make fe-test    # tsc + Vitest в контейнере
-make test-e2e   # исключение: Playwright требует Node и chromium на хосте
+make test-e2e   # временное гибридное исключение: Node/Vite/Playwright и bin/firenet на хосте, PostgreSQL в Docker
 ```
+
+`make test-e2e` требует Docker, Node, зависимости `frontend/` и `e2e/`, а
+также установленный Chromium. Полный перенос e2e в контейнеры — отдельная
+будущая задача.
 ```
 
 - [ ] **Step 5: Убедиться, что не осталось хостовых команд**
@@ -557,7 +604,10 @@ Expected: сборка успешна; `make test` — Go-тесты зелён�
 make test-e2e
 ```
 
-Expected: Playwright проходит (нужны docker и chromium). Если окружение без chromium — зафиксировать, что это известное исключение, и не считать провалом переезда.
+Expected: Playwright проходит в временном гибридном режиме (нужны Docker,
+Node, зависимости `frontend/` и `e2e/`, а также Chromium; PostgreSQL
+запускается в Docker). Если окружение без Chromium — зафиксировать, что это
+известное исключение, и не считать провалом переезда.
 
 - [ ] **Step 3: Убедиться, что рабочее дерево чисто**
 

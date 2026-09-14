@@ -50,7 +50,7 @@ When locating or analyzing code:
  2. `make fmt` — `gofmt -l -w` в контейнере (пишет в хостовые `backend/`
     через том); не должно остаться изменений, если код уже отформатирован
  3. `make test` — Go-тесты в контейнере `backend-test` (Postgres-тесты
-    идут против compose-сервиса `db`, не скипаются)
+    идут против отдельного compose-сервиса `test-db`, не скипаются)
  4. `make fe-test` — `tsc -b` + Vitest в контейнере `frontend-test`
  5. `make test-e2e` — E2E-сценарии Playwright.
 

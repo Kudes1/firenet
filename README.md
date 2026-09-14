@@ -94,7 +94,7 @@ Docker Compose считывает следующие значения из `.env
 ```sh
 make vet        # go vet в контейнере
 make fmt        # gofmt (пишет в backend/ на хосте)
-make test       # Go-тесты в контейнере, с Postgres из compose
+make test       # Go-тесты в контейнере, с отдельным test-db из compose
 make fe-test    # tsc + Vitest в контейнере
 make test-e2e   # временное гибридное исключение: Node/Vite/Playwright и bin/firenet на хосте, PostgreSQL в Docker
 ```
@@ -102,6 +102,10 @@ make test-e2e   # временное гибридное исключение: No
 `make test-e2e` требует Docker, Node, зависимости `frontend/` и `e2e/`, а
 также установленный Chromium. Полный перенос e2e в контейнеры — отдельная
 будущая задача.
+
+`make test` запускает PostgreSQL-сервис `test-db` под профилем `test` и
+использует отдельный том `firenet-test-db`. Рабочий сервис `db` и том
+`firenet-db` при этом не используются.
 
 ## Структура проекта
 

@@ -21,6 +21,13 @@ describe("LoginPage", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  it("renders a dedicated welcome shell", () => {
+    render(<MemoryRouter><LoginPage /></MemoryRouter>);
+
+    expect(screen.getByTestId("page-login")).toHaveClass("login-page");
+    expect(screen.getByRole("heading", { name: "С возвращением" })).toBeInTheDocument();
+  });
+
   it("posts credentials and follows ?next on success", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       id: "1", username: "admin", role: "admin", activated: true, createdAt: "",

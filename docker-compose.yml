@@ -14,6 +14,21 @@ services:
       timeout: 3s
       retries: 10
 
+  test-db:
+    image: postgres:16-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: firenet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: firenet_test
+    volumes:
+      - firenet-test-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U firenet -d firenet_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -35,10 +50,10 @@ services:
       context: ./backend
       target: test
     depends_on:
-      db:
+      test-db:
         condition: service_healthy
     environment:
-      FIRENET_TEST_DATABASE_URL: postgres://firenet:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/firenet?sslmode=disable
+      FIRENET_TEST_DATABASE_URL: postgres://firenet:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@test-db:5432/firenet_test?sslmode=disable
 
   frontend:
     build:
@@ -72,3 +87,4 @@ services:
 
 volumes:
   firenet-db:
+  firenet-test-db:
