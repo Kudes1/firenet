@@ -59,7 +59,7 @@ docker compose down                  # остановить и удалить к
 
 Приложение разделено на два рантайма:
 
-- **backend** (`cmd/firenet`) — Go-сервис, отдающий только JSON API
+- **backend** (`backend/cmd/firenet`) — Go-сервис, отдающий только JSON API
   (`/api/*`). Порт на хосте — `8787`, напрямую наружу не нужен.
 - **frontend** (`frontend/`) — React-приложение (Vite + TypeScript +
   React Flow), общается с API по cookie-сессии. Собирается в контейнер
@@ -88,29 +88,34 @@ Docker Compose считывает следующие значения из `.env
 
 ## Разработка
 
-Для проверки изменений исходного кода:
+Проверка изменений выполняется в docker compose, хостовые Go и Node не
+нужны:
 
 ```sh
-go build ./...
-go vet ./...
-gofmt -l .
-go test ./...
-cd frontend && npm test
-make test-e2e
+make vet        # go vet в контейнере
+make fmt        # gofmt (пишет в backend/ на хосте)
+make test       # Go-тесты в контейнере, с Postgres из compose
+make fe-test    # tsc + Vitest в контейнере
+make test-e2e   # временное гибридное исключение: Node/Vite/Playwright и bin/firenet на хосте, PostgreSQL в Docker
 ```
+
+`make test-e2e` требует Docker, Node, зависимости `frontend/` и `e2e/`, а
+также установленный Chromium. Полный перенос e2e в контейнеры — отдельная
+будущая задача.
 
 ## Структура проекта
 
 ```
-cmd/firenet/       точка входа Go-бэкенда (JSON API)
-internal/app/      ядро бизнес-логики
-internal/httpapi/  HTTP API (JSON)
+backend/           Go-бэкенд: модуль, cmd, internal, Dockerfile
+backend/cmd/firenet/  точка входа Go-бэкенда (JSON API)
+backend/internal/app/       ядро бизнес-логики
+backend/internal/httpapi/   HTTP API (JSON)
+backend/internal/pgstore/   хранение проектов и версий в PostgreSQL
+backend/internal/auth/      аутентификация и пользователи
+backend/internal/topology/  модель сети: устройства, связи, подсети и зоны
+backend/internal/rules/     модель правил фильтрации
+backend/internal/graph/     построение графа маршрутизации и поиск путей
+backend/internal/compiler/  размещение правил по устройствам
+backend/internal/render/    рендер iptables/ipset-скриптов
 frontend/          веб-интерфейс: React + TypeScript + Vite, сборка в nginx
-internal/pgstore/  хранение проектов и версий в PostgreSQL
-internal/auth/     аутентификация и пользователи
-internal/topology/ модель сети: устройства, связи, подсети и зоны
-internal/rules/    модель правил фильтрации
-internal/graph/    построение графа маршрутизации и поиск путей
-internal/compiler/ размещение правил по устройствам
-internal/render/   рендер iptables/ipset-скриптов
 ```

@@ -46,14 +46,28 @@ When locating or analyzing code:
    собранного бинаря и docker-Postgres (`global-setup.js`).
 
 ## Verification (run in this order after any change)
- 1. `go build ./...`
- 2. `go vet ./...`
- 3. `gofmt -l .` — must print nothing (`make fmt` to fix)
- 4. `go test ./...`
- 5. `cd frontend && npm run typecheck && npm test` — typecheck (tsc) и
-    юнит-тесты React (Vitest + RTL)
- 6. `make test-e2e` — E2E-сценарии Playwright (нужны docker и chromium;
-    первый запуск: `cd e2e && npm install && npx playwright install chromium`).
+ 1. `make vet` — `go vet` в контейнере `backend-test`
+ 2. `make fmt` — `gofmt -l -w` в контейнере (пишет в хостовые `backend/`
+    через том); не должно остаться изменений, если код уже отформатирован
+ 3. `make test` — Go-тесты в контейнере `backend-test` (Postgres-тесты
+    идут против compose-сервиса `db`, не скипаются)
+ 4. `make fe-test` — `tsc -b` + Vitest в контейнере `frontend-test`
+ 5. `make test-e2e` — E2E-сценарии Playwright.
+
+Хостовые Go и Node не предполагаются: всё, кроме `test-e2e`, выполняется
+в docker compose. `make test-e2e` — временное гибридное исключение:
+Playwright, Node/Vite и `bin/firenet` запускаются на хосте, а PostgreSQL
+поднимается в Docker из `e2e/global-setup.js`. Нужны Docker, Node,
+зависимости `frontend/` и `e2e/`, `npx playwright` и Chromium. Первый
+запуск:
+
+```sh
+cd frontend && npm ci
+cd ../e2e && npm ci && npx playwright install chromium
+cd ..
+```
+
+Цель собирает `bin/firenet` через `make bin` (извлечение бинаря из образа).
 
 No linter beyond `go vet` is configured — don't try golangci-lint.
 
@@ -61,12 +75,12 @@ No linter beyond `go vet` is configured — don't try golangci-lint.
  - `frontend/dist/` собирается в контейнер nginx; после правки `frontend/src`
    в prod-режиме нужен `docker compose up -d --build frontend`, в dev
    (`FRONTEND_TARGET=dev`) Vite подхватывает правки сам.
-  - The binary is a single web server (`cmd/firenet`): loads config from
+  - The binary is a single web server (`backend/cmd/firenet`): loads config from
     env (`internal/config`), applies migrations, bootstraps the admin
     user, seeds an empty project on a fresh DB, then serves `/api/*`.
     No CLI subcommands, no yaml input files.
   - Tests assert directly on structs/strings; there is no golden-file/-update infra.
- - e2e/ has its own package.json (playwright) — the app itself doesn't depend on node; editing e2e helpers doesn't require rebuilding the binary, but make test-e2e rebuilds bin/firenet via its build dependency anyway.
+ - e2e/ has its own package.json (playwright) — the app itself doesn't depend on node; editing e2e helpers doesn't require rebuilding the binary, but make test-e2e rebuilds bin/firenet via its `bin` dependency anyway.
 
 ## Общие правила
  - Отвечай в чате и задавай вопросы на русском языке
