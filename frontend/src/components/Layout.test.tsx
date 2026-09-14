@@ -31,7 +31,7 @@ function renderLayout(route = "/ui/subnets") {
           {/* Outlet (в Layout) требует контекст родительского route, поэтому
               Layout оборачиваем в pathless <Route> с дочерней заглушкой. */}
           <Route element={<Layout />}>
-            <Route path={route} element={<main data-testid="page" />} />
+            <Route path={route} element={<div data-testid="page" />} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -40,6 +40,14 @@ function renderLayout(route = "/ui/subnets") {
 }
 
 describe("Layout", () => {
+  it("keeps the enterprise shell around page content", () => {
+    renderLayout();
+
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+    expect(screen.getByRole("main")).toBeInTheDocument();
+    expect(screen.getByTestId("page")).toBeInTheDocument();
+  });
+
   it("renders the sidebar with all nav links", async () => {
     renderLayout();
     expect(await screen.findByRole("link", { name: "Схема" })).toHaveAttribute("href", "/ui/topology");
