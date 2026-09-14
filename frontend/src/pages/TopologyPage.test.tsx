@@ -63,6 +63,8 @@ describe("TopologyPage", () => {
     renderPage(<TopologyPage />, "/ui/topology", "d1");
 
     expect(screen.getByTestId("page-topology")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Топология" })).toBeInTheDocument();
+    expect(screen.getByRole("toolbar", { name: "Инструменты топологии" })).toBeInTheDocument();
     expect(screen.getByTestId("tool-select")).toBeInTheDocument();
     expect(screen.getByTestId("tool-connect")).toBeInTheDocument();
     expect(screen.getByTestId("tool-device")).toBeInTheDocument();
