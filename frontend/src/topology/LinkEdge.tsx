@@ -117,9 +117,10 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
 
   const live = drag ? (waypoints ?? []).map((w, i) => (i === drag.index ? drag.at : w)) : waypoints;
   const livePath = toPath(from && to ? edgePoints(from, to, offset, live) : []);
+  const edgeClass = [filtered ? "link-edge filtered" : "link-edge", diagnosticMark].filter(Boolean).join(" ");
 
   return (
-    <g data-testid={id}>
+    <g data-testid={id} className={edgeClass}>
       <BaseEdge
         id={id}
         path={livePath}
@@ -128,7 +129,7 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
           strokeWidth: selected ? 2.5 : 1.5,
           strokeDasharray: filtered ? "6 4" : undefined,
         }}
-        className={[filtered ? "link-edge filtered" : "link-edge", diagnosticMark].filter(Boolean).join(" ")}
+        className={edgeClass}
       />
       {editable && (
         <>

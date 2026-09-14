@@ -56,6 +56,23 @@ describe("LinkEdge waypoints", () => {
     expect(classes).toContain("diag-dim");
   });
 
+  it("keeps filtered and diagnostic state classes on the edge surface", async () => {
+    const filteredTopology: TopologyDoc = {
+      ...topology,
+      links: [{ ...topology.links![0], filter: { aExports: ["lan"], bExports: [] } }],
+    };
+    render(
+      <TopologyCanvas
+        topology={filteredTopology}
+        layout={layout}
+        editable={false}
+        markOf={(id) => id === "link:r1|sw1#0" ? "diag-flow-half" : undefined}
+      />,
+    );
+    const edge = await screen.findByTestId("link:r1|sw1#0");
+    expect(edge).toHaveClass("link-edge", "filtered", "diag-flow-half");
+  });
+
   it("shows waypoint handles only after selecting the edge", async () => {
     const withBend: LayoutDoc = {
       ...layout, links: { "r1|sw1": [[{ x: 220, y: 30 }]] },

@@ -364,6 +364,14 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   stroke: var(--accent);
   stroke-width: 2.5px;
 }
+.react-flow__edge .link-edge {
+  transition: stroke .15s ease, stroke-width .15s ease, opacity .15s ease;
+}
+.react-flow__edge-path.link-edge {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.react-flow__edge-path.filtered { opacity: 0.78; }
 
 /* Узлы канвы. Геометрия (радиус) задаётся инлайн в DeviceNode (KINDS.rx),
    цвет — здесь, по типу: легаси красил контуры из CanvasTheme (--kind-*),
@@ -375,14 +383,17 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   justify-content: center;
   gap: 2px;
   padding: 6px 10px;
-  background: var(--panel-bg);
-  border: 1.5px solid var(--border);
+  background: color-mix(in srgb, var(--panel-bg) 94%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--border) 84%, var(--fg));
   color: var(--fg);
   font-size: 0.82rem;
   cursor: default;
   overflow: hidden;
   box-sizing: border-box;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--fg) 8%, transparent);
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
+.topo-node:hover { background: color-mix(in srgb, var(--panel-bg-hover) 72%, var(--panel-bg)); }
 .topo-node.device-node.kind-router { border-color: var(--kind-router); }
 .topo-node.device-node.kind-switch { border-color: var(--kind-switch); }
 .topo-node.network-node {
@@ -446,6 +457,7 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.topo-node .node-label { font-weight: 600; letter-spacing: -0.01em; }
 /* Выделение — как в легаси (styled): контур accent и толще базового. */
 .topo-node.selected {
   border-color: var(--accent) !important;
@@ -674,10 +686,6 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .node-popover {
   position: absolute;
   z-index: 10;
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
   padding: var(--space-2);
 }
 .node-popover form { display: flex; gap: var(--space-1); align-items: center; }
@@ -689,10 +697,6 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   z-index: 10;
   min-width: 12rem;
   max-width: 18rem;
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
   padding: var(--space-2);
   pointer-events: none;
 }
@@ -713,10 +717,7 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   max-height: calc(100% - 2 * var(--space-3));
   display: flex;
   flex-direction: column;
-  background: var(--panel-bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow);
 }
 .floating-panel[hidden] { display: none; }
 .floating-panel-header {
@@ -776,10 +777,6 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   display: flex;
   flex-direction: column;
   min-width: 12rem;
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
   padding: var(--space-1);
 }
 .context-menu button {
@@ -807,10 +804,6 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   max-height: calc(100% - 2 * var(--space-3));
   display: flex;
   flex-direction: column;
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow);
 }
 .canvas-panel-lg { width: min(44rem, calc(100% - 2 * var(--space-3))); }
 .canvas-panel-compact {
@@ -866,10 +859,6 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   z-index: 12;
   flex-direction: column;
   min-width: 12rem;
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
   padding: var(--space-1);
 }
 .ctx-search {
@@ -898,15 +887,28 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   z-index: 3;
   pointer-events: none;
   max-width: 320px;
-  background: var(--panel-bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
   padding: 2px 8px;
   font-size: 0.82rem;
 }
 .topo-tooltip[hidden],
 .diag-tooltip[hidden] { display: none; }
+
+/* Все плавающие поверхности используют одинаковый хром: контрастная
+   token-based граница, спокойная raised-поверхность и общая тень. */
+.node-popover,
+.net-info,
+.floating-panel,
+.context-menu,
+.canvas-panel,
+.submenu,
+.topo-tooltip,
+.diag-tooltip {
+  background: color-mix(in srgb, var(--panel-bg) 94%, var(--bg));
+  color: var(--fg);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, var(--fg));
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
 
 /* structured link-filter tooltip: one route block per direction */
 .topo-tooltip .tip-route { margin-top: 5px; white-space: nowrap; }
