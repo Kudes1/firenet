@@ -43,7 +43,7 @@
 - Consumes: `storageKeys.theme` and the current `applyTheme(theme)` API.
 - Produces: `initialTheme(): "light" | "dark"` returning `"light"` when no valid saved choice exists, and `applyTheme(theme)` continuing to set `document.documentElement.dataset.theme` and persist the choice.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -70,13 +70,13 @@ describe("theme", () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test to verify it fails**
+- [x] **Step 2: Run the focused test to verify it fails**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/components/theme.test.ts`
 
 Expected: FAIL because `initialTheme()` currently follows `matchMedia()` and can return `"dark"` when no preference is saved.
 
-- [ ] **Step 3: Implement the minimal theme fallback**
+- [x] **Step 3: Implement the minimal theme fallback**
 
 Keep the existing explicit saved-value branch and replace the system-preference fallback with:
 
@@ -86,13 +86,13 @@ return "light";
 
 Do not remove `applyTheme()` or change the `ui.theme` storage key.
 
-- [ ] **Step 4: Run the focused tests**
+- [x] **Step 4: Run the focused tests**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/components/theme.test.ts src/components/Layout.test.tsx`
 
 Expected: PASS with the existing theme toggle test and the new default-theme contract passing.
 
-- [ ] **Step 5: Commit the isolated theme contract**
+- [x] **Step 5: Commit the isolated theme contract**
 
 ```bash
 git add frontend/src/components/theme.ts frontend/src/components/theme.test.ts frontend/src/components/Layout.test.tsx
@@ -111,7 +111,7 @@ git commit -m "feat(frontend): make light theme the default"
 - Consumes: `Sidebar` navigation groups, `DraftBanner`, `BannerHost`, `ErrorBoundary` and the existing `Outlet` flow.
 - Produces: stable `.app-shell`, `.sidebar`, `.app-main`, `.app-header`/semantic shell hooks as needed, while preserving current links, collapsed state, theme button, logout button and test IDs.
 
-- [ ] **Step 1: Add a structural regression assertion**
+- [x] **Step 1: Add a structural regression assertion**
 
 Extend the existing layout test with the shell contract that the rendered application keeps the sidebar and renders the outlet inside the main content region. Use existing accessible roles and test IDs rather than asserting CSS implementation details:
 
@@ -125,25 +125,25 @@ it("keeps the enterprise shell around page content", () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test**
+- [x] **Step 2: Run the focused test**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/components/Layout.test.tsx`
 
 Expected: PASS if the current markup already satisfies the semantic contract; if it does, keep the test as a regression guard and proceed to presentation-only changes.
 
-- [ ] **Step 3: Implement the shell presentation**
+- [x] **Step 3: Implement the shell presentation**
 
 Update the CSS so `.app-shell` owns the viewport, `.sidebar` is a stable raised navigation surface, and the content `main` uses the new background and spacing. Keep the current collapsed widths and the existing `navClass` behavior. Group shared controls through existing classes (`.sidebar-toggle`, `.theme-toggle`, `.logout-btn`) and keep focus rings visible.
 
 The shell implementation must not move data fetching, navigation, logout, or theme state out of `Sidebar`/`Layout`.
 
-- [ ] **Step 4: Run the focused shell tests**
+- [x] **Step 4: Run the focused shell tests**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/components/Layout.test.tsx src/App.test.tsx`
 
 Expected: PASS with the sidebar, theme toggle, route rendering and all existing navigation assertions unchanged.
 
-- [ ] **Step 5: Commit the shell styling**
+- [x] **Step 5: Commit the shell styling**
 
 ```bash
 git add frontend/src/components/Layout.tsx frontend/src/components/Sidebar.tsx frontend/src/components/Layout.test.tsx frontend/src/styles.css
@@ -161,7 +161,7 @@ git commit -m "feat(frontend): restyle clean enterprise application shell"
 - Consumes: `TopologyCanvas` props, editor state, lock state, toolbar callbacks, `CanvasPanel` children and current `data-testid` values.
 - Produces: a topology workspace with a clear page/toolbar/canvas hierarchy; all existing editor actions continue to invoke the same callbacks.
 
-- [ ] **Step 1: Add a topology workspace regression test**
+- [x] **Step 1: Add a topology workspace regression test**
 
 Add a behavior-level assertion for the existing topology controls and workspace, without testing exact colors or pixel values:
 
@@ -177,13 +177,13 @@ it("exposes the topology workspace and primary tools", () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused topology test**
+- [x] **Step 2: Run the focused topology test**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/pages/TopologyPage.test.tsx`
 
 Expected: PASS if the existing topology controls already satisfy the behavior contract; retain it as a guard while changing only markup classes and CSS.
 
-- [ ] **Step 3: Implement the clean enterprise hierarchy**
+- [x] **Step 3: Implement the clean enterprise hierarchy**
 
 Use the existing topology page structure to style:
 
@@ -195,13 +195,13 @@ Use the existing topology page structure to style:
 
 If a new class is necessary, add it next to the existing `data-testid`; do not rename the current test IDs.
 
-- [ ] **Step 4: Run the topology tests**
+- [x] **Step 4: Run the topology tests**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/pages/TopologyPage.test.tsx src/topology/TopologyCanvas.test.tsx`
 
 Expected: PASS for rendering, create/edit/delete, lock/read-only behavior, connection tools and canvas layers.
 
-- [ ] **Step 5: Commit the topology workspace styling**
+- [x] **Step 5: Commit the topology workspace styling**
 
 ```bash
 git add frontend/src/pages/TopologyPage.tsx frontend/src/pages/TopologyPage.test.tsx frontend/src/styles.css
@@ -224,27 +224,27 @@ git commit -m "feat(frontend): restyle topology workspace"
 - Consumes: existing React Flow node/edge props, panel drag/close callbacks and context-menu actions.
 - Produces: unified node, edge, tooltip, context-menu and panel chrome with unchanged data and interaction contracts.
 
-- [ ] **Step 1: Add focused state assertions where coverage is missing**
+- [x] **Step 1: Add focused state assertions where coverage is missing**
 
 Cover only user-visible behavior that can regress during restyling: selected node receives its selected class, filtered/diagnostic edge keeps its state class, and a canvas panel keeps its close button accessible name.
 
-- [ ] **Step 2: Run the focused topology primitive tests**
+- [x] **Step 2: Run the focused topology primitive tests**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/topology/TopologyCanvas.test.tsx src/topology/ContextMenu.test.tsx src/topology/LinkEdge.test.tsx`
 
 Expected: FAIL only for newly added assertions, or PASS if the existing classes already provide the contract.
 
-- [ ] **Step 3: Implement shared primitive styling**
+- [x] **Step 3: Implement shared primitive styling**
 
 Apply the design tokens consistently to `.topo-node`, `.link-edge`, `.canvas-panel`, `.context-menu`, `.net-info` and related selectors. Keep topology-kind colors semantic, make selection visible in both themes, and use a single raised-surface treatment for floating UI.
 
-- [ ] **Step 4: Run the primitive tests**
+- [x] **Step 4: Run the primitive tests**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/topology/TopologyCanvas.test.tsx src/topology/ContextMenu.test.tsx src/topology/LinkEdge.test.tsx`
 
 Expected: PASS with existing drag, context-menu, edge and panel behavior intact.
 
-- [ ] **Step 5: Commit the topology primitives**
+- [x] **Step 5: Commit the topology primitives**
 
 ```bash
 git add frontend/src/topology frontend/src/styles.css
@@ -262,7 +262,7 @@ git commit -m "feat(frontend): unify topology surfaces and states"
 - Consumes: shell and topology classes from Tasks 2–4.
 - Produces: predictable behavior at narrow viewport widths, preserved keyboard focus, and no loss of accessible names or semantic status messages.
 
-- [ ] **Step 1: Add regression assertions**
+- [x] **Step 1: Add regression assertions**
 
 Add the assertions to the existing layout/topology tests so the key controls remain keyboard-discoverable after the markup changes:
 
@@ -274,23 +274,23 @@ expect(await screen.findByRole("status", { name: "Сохранено" })).toBeIn
 
 When the test opens a `CanvasPanel`, assert its existing close control with `screen.getByRole("button", { name: "Закрыть" })`.
 
-- [ ] **Step 2: Run the focused accessibility tests**
+- [x] **Step 2: Run the focused accessibility tests**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/components/Layout.test.tsx src/pages/TopologyPage.test.tsx`
 
 Expected: PASS before responsive CSS changes.
 
-- [ ] **Step 3: Implement responsive rules**
+- [x] **Step 3: Implement responsive rules**
 
 At the narrow breakpoint, keep the sidebar collapsed geometry, let the topology toolbar wrap, keep the canvas usable, and make floating panels fit inside the viewport. Do not hide primary actions or rely on hover-only access.
 
-- [ ] **Step 4: Run the focused tests again**
+- [x] **Step 4: Run the focused tests again**
 
 Run: `docker compose --profile test run --rm frontend-test npm test -- src/components/Layout.test.tsx src/pages/TopologyPage.test.tsx`
 
 Expected: PASS with all accessible names and existing interactions unchanged.
 
-- [ ] **Step 5: Commit responsive safeguards**
+- [x] **Step 5: Commit responsive safeguards**
 
 ```bash
 git add frontend/src/styles.css frontend/src/components/Layout.test.tsx frontend/src/pages/TopologyPage.test.tsx
@@ -307,7 +307,7 @@ git commit -m "feat(frontend): make redesigned shell responsive"
 - Consumes: completed theme, shell, topology and responsive work.
 - Produces: a verified first-stage redesign ready for the next roadmap plan.
 
-- [ ] **Step 1: Review the diff and scope**
+- [x] **Step 1: Review the diff and scope**
 
 Run:
 
@@ -319,7 +319,7 @@ git diff --stat
 
 Confirm that only phase-one frontend files and the intended tests changed; do not stage unrelated existing worktree changes.
 
-- [ ] **Step 2: Run the project verification order**
+- [x] **Step 2: Run the project verification order**
 
 Run exactly:
 
@@ -333,7 +333,7 @@ make test-e2e
 
 Expected: every command exits with status 0; frontend and E2E output reports zero failed tests. Existing warnings from React Router/MSW or Docker tooling are recorded but are not treated as new failures unless they change exit status or identify a regression in the redesigned shell/topology.
 
-- [ ] **Step 3: Commit the integrated phase**
+- [x] **Step 3: Commit the integrated phase**
 
 ```bash
 git add frontend/src docs/superpowers/specs/2026-09-14-clean-enterprise-redesign-design.md docs/superpowers/plans/2026-09-14-clean-enterprise-redesign.md
