@@ -71,6 +71,7 @@ describe("LinkEdge waypoints", () => {
     );
     const edge = await screen.findByTestId("link:r1|sw1#0");
     expect(edge).toHaveClass("link-edge", "filtered", "diag-flow-half");
+    expect(edge.querySelector(".react-flow__edge-path")).toHaveClass("link-edge", "filtered", "diag-flow-half");
   });
 
   it("shows waypoint handles only after selecting the edge", async () => {

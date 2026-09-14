@@ -272,7 +272,7 @@ export default function TopologyPage() {
       <header className="topology-page-header">
         <div>
           <p className="topology-page-eyebrow">Рабочая область</p>
-          <h1>Топология</h1>
+          <h1 className="topology-page-title">Топология</h1>
         </div>
         <p>Устройства, сети и связи проекта</p>
       </header>

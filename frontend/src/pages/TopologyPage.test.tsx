@@ -67,12 +67,42 @@ describe("TopologyPage", () => {
     renderPage(<TopologyPage />, "/ui/topology", "d1");
 
     expect(screen.getByTestId("page-topology")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Топология" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Топология" })).toHaveClass("topology-page-title");
     expect(screen.getByRole("toolbar", { name: "Инструменты топологии" })).toBeInTheDocument();
     expect(screen.getByTestId("tool-select")).toBeInTheDocument();
     expect(screen.getByTestId("tool-connect")).toBeInTheDocument();
     expect(screen.getByTestId("tool-device")).toBeInTheDocument();
     expect(screen.getByTestId("tool-network")).toBeInTheDocument();
+  });
+
+  it("uses the approved enterprise tokens in both themes", () => {
+    const lightTokens = styles.slice(styles.indexOf(":root {"), styles.indexOf(':root[data-theme="dark"]'));
+    const darkTokens = styles.slice(styles.indexOf(':root[data-theme="dark"]'));
+    for (const token of [
+      "--bg: #f5f7fb;", "--fg: #172033;", "--muted: #64748b;", "--border: #dbe3ee;",
+      "--panel-bg: #ffffff;", "--panel-bg-hover: #eef4fb;", "--accent: #2563eb;",
+      "--success: #16a34a;", "--diag-flow-half: #d97706;", "--danger: #dc2626;",
+    ]) expect(lightTokens).toContain(token);
+    for (const token of [
+      "--bg: #101827;", "--fg: #edf2f7;", "--muted: #9aa8ba;", "--border: #2b394d;",
+      "--panel-bg: #172235;", "--panel-bg-hover: #203049;", "--accent: #60a5fa;",
+      "--success: #4ade80;", "--diag-flow-half: #fbbf24;", "--danger: #f87171;",
+    ]) expect(darkTokens).toContain(token);
+    expect(styles).toMatch(/--radius-sm:\s*8px;/);
+    expect(styles).toMatch(/--radius-md:\s*12px;/);
+    expect(styles).toMatch(/\.topology-page-title\s*\{[^}]*font-size:\s*1\.5rem;/s);
+    expect(styles).toMatch(/\.topology-layout\s*\{[^}]*border-radius:\s*var\(--radius-md\);/s);
+    expect(styles).toMatch(/\.toolbar-sep\s*\{[^}]*background:\s*var\(--border\);/s);
+  });
+
+  it("keeps a visible focus-ring contract for the active toolbar tool", () => {
+    renderPage(<TopologyPage />, "/ui/topology", "d1");
+
+    const tool = screen.getByTestId("tool-select");
+    tool.focus();
+    expect(tool).toHaveFocus();
+    expect(tool).toHaveClass("active");
+    expect(styles).toMatch(/\.tool:focus-visible\s*\{[^}]*box-shadow:\s*var\(--focus-ring\)/s);
   });
 
   it("keeps narrow topology surfaces within their available bounds", () => {
@@ -538,7 +568,7 @@ describe("TopologyPage", () => {
     // Неучаствующие узлы затемняются.
     expect(screen.getByTestId("rf__node-network:office").className).toContain("search-dim");
     // Закрытие модалки снимает подсветку.
-    fireEvent.click(document.querySelector("button.modal-close")!);
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть" }));
     expect(screen.getByTestId("rf__node-device:r1").className).not.toContain("link-end-a");
     expect(screen.getByTestId("rf__node-device:sw1").className).not.toContain("link-end-b");
   });
