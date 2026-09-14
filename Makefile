@@ -4,10 +4,10 @@ BIN_DIR := bin
 .PHONY: build run dev test fe-test fe-build test-e2e vet fmt tidy clean
 
 build:
-	go build -o $(BIN_DIR)/$(BINARY) ./cmd/firenet
+	docker compose build backend
 
 run:
-	go run ./cmd/firenet
+	docker compose up --build
 
 dev:
 	docker compose up -d --build

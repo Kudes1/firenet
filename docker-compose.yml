@@ -15,7 +15,8 @@ services:
       retries: 10
 
   backend:
-    build: .
+    build:
+      context: ./backend
     restart: unless-stopped
     depends_on:
       db:
