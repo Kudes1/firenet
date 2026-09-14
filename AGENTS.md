@@ -76,7 +76,7 @@ No linter beyond `go vet` is configured — don't try golangci-lint.
    в prod-режиме нужен `docker compose up -d --build frontend`, в dev
    (`FRONTEND_TARGET=dev`) Vite подхватывает правки сам.
   - The binary is a single web server (`backend/cmd/firenet`): loads config from
-    env (`internal/config`), applies migrations, bootstraps the admin
+    env (`backend/internal/config`), applies migrations, bootstraps the admin
     user, seeds an empty project on a fresh DB, then serves `/api/*`.
     No CLI subcommands, no yaml input files.
   - Tests assert directly on structs/strings; there is no golden-file/-update infra.
