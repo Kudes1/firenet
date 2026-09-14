@@ -16,10 +16,10 @@ test:
 	docker compose --profile test run --rm --build backend-test
 
 fe-test:
-	cd frontend && npm test
+	docker compose --profile test run --rm --build frontend-test
 
 fe-build:
-	cd frontend && npm run build
+	docker compose build frontend
 
 test-e2e: bin
 	cd e2e && npx playwright test
