@@ -186,7 +186,17 @@ nav.side-nav .icon svg { width: 100%; height: 100%; }
 /* 56px: ось иконок левая и от ширины не зависит; запас справа нужен,
    чтобы иконка (18.4px) помещалась в кнопки с их паддингом 8px */
 .sidebar.collapsed { width: 56px; }
-.sidebar.collapsed .label { display: none; }
+.sidebar.collapsed .label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 /* Collapsed rail: hide group headers, keep the links as an icon list. */
 .sidebar.collapsed .nav-group-header { display: none; }
 
@@ -647,15 +657,39 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .tool.danger:disabled:hover { background: color-mix(in srgb, var(--danger) 12%, var(--panel-bg)); }
 
 @media (max-width: 760px) {
+  .sidebar {
+    width: 56px;
+    overflow: hidden;
+  }
+  .sidebar > .brand .brand-full { display: none; }
+  .sidebar > .brand .brand-short { display: inline-block; }
+  .sidebar .label,
+  .sidebar .user-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .sidebar .nav-group-header { display: none; }
+  .sidebar .user-box { flex-direction: column; padding: var(--space-2) 0; }
+  .sidebar .logout-btn { width: 36px; padding: 0; }
   .topology-page-header { align-items: flex-start; }
   .topology-page-header > p { display: none; }
   .topology-layout { min-height: 24rem; }
+  .canvas-wrap { min-height: 20rem; }
   .topo-toolbar {
     right: var(--space-2);
     left: var(--space-2);
     max-width: none;
     transform: none;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+    overflow: visible;
   }
   .topo-toolbar #topo-search { width: min(180px, 38vw); }
 }
@@ -845,6 +879,23 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   gap: var(--space-1);
   margin-bottom: var(--space-3);
   font-size: 0.9rem;
+}
+
+@media (max-width: 760px) {
+  .floating-panel {
+    width: min(380px, calc(100vw - 2 * var(--space-2)));
+    max-width: calc(100vw - 2 * var(--space-2));
+    max-height: calc(100vh - 2 * var(--space-2));
+  }
+  .canvas-panel,
+  .canvas-panel-lg,
+  .canvas-panel-compact {
+    min-width: 0;
+    width: calc(100% - 2 * var(--space-2));
+    max-width: calc(100% - 2 * var(--space-2));
+    max-height: calc(100% - 2 * var(--space-2));
+  }
+  .canvas-panel-body { padding: var(--space-2) var(--space-3); }
 }
 
 /* submenu revealed by hover/focus on its wrapper */

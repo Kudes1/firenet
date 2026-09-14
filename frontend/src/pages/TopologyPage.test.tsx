@@ -502,6 +502,7 @@ describe("TopologyPage", () => {
     expect(await screen.findByLabelText("Имя")).toBeInTheDocument();
     // Форма редактирования — панель внутри канвы (.canvas-panel), не <dialog>.
     expect(document.querySelector(".canvas-panel")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Закрыть" })).toBeInTheDocument();
   });
 
   it("outlines link endpoints while the filter panel is open", async () => {

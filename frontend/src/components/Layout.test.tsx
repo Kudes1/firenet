@@ -45,6 +45,8 @@ describe("Layout", () => {
 
     const page = screen.getByTestId("page");
     expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Сменить тему" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Свернуть меню" })).toBeInTheDocument();
     expect(screen.getByRole("main")).toBe(page);
     expect(document.querySelector(".app-main")).toContainElement(page);
   });
