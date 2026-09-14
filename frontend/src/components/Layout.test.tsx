@@ -115,6 +115,22 @@ describe("Layout", () => {
       /\.sidebar\s*>\s*nav\.side-nav\s*\{[^}]*flex:\s*1[^}]*min-height:\s*0[^}]*overflow-y:\s*auto/s,
     );
   });
+
+  it("keeps closed navigation groups represented by an operable control", async () => {
+    expect(styles).not.toMatch(
+      /\.sidebar(?:\.collapsed)? \.nav-group-header\s*\{\s*display:\s*none\s*;\s*\}/,
+    );
+
+    localStorage.setItem(storageKeys.navGroup("topology"), "closed");
+    renderLayout();
+    const toggle = screen.getByRole("button", { name: "Свернуть/развернуть раздел «Топология»" });
+    expect(toggle).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Схема" })).toBeNull();
+
+    await userEvent.click(toggle);
+    expect(await screen.findByRole("link", { name: "Схема" })).toBeInTheDocument();
+    expect(localStorage.getItem(storageKeys.navGroup("topology"))).toBeNull();
+  });
 });
 
 describe("Sidebar collapse and theme", () => {

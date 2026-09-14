@@ -197,8 +197,7 @@ nav.side-nav .icon svg { width: 100%; height: 100%; }
   white-space: nowrap;
   border: 0;
 }
-/* Collapsed rail: hide group headers, keep the links as an icon list. */
-.sidebar.collapsed .nav-group-header { display: none; }
+/* Collapsed rail: keep group toggles as icon buttons so closed sections remain operable. */
 
 .theme-toggle {
   justify-content: flex-start;
@@ -675,7 +674,6 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
     white-space: nowrap;
     border: 0;
   }
-  .sidebar .nav-group-header { display: none; }
   .sidebar .user-box { flex-direction: column; padding: var(--space-2) 0; }
   .sidebar .logout-btn { width: 36px; padding: 0; }
   .topology-page-header { align-items: flex-start; }
@@ -883,15 +881,13 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 
 @media (max-width: 760px) {
   .floating-panel {
-    width: min(380px, calc(100vw - 2 * var(--space-2)));
-    max-width: calc(100vw - 2 * var(--space-2));
-    max-height: calc(100vh - 2 * var(--space-2));
+    max-width: calc(100% - 2 * var(--space-2));
+    max-height: calc(100% - 2 * var(--space-2));
   }
   .canvas-panel,
   .canvas-panel-lg,
   .canvas-panel-compact {
     min-width: 0;
-    width: calc(100% - 2 * var(--space-2));
     max-width: calc(100% - 2 * var(--space-2));
     max-height: calc(100% - 2 * var(--space-2));
   }

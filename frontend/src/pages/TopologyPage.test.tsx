@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { beforeAll, afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -5,6 +7,8 @@ import type { LayoutDoc } from "../api/types";
 import { server } from "../test/msw";
 import { renderPage } from "../test/renderPage";
 import TopologyPage from "./TopologyPage";
+
+const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 beforeAll(() => server.listen());
 afterEach(() => { server.resetHandlers(); sessionStorage.clear(); });
@@ -69,6 +73,24 @@ describe("TopologyPage", () => {
     expect(screen.getByTestId("tool-connect")).toBeInTheDocument();
     expect(screen.getByTestId("tool-device")).toBeInTheDocument();
     expect(screen.getByTestId("tool-network")).toBeInTheDocument();
+  });
+
+  it("keeps narrow topology surfaces within their available bounds", () => {
+    expect(styles).toMatch(/@media \(max-width: 760px\) \{[\s\S]*\.topo-toolbar \{[\s\S]*flex-wrap:\s*wrap;/);
+    expect(styles).toMatch(/@media \(max-width: 760px\) \{[\s\S]*\.canvas-wrap\s*\{\s*min-height:\s*20rem;\s*\}/);
+    expect(styles).not.toMatch(
+      /@media \(max-width: 760px\) \{\s*\.floating-panel\s*\{[^}]*100v[wh][^}]*\}/s,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width: 760px\) \{\s*\.floating-panel\s*\{\s*max-width:\s*calc\(100% - 2 \* var\(--space-2\)\);\s*max-height:\s*calc\(100% - 2 \* var\(--space-2\)\);\s*\}/s,
+    );
+    expect(styles).not.toMatch(
+      /@media \(max-width: 760px\) \{[\s\S]*\.canvas-panel,\s*\.canvas-panel-lg,\s*\.canvas-panel-compact\s*\{[^}]*\n\s*width:/s,
+    );
+    expect(styles).toMatch(/\.canvas-panel-lg \{ width: min\(44rem, calc\(100% - 2 \* var\(--space-3\)\)\); \}/);
+    expect(styles).toMatch(
+      /\.canvas-panel-compact \{\s*min-width: 16rem;\s*width: min\(19rem, calc\(100% - 2 \* var\(--space-3\)\)\);\s*\}/,
+    );
   });
 
   it("renders the canvas with devices and networks", async () => {
