@@ -220,7 +220,44 @@ main,
 }
 .tab-panel[hidden] { display: none; }
 
-.topology-layout { display: flex; flex: 1; min-height: 0; position: relative; }
+.topology-page { gap: var(--space-2); }
+.topology-page-header {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-1) var(--space-2);
+}
+.topology-page-header h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+.topology-page-header > p,
+.topology-page-eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.topology-page-eyebrow {
+  margin-bottom: 2px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.topology-layout {
+  display: flex;
+  flex: 1;
+  min-height: 26rem;
+  position: relative;
+  padding: var(--space-1);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--panel-bg));
+  border-radius: calc(var(--radius-md) + var(--space-1));
+  background: color-mix(in srgb, var(--panel-bg) 88%, var(--bg));
+  box-shadow: var(--shadow);
+}
 .panel {
   background: var(--panel-bg);
   border: 1px solid var(--border);
@@ -287,10 +324,45 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .canvas-wrap {
   flex: 1;
   position: relative;
-  border: 1px solid var(--border);
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, var(--bg));
   border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 96%, var(--panel-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+:root[data-theme="dark"] .canvas-wrap {
+  background: color-mix(in srgb, var(--bg) 86%, var(--panel-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.canvas-wrap .react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-dots-color-default: color-mix(in srgb, var(--muted) 24%, transparent);
+  --xy-edge-stroke-default: color-mix(in srgb, var(--fg) 34%, var(--border));
+  --xy-edge-stroke-selected-default: var(--accent);
+  --xy-selection-background-color-default: color-mix(in srgb, var(--accent) 9%, transparent);
+  --xy-selection-border-default: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  --xy-controls-button-background-color-default: var(--panel-bg);
+  --xy-controls-button-background-color-hover-default: var(--panel-bg-hover);
+  --xy-controls-button-color-default: var(--fg);
+  --xy-controls-button-color-hover-default: var(--accent);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-controls-box-shadow-default: var(--shadow);
+  --xy-minimap-background-color-default: var(--panel-bg);
+  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--bg) 72%, transparent);
+  --xy-minimap-node-background-color-default: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.canvas-wrap .react-flow__controls,
+.canvas-wrap .react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+.canvas-wrap .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 2.5px;
 }
 
 /* Узлы канвы. Геометрия (радиус) задаётся инлайн в DeviceNode (KINDS.rx),
@@ -379,6 +451,7 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   border-color: var(--accent) !important;
   border-width: 2.5px;
   padding: 5px 9px; /* компенсация: размер узла не меняется */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 /* Концы редактируемой связи — контуры A/B (легаси end-a/end-b, lineWidth 2.5).
    Класс вешается на обёртку react-flow__node узла, поэтому селектор через неё. */
@@ -387,7 +460,11 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 /* Затемнение при поиске/редактировании связи (легаси: viewport .search-dim). */
 .react-flow__node.search-dim { opacity: 0.35; }
 /* Первый объект connect-инструмента (легаси pending: контур accent, толще). */
-.react-flow__node.pending .topo-node { border-color: var(--accent) !important; border-width: 3px; }
+.react-flow__node.pending .topo-node {
+  border-color: var(--accent) !important;
+  border-width: 3px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
+}
 /* Диагностика: цвета и толщина совпадают с легаси Canvas2D. Класс ставится
    на обёртку React Flow, а для рёбер дополнительно передаётся на SVG path. */
 .react-flow__node.diag-flow-ok .topo-node { border-color: var(--diag-flow-ok) !important; border-width: 2.5px; }
@@ -470,14 +547,27 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 0;
   padding: var(--space-1);
-  background: var(--panel-bg);
-  border: 1px solid var(--border);
+  max-width: calc(100% - var(--space-4));
+  background: color-mix(in srgb, var(--panel-bg) 94%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--accent));
   border-radius: var(--radius-md);
   box-shadow: var(--shadow);
 }
-.toolbar-sep { width: 1px; height: 22px; background: var(--border); margin: 0 2px; }
+.topo-tool-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.topo-tool-group + .topo-tool-group {
+  margin-left: var(--space-1);
+  padding-left: var(--space-1);
+  border-left: 1px solid var(--border);
+}
+.topo-search-group { flex: 0 1 auto; }
+.topo-status-group { flex: none; }
 .sync-status {
   display: inline-flex;
   align-items: center;
@@ -487,13 +577,31 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
   color: var(--muted);
 }
 .sync-status svg { width: 20px; height: 20px; }
-.sync-status.saving { color: var(--accent); }
+.sync-status.saved {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border-radius: var(--radius-sm);
+}
+.sync-status.dirty {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: var(--radius-sm);
+}
+.sync-status.saving {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: var(--radius-sm);
+}
 .sync-status.saving svg {
   transform-box: fill-box;
   transform-origin: center;
   animation: sync-status-spin 1s linear infinite;
 }
-.sync-status.error { color: var(--danger); }
+.sync-status.error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-radius: var(--radius-sm);
+}
 @keyframes sync-status-spin { to { transform: rotate(360deg); } }
 .tool {
   display: inline-flex;
@@ -511,13 +619,38 @@ button.icon-btn.edit { color: var(--accent); font-weight: normal; }
 .tool svg { width: 20px; height: 20px; }
 .tool[hidden] { display: none; }
 .tool:hover { background: var(--panel-bg-hover); }
-.tool.active { background: var(--accent); color: var(--accent-fg); }
+.tool.active {
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel-bg));
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 48%, var(--border));
+}
 .tool.primary { font-weight: inherit; }
 .tool.primary:hover { background: var(--accent); filter: brightness(1.08); }
-.tool.danger { background: var(--danger); color: #fff; }
-.tool.danger:hover { filter: brightness(1.1); }
+.tool.danger {
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel-bg));
+  color: var(--danger);
+}
+.tool.danger:hover { background: color-mix(in srgb, var(--danger) 20%, var(--panel-bg)); }
 .tool.danger:disabled { opacity: 0.45; cursor: default; }
-.tool.danger:disabled:hover { filter: none; }
+.tool.danger:disabled:hover { background: color-mix(in srgb, var(--danger) 12%, var(--panel-bg)); }
+
+@media (max-width: 760px) {
+  .topology-page-header { align-items: flex-start; }
+  .topology-page-header > p { display: none; }
+  .topology-layout { min-height: 24rem; }
+  .topo-toolbar {
+    right: var(--space-2);
+    left: var(--space-2);
+    max-width: none;
+    transform: none;
+    overflow-x: auto;
+  }
+  .topo-toolbar #topo-search { width: min(180px, 38vw); }
+}
+
+@media (max-height: 640px) {
+  .topology-layout { min-height: 20rem; }
+}
 
 /* overview of the whole scene, shown only once it no longer fits the viewport */
 .topo-minimap,

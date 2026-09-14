@@ -268,7 +268,14 @@ export default function TopologyPage() {
   const editNetwork = editTarget?.kind === "network" ? networks.find((n) => n.name === editTarget.name) : undefined;
 
   return (
-    <main className="page" data-testid="page-topology">
+    <main className="page topology-page" data-testid="page-topology">
+      <header className="topology-page-header">
+        <div>
+          <p className="topology-page-eyebrow">Рабочая область</p>
+          <h1>Топология</h1>
+        </div>
+        <p>Устройства, сети и связи проекта</p>
+      </header>
       {/* Чужая вкладка держит лок редактирования: канва только смотрит. */}
       {lock.locked && (
         <div className="draft-banner draft-banner-readonly" data-testid="topo-lock-banner">
@@ -318,82 +325,87 @@ export default function TopologyPage() {
           {pendingCenter && cursor && (
             <ConnectPreview from={pendingCenter} to={cursor} />
           )}
-          <div className="topo-toolbar">
-            <button
-              type="button"
-              data-testid="topo-search-toggle"
-              className="tool"
-              title="Поиск по устройствам, сетям, подсетям"
-              onClick={() => setSearchOpen(!searchOpen)}
-            >
-              <SearchIcon />
-            </button>
-            <input
-              id="topo-search"
-              hidden={!searchOpen}
-              placeholder="поиск: имя / CIDR / IP"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <span className="toolbar-sep" />
-            <button
-              type="button"
-              className="tool danger"
-              data-testid="topo-delete"
-              title="Удалить выбранное (Del)"
-              disabled={!selection.length}
-              onClick={() => guard(() => editor.removeSelected(selection))}
-            >
-              <TrashIcon />
-            </button>
-            <span className="toolbar-sep" />
-            <button
-              type="button"
-              data-testid="tool-select"
-              className={`tool${tool === "select" ? " active" : ""}`}
-              title="Выбор и перемещение (V)"
-              onClick={() => selectTool("select")}
-            >
-              <SelectIcon />
-            </button>
-            <button
-              type="button"
-              data-testid="tool-connect"
-              className={`tool${tool === "connect" ? " active" : ""}`}
-              title="Соединить устройства/сети (C)"
-              onClick={() => selectTool("connect")}
-            >
-              <ConnectIcon />
-            </button>
-            <button
-              type="button"
-              data-testid="tool-device"
-              className={`tool${tool === "device" ? " active" : ""}`}
-              title="Добавить устройство (D)"
-              onClick={() => guard(() => selectTool("device"))}
-            >
-              <DeviceToolIcon />
-            </button>
-            <button
-              type="button"
-              data-testid="tool-network"
-              className={`tool${tool === "network" ? " active" : ""}`}
-              title="Добавить сеть (N)"
-              onClick={() => guard(() => selectTool("network"))}
-            >
-              <NetworkToolIcon />
-            </button>
-            <span className="toolbar-sep" />
-            <span
-              id="topo-sync-status"
-              className={`sync-status ${editor.status}`}
-              role="status"
-              aria-live="polite"
-              title={statusLabel}
-              aria-label={statusLabel}
-            >
-              <SyncStatusIcon status={editor.status} />
-            </span>
+          <div className="topo-toolbar" role="toolbar" aria-label="Инструменты топологии">
+            <div className="topo-tool-group topo-search-group">
+              <button
+                type="button"
+                data-testid="topo-search-toggle"
+                className="tool"
+                title="Поиск по устройствам, сетям, подсетям"
+                onClick={() => setSearchOpen(!searchOpen)}
+              >
+                <SearchIcon />
+              </button>
+              <input
+                id="topo-search"
+                hidden={!searchOpen}
+                placeholder="поиск: имя / CIDR / IP"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <div className="topo-tool-group">
+              <button
+                type="button"
+                className="tool danger"
+                data-testid="topo-delete"
+                title="Удалить выбранное (Del)"
+                disabled={!selection.length}
+                onClick={() => guard(() => editor.removeSelected(selection))}
+              >
+                <TrashIcon />
+              </button>
+            </div>
+            <div className="topo-tool-group">
+              <button
+                type="button"
+                data-testid="tool-select"
+                className={`tool${tool === "select" ? " active" : ""}`}
+                title="Выбор и перемещение (V)"
+                onClick={() => selectTool("select")}
+              >
+                <SelectIcon />
+              </button>
+              <button
+                type="button"
+                data-testid="tool-connect"
+                className={`tool${tool === "connect" ? " active" : ""}`}
+                title="Соединить устройства/сети (C)"
+                onClick={() => selectTool("connect")}
+              >
+                <ConnectIcon />
+              </button>
+              <button
+                type="button"
+                data-testid="tool-device"
+                className={`tool${tool === "device" ? " active" : ""}`}
+                title="Добавить устройство (D)"
+                onClick={() => guard(() => selectTool("device"))}
+              >
+                <DeviceToolIcon />
+              </button>
+              <button
+                type="button"
+                data-testid="tool-network"
+                className={`tool${tool === "network" ? " active" : ""}`}
+                title="Добавить сеть (N)"
+                onClick={() => guard(() => selectTool("network"))}
+              >
+                <NetworkToolIcon />
+              </button>
+            </div>
+            <div className="topo-tool-group topo-status-group">
+              <span
+                id="topo-sync-status"
+                className={`sync-status ${editor.status}`}
+                role="status"
+                aria-live="polite"
+                title={statusLabel}
+                aria-label={statusLabel}
+              >
+                <SyncStatusIcon status={editor.status} />
+              </span>
+            </div>
           </div>
           {menu && <ContextMenu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
           {/* Панели редактирования — children канвы: координаты канвовые,

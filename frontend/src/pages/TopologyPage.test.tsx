@@ -59,6 +59,16 @@ function captureOperations() {
 }
 
 describe("TopologyPage", () => {
+  it("exposes the topology workspace and primary tools", () => {
+    renderPage(<TopologyPage />, "/ui/topology", "d1");
+
+    expect(screen.getByTestId("page-topology")).toBeInTheDocument();
+    expect(screen.getByTestId("tool-select")).toBeInTheDocument();
+    expect(screen.getByTestId("tool-connect")).toBeInTheDocument();
+    expect(screen.getByTestId("tool-device")).toBeInTheDocument();
+    expect(screen.getByTestId("tool-network")).toBeInTheDocument();
+  });
+
   it("renders the canvas with devices and networks", async () => {
     useRichLayout();
     renderPage(<TopologyPage />, "/ui/topology", "d1");
