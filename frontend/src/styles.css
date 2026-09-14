@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #ffffff;
   --fg: #1a1a1a;
   --muted: #6b6b6b;
@@ -36,31 +36,8 @@
 
   --net-edit-w: 520px;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #17171a;
-    --fg: #e8e8ea;
-    --muted: #98989f;
-    --border: #33333a;
-    --accent: #60a5fa;
-    --accent-fg: #0b1220;
-    --danger: #f87171;
-    --danger-fg: #450a0a;
-    --success: #4ade80;
-    --success-fg: #052e16;
-    --panel-bg: #212126;
-    --panel-bg-hover: #2a2a30;
-    --shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
-    --focus-ring: 0 0 0 3px rgba(96, 165, 250, 0.4);
-    --kind-router: #f59e0b;
-    --kind-switch: #a78bfa;
-    --kind-network: #4ade80;
-    /* link-edit end markers: A/B colors shared by the canvas and panel columns */
-    --link-end-a: #0ea5e9;
-    --link-end-b: #f97316;
-  }
-}
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #17171a;
   --fg: #e8e8ea;
   --muted: #98989f;
@@ -137,6 +114,11 @@ nav.side-nav a,
 }
 
 nav.side-nav { display: flex; flex-direction: column; gap: var(--space-1); }
+.sidebar > nav.side-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
 /* Collapsible section: header button + indented links. .closed hides the body. */
 .nav-group { display: flex; flex-direction: column; gap: var(--space-1); }
 nav.side-nav > * + * { border-top: 1px solid var(--border); padding-top: var(--space-2); }
@@ -216,12 +198,9 @@ nav.side-nav .icon svg { width: 100%; height: 100%; }
 .theme-toggle .icon-moon { display: none; }
 :root[data-theme="dark"] .theme-toggle .icon-sun { display: none; }
 :root[data-theme="dark"] .theme-toggle .icon-moon { display: block; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .theme-toggle .icon-sun { display: none; }
-  :root:not([data-theme="light"]) .theme-toggle .icon-moon { display: block; }
-}
 
-main {
+main,
+.app-main {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -1501,7 +1480,7 @@ dialog.modal textarea { width: 100%; }
   text-align: left;
 }
 
-/* DraftBanner.tsx рендерит баннер первым элементом flex-колонки <main> —
+/* DraftBanner.tsx рендерит баннер первым элементом flex-колонки .app-main —
    обычный поток, без fixed-позиционирования и компенсирующих паддингов. */
 .draft-banner {
   display: flex;

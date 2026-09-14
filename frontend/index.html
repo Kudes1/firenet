@@ -6,9 +6,10 @@
 <title>firenet</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <script>
+  document.documentElement.dataset.theme = "light";
   try {
     var saved = localStorage.getItem("ui.theme");
-    if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+    if (saved === "dark") document.documentElement.dataset.theme = saved;
   } catch (e) {}
 </script>
 </head>

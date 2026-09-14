@@ -31,7 +31,7 @@ function renderLayout(route = "/ui/subnets") {
           {/* Outlet (в Layout) требует контекст родительского route, поэтому
               Layout оборачиваем в pathless <Route> с дочерней заглушкой. */}
           <Route element={<Layout />}>
-            <Route path={route} element={<div data-testid="page" />} />
+            <Route path={route} element={<main data-testid="page" />} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -43,9 +43,10 @@ describe("Layout", () => {
   it("keeps the enterprise shell around page content", () => {
     renderLayout();
 
+    const page = screen.getByTestId("page");
     expect(screen.getByTestId("sidebar")).toBeInTheDocument();
-    expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(screen.getByTestId("page")).toBeInTheDocument();
+    expect(screen.getByRole("main")).toBe(page);
+    expect(document.querySelector(".app-main")).toContainElement(page);
   });
 
   it("renders the sidebar with all nav links", async () => {
@@ -103,8 +104,14 @@ describe("Layout", () => {
   });
 
   it("keeps the workspace spacing compact around the draft banner", async () => {
-    expect(styles).toMatch(/\bmain\s*\{[^}]*padding:\s*var\(--space-2\)/s);
+    expect(styles).toMatch(/main,\s*\.app-main\s*\{[^}]*padding:\s*var\(--space-2\)/s);
     expect(styles).toMatch(/\.draft-banner\s*\{[^}]*margin-bottom:\s*var\(--space-2\)/s);
+  });
+
+  it("keeps sidebar controls available when navigation overflows", () => {
+    expect(styles).toMatch(
+      /\.sidebar\s*>\s*nav\.side-nav\s*\{[^}]*flex:\s*1[^}]*min-height:\s*0[^}]*overflow-y:\s*auto/s,
+    );
   });
 });
 

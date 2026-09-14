@@ -7,6 +7,10 @@ export function initialTheme(): "light" | "dark" {
   return "light";
 }
 
+export function initializeTheme(): void {
+  document.documentElement.dataset.theme = initialTheme();
+}
+
 export function applyTheme(theme: "light" | "dark"): void {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem(storageKeys.theme, theme);

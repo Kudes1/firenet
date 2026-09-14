@@ -19,13 +19,13 @@ export default function Layout() {
     <DraftProvider>
       <div className="app-shell">
         <Sidebar />
-        <main className="app-main">
+        <div className="app-main">
           <BannerHost />
           {!NO_DRAFT_BANNER.has(active) && <DraftBanner />}
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>
-        </main>
+        </div>
       </div>
     </DraftProvider>
   );
