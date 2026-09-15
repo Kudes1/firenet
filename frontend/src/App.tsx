@@ -17,17 +17,6 @@ import TopologyPage from "./pages/TopologyPage";
 import UnionsPage from "./pages/UnionsPage";
 import UsersPage from "./pages/UsersPage";
 
-// Пути 1:1 с легаси-страницами Go. Страницы появляются в задачах 8–20;
-// до этого рендерятся заглушки с data-testid="page-<name>".
-const routes: Array<[string, string]> = [
-  ["/ui/topology", "topology"],
-  ["/ui/networks", "networks"],
-  ["/ui/devices", "devices"],
-  ["/ui/sets", "sets"],
-  ["/ui/unions", "unions"],
-  ["/ui/links", "links"],
-];
-
 function Placeholder({ name }: { name: string }) {
   return <main className="page" data-testid={`page-${name}`}>{name}</main>;
 }
@@ -51,9 +40,6 @@ export default function App() {
         <Route path="/ui/history" element={<HistoryPage />} />
         <Route path="/ui/drafts" element={<DraftsPage />} />
         <Route path="/ui/users" element={<UsersPage />} />
-        {routes.map(([path, name]) => (
-          <Route key={path} path={path} element={<Placeholder name={name} />} />
-        ))}
         <Route path="*" element={<Placeholder name="notfound" />} />
       </Route>
       <Route path="/login" element={<LoginPage />} />

@@ -82,17 +82,50 @@ describe("CanvasPanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("drags by the header and clamps to the canvas", () => {
+  it("keeps a dragged panel inside the canvas", () => {
     renderPanel({ at: { x: 100, y: 100 } });
-    // Канва 800x600, панель 300x200 → x ≤ 500, y ≤ 400.
+    // Канва 800x600, панель 300x200, внутренний отступ границы — 12px.
     mockRects(new DOMRect(100, 100, 300, 200), new DOMRect(0, 0, 800, 600));
     const header = screen.getByText("Изменить устройство r1").closest(".canvas-panel-header")!;
     fireEvent.mouseDown(header, { clientX: 150, clientY: 120 });
     fireEvent.mouseMove(window, { clientX: 1200, clientY: -400 });
     fireEvent.mouseUp(window);
     const panel = document.querySelector(".canvas-panel") as HTMLElement;
-    expect(panel.style.left).toBe("500px");
-    expect(panel.style.top).toBe("0px");
+    expect(panel.style.left).toBe("488px");
+    expect(panel.style.top).toBe("12px");
+  });
+
+  it("keeps a panel inside the canvas when the camera moves", () => {
+    const { rerender } = render(
+      <ViewportContext.Provider value={[0, 0, 1]}>
+        <div className="canvas-shell">
+          <CanvasPanel title="Изменить устройство r1" onClose={vi.fn()} at={{ x: 100, y: 100 }}>
+            <input />
+          </CanvasPanel>
+        </div>
+      </ViewportContext.Provider>,
+    );
+    const panel = document.querySelector(".canvas-panel") as HTMLElement;
+    const surface = document.querySelector(".canvas-shell") as HTMLElement;
+    Object.defineProperty(panel, "getBoundingClientRect", {
+      value: () => new DOMRect(100, 100, 300, 200), configurable: true,
+    });
+    Object.defineProperty(surface, "getBoundingClientRect", {
+      value: () => new DOMRect(0, 0, 800, 600), configurable: true,
+    });
+
+    rerender(
+      <ViewportContext.Provider value={[-500, -400, 1]}>
+        <div className="canvas-shell">
+          <CanvasPanel title="Изменить устройство r1" onClose={vi.fn()} at={{ x: 100, y: 100 }}>
+            <input />
+          </CanvasPanel>
+        </div>
+      </ViewportContext.Provider>,
+    );
+
+    expect(panel.style.left).toBe("12px");
+    expect(panel.style.top).toBe("12px");
   });
 
   // Панель привязана к координатам сцены: экранная позиция = якорь × zoom +

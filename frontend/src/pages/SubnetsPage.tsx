@@ -69,11 +69,13 @@ export default function SubnetsPage() {
   };
 
   const columns: Column<SubnetDoc>[] = [
-    { key: "name", title: "Имя", render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
-    { key: "cidr", title: "CIDR", render: (r) => r.cidr, filter: (r, q) => containsFold(r.cidr, q) },
+    { key: "name", title: "Имя", width: "20%", minWidth: 150, render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
+    { key: "cidr", title: "CIDR", width: "20%", minWidth: 170, render: (r) => r.cidr, filter: (r, q) => containsFold(r.cidr, q) },
     {
       key: "owner",
       title: "Сеть",
+      width: "23%",
+      minWidth: 160,
       render: (r) => ownerOf.get(r.name)
         ? <span className="owner-badge">{ownerOf.get(r.name)}</span>
         : <span className="hint">не входит ни в одну сеть</span>,
@@ -82,30 +84,41 @@ export default function SubnetsPage() {
     {
       key: "description",
       title: "Описание",
+      width: "25%",
+      minWidth: 180,
       render: (r) => r.description || "—",
       filter: (r, q) => containsFold(r.description, q),
     },
     {
       key: "actions",
       title: "",
+      width: "12%",
+      minWidth: 84,
       filterReset: true,
       render: (r) => (
-        <>
-          <button type="button" className="icon-btn edit" title={`Изменить подсеть ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
-          <button type="button" className="icon-btn delete" title={`Удалить подсеть ${r.name}`} onClick={() => remove(rows.indexOf(r))}><DeleteIcon /></button>
-        </>
+        <div className="subnet-actions">
+          <button type="button" className="icon-btn subnet-action edit" title={`Изменить подсеть ${r.name}`} aria-label={`Изменить подсеть ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
+          <button type="button" className="icon-btn subnet-action delete" title={`Удалить подсеть ${r.name}`} aria-label={`Удалить подсеть ${r.name}`} onClick={() => remove(rows.indexOf(r))}><DeleteIcon /></button>
+        </div>
       ),
     },
   ];
 
   return (
-    <main className="page" data-testid="page-subnets">
+    <main className="page subnets-page" data-testid="page-subnets">
       <DataTable
         columns={columns}
         rows={rows}
         rowKey={(r) => r.name}
         empty="Подсетей нет — добавьте первую"
-        hint={<><h3>Подсети</h3><p className="hint">Именованные CIDR-блоки, из которых собираются сети и наборы.</p></>}
+        resizable
+        storageKey="firenet:subnets:column-widths"
+        hint={(
+          <div className="subnets-heading">
+            <h1>Подсети</h1>
+            <p className="hint">Именованные CIDR-блоки, из которых собираются сети и наборы.</p>
+          </div>
+        )}
         actions={<button type="button" className="primary" title="Добавить подсеть" onClick={() => open(-1)}>+ Подсеть</button>}
       />
       <Modal

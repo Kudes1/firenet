@@ -17,6 +17,15 @@ describe("UnionsPage", () => {
     expect(screen.getByText("r1")).toBeInTheDocument();
   });
 
+  it("shows the redesigned table surface", async () => {
+    renderPage(<UnionsPage />, "/ui/unions", "d1");
+    await screen.findByText("u1");
+
+    expect(screen.getByTestId("page-unions")).toHaveClass("unions-page");
+    expect(screen.getByRole("heading", { name: "Объединения", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("separator", { name: /Имя.*Устройства/ })).toBeInTheDocument();
+  });
+
   it("says membership is set on the canvas", async () => {
     const { user } = renderPage(<UnionsPage />, "/ui/unions", "d1");
     await screen.findByText("u1");

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useMe, useRestoreVersion, useVersionDiff, useVersions } from "../api/queries";
 import type { EntityDiff, VersionInfo } from "../api/types";
 import { notify } from "../components/notify";
+import DataTable, { type Column } from "../components/ui/DataTable";
+import { containsFold } from "../lib/search";
 
 const CHANGE_LABEL: Record<string, string> = {
   added: "добавлено", modified: "изменено", removed: "удалено",
@@ -35,40 +37,90 @@ export default function HistoryPage() {
   };
 
   const isAdmin = me.data?.role === "admin";
+  const columns: Column<VersionInfo>[] = [
+    {
+      key: "version",
+      title: "Версия",
+      width: "12%",
+      minWidth: 100,
+      render: (version) => <span className="history-version">{version.id}</span>,
+      filter: (version, query) => String(version.id).includes(query.trim()),
+    },
+    {
+      key: "date",
+      title: "Дата",
+      width: "21%",
+      minWidth: 190,
+      render: (version) => new Date(version.createdAt).toLocaleString("ru-RU"),
+      filter: (version, query) => containsFold(new Date(version.createdAt).toLocaleString("ru-RU"), query),
+    },
+    {
+      key: "confirmedBy",
+      title: "Подтвердил",
+      width: "17%",
+      minWidth: 150,
+      render: (version) => version.confirmedBy || "—",
+      filter: (version, query) => containsFold(version.confirmedBy, query),
+    },
+    {
+      key: "note",
+      title: "Заметка",
+      width: "28%",
+      minWidth: 220,
+      render: (version) => version.note || "—",
+      filter: (version, query) => containsFold(version.note, query),
+    },
+    {
+      key: "actions",
+      title: "",
+      width: "22%",
+      minWidth: 220,
+      filterReset: true,
+      render: (version) => (
+        <div className="history-actions">
+          <button
+            type="button"
+            className="secondary"
+            title={`Дифф версии ${version.id}`}
+            onClick={() => setDiffFor(diffFor === version.id ? null : version.id)}
+          >
+            Дифф
+          </button>
+          {isAdmin && previousOf(version.id) && (
+            <button
+              type="button"
+              className="primary"
+              title={`Восстановить версию ${version.id}`}
+              onClick={() => onRestore(version.id)}
+            >
+              Восстановить
+            </button>
+          )}
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <main className="page" data-testid="page-history">
-      <div className="table-toolbar">
-        <div className="toolbar-text">
-          <h3>История версий</h3>
-          <p className="hint">Подтверждённые версии проекта.</p>
-        </div>
-      </div>
-      <table className="data-table" id="history-table">
-        <thead><tr><th>Версия</th><th>Дата</th><th>Подтвердил</th><th>Заметка</th><th /></tr></thead>
-        <tbody>
-          {list.map((v: VersionInfo) => (
-            <tr key={v.id}>
-              <td>{v.id}</td>
-              <td>{new Date(v.createdAt).toLocaleString("ru-RU")}</td>
-              <td>{v.confirmedBy || "—"}</td>
-              <td>{v.note || "—"}</td>
-              <td>
-                <button type="button" className="btn-link" title={`Дифф версии ${v.id}`} onClick={() => setDiffFor(diffFor === v.id ? null : v.id)}>Дифф</button>
-                {isAdmin && previousOf(v.id) && (
-                  <button type="button" className="btn-link" title={`Восстановить версию ${v.id}`} onClick={() => onRestore(v.id)}>Восстановить</button>
-                )}
-              </td>
-            </tr>
-          ))}
-          {list.length === 0 && (
-            <tr><td className="empty-cell" colSpan={5}>Версий нет</td></tr>
-          )}
-        </tbody>
-      </table>
+    <main className="page history-page" data-testid="page-history">
+      <DataTable
+        id="history-table"
+        columns={columns}
+        rows={list}
+        rowKey={(version) => String(version.id)}
+        empty="Версий нет"
+        resizable
+        storageKey="firenet:history:column-widths"
+        hint={(
+          <div className="history-heading">
+            <h1>История версий</h1>
+            <p className="hint">Подтверждённые версии проекта.</p>
+          </div>
+        )}
+      />
 
       {diffFor !== null && (
-        <div className="page-panel" id="diff-panel" data-testid="diff-panel">
+        <div className="page-panel history-diff-panel" id="diff-panel" data-testid="diff-panel">
           <div className="lint-panel-header">
             <strong>{`Версия ${diffFor} против ${previous?.id ?? "—"}`}</strong>
             <button type="button" className="lint-panel-close" onClick={() => setDiffFor(null)}>×</button>

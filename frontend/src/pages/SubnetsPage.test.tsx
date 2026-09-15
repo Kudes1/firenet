@@ -11,6 +11,17 @@ afterEach(() => { server.resetHandlers(); sessionStorage.clear(); });
 afterAll(() => server.close());
 
 describe("SubnetsPage", () => {
+  it("uses the redesigned data surface", async () => {
+    renderPage(<SubnetsPage />, "/ui/subnets", "d1");
+    await screen.findByText("lan");
+
+    expect(screen.getByTestId("page-subnets")).toHaveClass("subnets-page");
+    expect(screen.getByRole("heading", { name: "Подсети", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Сбросить ширины колонок" })).toBeInTheDocument();
+    expect(screen.getByRole("separator", { name: /Имя.*CIDR/ })).toBeInTheDocument();
+    expect(screen.getByTitle("Изменить подсеть lan").parentElement).toHaveClass("subnet-actions");
+  });
+
   it("lists subnets with their owning network", async () => {
     renderPage(<SubnetsPage />);
     expect(await screen.findByText("lan")).toBeInTheDocument();

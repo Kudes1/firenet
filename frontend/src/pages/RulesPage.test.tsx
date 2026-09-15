@@ -11,9 +11,20 @@ afterEach(() => { server.resetHandlers(); sessionStorage.clear(); });
 afterAll(() => server.close());
 
 describe("RulesPage", () => {
+  it("exposes the redesigned rules surface", async () => {
+    renderPage(<RulesPage />, "/ui/rules", "d1");
+
+    await screen.findByText("web");
+    expect(screen.getByTestId("page-rules")).toHaveClass("rules-page");
+    expect(screen.getByRole("heading", { level: 1, name: "Правила" })).toBeInTheDocument();
+    expect(screen.getByTestId("rules-table-surface")).toBeInTheDocument();
+    expect(screen.getByText("allow", { selector: ".rule-action.rule-action-allow" })).toBeInTheDocument();
+    expect(screen.getByText("tcp", { selector: ".rule-proto" })).toBeInTheDocument();
+  });
+
   it("shows the primary chain and its rules", async () => {
     renderPage(<RulesPage />, "/ui/rules", "d1");
-    expect(await screen.findByText("FORWARD")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "FORWARD" })).toBeInTheDocument();
     expect(screen.getByText("web")).toBeInTheDocument();
   });
 

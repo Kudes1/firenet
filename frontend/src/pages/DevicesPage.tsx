@@ -10,6 +10,7 @@ import { DeviceEditForm } from "../topology/editForms";
 import { DeleteIcon, EditIcon } from "../components/icons";
 
 const KIND_LABEL: Record<string, string> = { router: "маршрутизатор", switch: "коммутатор" };
+const KIND_CLASS: Record<string, string> = { router: "device-kind-router", switch: "device-kind-switch" };
 
 export default function DevicesPage() {
   const { isReadOnly } = useDraft();
@@ -39,11 +40,19 @@ export default function DevicesPage() {
   };
 
   const columns: Column<DeviceDoc>[] = [
-    { key: "name", title: "Имя", render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
-    { key: "kind", title: "Тип", render: (r) => KIND_LABEL[r.kind] ?? r.kind },
+    { key: "name", title: "Имя", width: "22%", minWidth: 160, render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
+    {
+      key: "kind",
+      title: "Тип",
+      width: "16%",
+      minWidth: 130,
+      render: (r) => <span className={`device-kind ${KIND_CLASS[r.kind] ?? "device-kind-other"}`}>{KIND_LABEL[r.kind] ?? r.kind}</span>,
+    },
     {
       key: "union",
       title: "Объединение",
+      width: "20%",
+      minWidth: 150,
       render: (r) => {
         const union = unions.find((u) => (u.devices ?? []).includes(r.name));
         return union
@@ -55,18 +64,22 @@ export default function DevicesPage() {
     {
       key: "description",
       title: "Описание",
+      width: "30%",
+      minWidth: 180,
       render: (r) => r.description || "—",
       filter: (r, q) => containsFold(r.description, q),
     },
     {
       key: "actions",
       title: "",
+      width: "12%",
+      minWidth: 84,
       filterReset: true,
       render: (r) => (
-        <>
-          <button type="button" className="icon-btn edit" title={`Изменить устройство ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
-          <button type="button" className="icon-btn delete" title={`Удалить устройство ${r.name}`} onClick={() => run([{ kind: "delete-device", deviceName: r.name }], "Устройство удалено")}><DeleteIcon /></button>
-        </>
+        <div className="device-actions">
+          <button type="button" className="icon-btn device-action edit" title={`Изменить устройство ${r.name}`} aria-label={`Изменить устройство ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
+          <button type="button" className="icon-btn device-action delete" title={`Удалить устройство ${r.name}`} aria-label={`Удалить устройство ${r.name}`} onClick={() => run([{ kind: "delete-device", deviceName: r.name }], "Устройство удалено")}><DeleteIcon /></button>
+        </div>
       ),
     },
   ];
@@ -74,13 +87,20 @@ export default function DevicesPage() {
   const device = editing === null ? null : rows[editing];
 
   return (
-    <main className="page" data-testid="page-devices">
+    <main className="page devices-page" data-testid="page-devices">
       <DataTable
         columns={columns}
         rows={rows}
         rowKey={(r) => r.name}
         empty="Устройств нет — создайте их на схеме"
-        hint={<><h3>Устройства</h3><p className="hint">Маршрутизаторы и коммутаторы топологии.</p></>}
+        resizable
+        storageKey="firenet:devices:column-widths"
+        hint={(
+          <div className="devices-heading">
+            <h1>Устройства</h1>
+            <p className="hint">Маршрутизаторы и коммутаторы топологии.</p>
+          </div>
+        )}
       />
       <Modal
         open={!!device}

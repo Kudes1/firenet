@@ -4,10 +4,18 @@ import {
 } from "../api/queries";
 import type { DraftDiffEntry, DraftResponse } from "../api/types";
 import { useDraft } from "../draft/DraftContext";
+import { containsFold } from "../lib/search";
 import { notify } from "../components/notify";
+import DataTable, { type Column } from "../components/ui/DataTable";
 import { DeleteIcon } from "../components/icons";
 
 const CHANGE_LABEL: Record<string, string> = { added: "добавлено", modified: "изменено", removed: "удалено" };
+const DRAFT_STATUS_CLASS: Record<string, string> = {
+  open: "draft-status-open",
+  conflict: "draft-status-conflict",
+  merged: "draft-status-merged",
+  closed: "draft-status-closed",
+};
 
 export default function DraftsPage() {
   const me = useMe();
@@ -58,65 +66,108 @@ export default function DraftsPage() {
   };
 
   const rows = drafts.data ?? [];
+  const columns: Column<DraftResponse>[] = [
+    {
+      key: "name",
+      title: "Название",
+      width: "25%",
+      minWidth: 180,
+      render: (draft) => <span className="draft-name">{draft.name}</span>,
+      filter: (draft, query) => containsFold(draft.name, query),
+    },
+    {
+      key: "owner",
+      title: "Автор",
+      width: "18%",
+      minWidth: 130,
+      render: (draft) => draft.owner,
+      filter: (draft, query) => containsFold(draft.owner, query),
+    },
+    {
+      key: "baseVersion",
+      title: "База",
+      width: "12%",
+      minWidth: 90,
+      render: (draft) => draft.baseVersion,
+      filter: (draft, query) => String(draft.baseVersion).includes(query.trim()),
+    },
+    {
+      key: "status",
+      title: "Статус",
+      width: "16%",
+      minWidth: 130,
+      render: (draft) => (
+        <span className={`draft-status ${DRAFT_STATUS_CLASS[draft.status] ?? "draft-status-other"}`}>
+          {draft.status}
+        </span>
+      ),
+      filter: (draft, query) => containsFold(draft.status, query),
+    },
+    {
+      key: "actions",
+      title: "",
+      width: "29%",
+      minWidth: 300,
+      filterReset: true,
+      render: (draft) => (
+        <div className="draft-actions">
+          <button type="button" title={`Открыть черновик ${draft.name}`} onClick={() => setDraftId(draft.id)}>Открыть</button>
+          <button type="button" className="secondary" title={`Изменения черновика ${draft.name}`} onClick={() => setDiffFor(diffFor === draft.id ? null : draft.id)}>Изменения</button>
+          {me.data?.role === "admin" && draft.status !== "merged" && (
+            <button type="button" className="primary" title={`Подтвердить черновик ${draft.name}`} onClick={() => onConfirm(draft)}>Подтвердить</button>
+          )}
+          <button type="button" className="icon-btn delete" title={`Удалить черновик ${draft.name}`} aria-label={`Удалить черновик ${draft.name}`} onClick={() => onDelete(draft)}><DeleteIcon /></button>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <main className="page" data-testid="page-drafts">
-      <div className="table-toolbar">
-        <div className="toolbar-text">
-          <h3>Черновики</h3>
-          <p className="hint">Личные черновики и их подтверждение.</p>
-        </div>
-        {me.data?.role === "admin" && (
-          <label className="modal-check">
-            <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
-            Показывать все
-          </label>
+    <main className="page drafts-page" data-testid="page-drafts">
+      <DataTable
+        id="drafts-table"
+        columns={columns}
+        rows={rows}
+        rowKey={(draft) => draft.id}
+        empty="Черновиков нет — создайте первый"
+        resizable
+        storageKey="firenet:drafts:column-widths"
+        hint={(
+          <div className="drafts-heading">
+            <h1>Черновики</h1>
+            <p className="hint">Личные черновики и их подтверждение.</p>
+          </div>
         )}
-      </div>
-
-      <form
-        id="create-draft-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const input = event.currentTarget.elements.namedItem("name") as HTMLInputElement;
-          void onCreate(input.value);
-          input.value = "";
-        }}
-      >
-        <label>
-          Название
-          <input name="name" required placeholder="правки для офиса" />
-        </label>
-        <button type="submit">Создать</button>
-      </form>
-
-      <table className="data-table" id="drafts-table">
-        <thead><tr><th>Название</th><th>Автор</th><th>База</th><th>Статус</th><th /></tr></thead>
-        <tbody>
-          {rows.map((d) => (
-            <tr key={d.id}>
-              <td>{d.name}</td>
-              <td>{d.owner}</td>
-              <td>{d.baseVersion}</td>
-              <td>{d.status}</td>
-              <td>
-                <button type="button" className="btn-link" title={`Открыть черновик ${d.name}`} onClick={() => setDraftId(d.id)}>Открыть</button>
-                <button type="button" className="btn-link" title={`Изменения черновика ${d.name}`} onClick={() => setDiffFor(diffFor === d.id ? null : d.id)}>Изменения</button>
-                {me.data?.role === "admin" && d.status !== "merged" && (
-                  <button type="button" className="btn-link" title={`Подтвердить черновик ${d.name}`} onClick={() => onConfirm(d)}>Подтвердить</button>
-                )}
-                <button type="button" className="icon-btn delete" title={`Удалить черновик ${d.name}`} onClick={() => onDelete(d)}><DeleteIcon /></button>
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr><td className="empty-cell" colSpan={5}>Черновиков нет</td></tr>
-          )}
-        </tbody>
-      </table>
+        actions={(
+          <>
+            {me.data?.role === "admin" && (
+              <label className="modal-check">
+                <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
+                Показывать все
+              </label>
+            )}
+            <form
+              id="create-draft-form"
+              className="draft-create-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const input = event.currentTarget.elements.namedItem("name") as HTMLInputElement;
+                void onCreate(input.value);
+                input.value = "";
+              }}
+            >
+              <label>
+                <span>Название</span>
+                <input name="name" required placeholder="правки для офиса" />
+              </label>
+              <button type="submit" className="primary">Создать</button>
+            </form>
+          </>
+        )}
+      />
 
       {diffFor && (
-        <div className="page-panel" id="diff-panel" data-testid="diff-panel">
+        <div className="page-panel draft-diff-panel" id="diff-panel" data-testid="diff-panel">
           <div className="lint-panel-header">
             <strong>{`Изменения: ${rows.find((d) => d.id === diffFor)?.name ?? diffFor}`}</strong>
             <button type="button" className="lint-panel-close" onClick={() => setDiffFor(null)}>×</button>

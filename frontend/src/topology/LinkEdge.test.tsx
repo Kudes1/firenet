@@ -86,6 +86,20 @@ describe("LinkEdge waypoints", () => {
     expect(await screen.findByTestId("waypoint:link:r1|sw1#0:0")).toBeInTheDocument();
   });
 
+  it("rounds waypoint corners in the visible and hit-test paths", async () => {
+    const withBend: LayoutDoc = {
+      ...layout, links: { "r1|sw1": [[{ x: 220, y: 80 }]] },
+    };
+    render(<TopologyCanvas topology={topology} layout={withBend} editable onWaypointsChange={vi.fn()} />);
+
+    const edge = await screen.findByTestId("link:r1|sw1#0");
+    const visiblePath = edge.querySelector(".react-flow__edge-path")?.getAttribute("d");
+    const hitPath = edge.querySelector(".link-hit")?.getAttribute("d");
+
+    expect(visiblePath).toMatch(/^M 70 30 L [^ ]+ [^ ]+ Q 220 80 [^ ]+ [^ ]+ L 370 30$/);
+    expect(hitPath).toBe(visiblePath);
+  });
+
   it("inserts a waypoint at the projected segment point on double click", async () => {
     const onWaypointsChange = vi.fn();
     render(<TopologyCanvas topology={topology} layout={layout} editable onWaypointsChange={onWaypointsChange} />);
@@ -120,6 +134,35 @@ describe("LinkEdge waypoints", () => {
     expect(onWaypointsChange).not.toHaveBeenCalled();
     fireEvent(document, pointer("pointerup", 250, 80));
     expect(onWaypointsChange).toHaveBeenCalledWith("link:r1|sw1#0", [{ x: 250, y: 80 }]);
+  });
+
+  it("keeps the committed waypoint visible until the layout echoes it", async () => {
+    const withBend: LayoutDoc = {
+      ...layout, links: { "r1|sw1": [[{ x: 220, y: 30 }]] },
+    };
+    const onWaypointsChange = vi.fn();
+    const { rerender } = render(
+      <TopologyCanvas topology={topology} layout={withBend} editable onWaypointsChange={onWaypointsChange} />,
+    );
+    await selectEdge();
+    const handle = await screen.findByTestId("waypoint:link:r1|sw1#0:0");
+    fireEvent(handle, pointer("pointerdown", 220, 30));
+    fireEvent(document, pointer("pointermove", 250, 80));
+    fireEvent(document, pointer("pointerup", 250, 80));
+
+    expect(screen.getByTestId("waypoint:link:r1|sw1#0:0")).toHaveAttribute("cx", "250");
+    expect(screen.getByTestId("waypoint:link:r1|sw1#0:0")).toHaveAttribute("cy", "80");
+
+    rerender(
+      <TopologyCanvas
+        topology={topology}
+        layout={{ ...withBend, links: { "r1|sw1": [[{ x: 250, y: 80 }]] } }}
+        editable
+        onWaypointsChange={onWaypointsChange}
+      />,
+    );
+    expect(screen.getByTestId("waypoint:link:r1|sw1#0:0")).toHaveAttribute("cx", "250");
+    expect(screen.getByTestId("waypoint:link:r1|sw1#0:0")).toHaveAttribute("cy", "80");
   });
 
   // Регрессия: старт drag брал нулевую точку, и между pointerdown и первым

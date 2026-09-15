@@ -40,6 +40,7 @@ export default function RulesPage() {
 
   const chains = rules.data?.chains ?? [];
   const chain = chains[active];
+  const totalRules = chains.reduce((total, item) => total + item.rules.length, 0);
 
   const endpoints = useMemo(() => [
     "any",
@@ -167,118 +168,148 @@ export default function RulesPage() {
   }
 
   return (
-    <main className="page" data-testid="page-rules">
-      <div className="chain-tabs" data-testid="chain-tabs">
-        {chains.map((c, i) => (
-          <span className={`chain-tab${i === active ? " active" : ""}`} key={c.name || i}>
-            <button type="button" onClick={() => setActive(i)}>{c.name || "—"}</button>
-            {i > 0 && (
-              <button type="button" className="chain-tab-remove" title={`Удалить цепочку ${c.name}`} onClick={() => removeChain(i)}>×</button>
-            )}
-          </span>
-        ))}
-        <button type="button" className="chain-tab-add" onClick={addChain}>+ цепочка</button>
-      </div>
+    <main className="page rules-page" data-testid="page-rules">
+      <header className="rules-page-header">
+        <div className="rules-heading">
+          <h1>Правила</h1>
+          <p className="hint">Цепочки фильтрации трафика для устройств топологии.</p>
+        </div>
+        <div className="rules-page-summary" aria-label="Сводка по правилам">
+          <span><strong>{chains.length}</strong> {chains.length === 1 ? "цепочка" : "цепочек"}</span>
+          <span><strong>{totalRules}</strong> {totalRules === 1 ? "правило" : "правил"}</span>
+        </div>
+      </header>
 
-      <div className="rules-settings-group">
-        {chainEditing && chainDraft ? (
-          <>
-            <label>
-              Имя
-              <input value={chainDraft.name} onChange={(e) => setChainDraft({ ...chainDraft, name: e.target.value })} />
-            </label>
-            <label>
-              Действие по умолчанию
-              <select value={chainDraft.defaultAction} onChange={(e) => setChainDraft({ ...chainDraft, defaultAction: e.target.value })}>
-                {["deny", "allow", "return"].map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </label>
-            {active === 0 && (
+      <section className="rules-chain-surface" aria-label="Цепочки правил">
+        <div className="rules-chain-header">
+          <div>
+            <span className="rules-eyebrow">Цепочка</span>
+            <strong>{chain.name || "—"}</strong>
+          </div>
+          <button type="button" className="chain-tab-add" onClick={addChain}>+ цепочка</button>
+        </div>
+
+        <div className="chain-tabs" data-testid="chain-tabs">
+          {chains.map((c, i) => (
+            <span className={`chain-tab${i === active ? " active" : ""}`} key={c.name || i}>
+              <button type="button" aria-current={i === active ? "page" : undefined} onClick={() => setActive(i)}>{c.name || "—"}</button>
+              {i > 0 && (
+                <button type="button" className="chain-tab-remove" title={`Удалить цепочку ${c.name}`} onClick={() => removeChain(i)}>×</button>
+              )}
+            </span>
+          ))}
+        </div>
+
+        <div className="rules-settings-group">
+          {chainEditing && chainDraft ? (
+            <>
               <label>
-                Позиция
-                <select
-                  value={chainDraft.chainPosition ?? "top"}
-                  onChange={(e) => setChainDraft({ ...chainDraft, chainPosition: e.target.value as "top" | "bottom" })}
-                >
-                  <option value="top">top</option>
-                  <option value="bottom">bottom</option>
+                Имя
+                <input value={chainDraft.name} onChange={(e) => setChainDraft({ ...chainDraft, name: e.target.value })} />
+              </label>
+              <label>
+                Действие по умолчанию
+                <select value={chainDraft.defaultAction} onChange={(e) => setChainDraft({ ...chainDraft, defaultAction: e.target.value })}>
+                  {["deny", "allow", "return"].map((a) => <option key={a} value={a}>{a}</option>)}
                 </select>
               </label>
-            )}
-            <div className="settings-edit-actions">
-              <button type="button" onClick={() => { setChainEditing(false); setChainDraft(null); }}>Отмена</button>
-              <button type="button" className="primary" onClick={submitChain}>Сохранить</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <span className="settings-badge">Действие: {chain.defaultAction}</span>
-            {active === 0 && <span className="settings-badge">Позиция: {chain.chainPosition ?? "top"}</span>}
-            <button type="button" onClick={() => { setChainDraft(chain); setChainEditing(true); }}>⚙ Изменить параметры</button>
-          </>
-        )}
-      </div>
-
-      <div className="table-toolbar">
-        <div className="toolbar-text"><h3>Правила</h3></div>
-        <div className="toolbar-actions">
-          <button type="button" onClick={() => { setLintOpen(true); void lint.refetch(); }}>Проверить</button>
-          <button type="button" className="primary" title="Добавить правило" onClick={() => openRule(-1)}>+ Правило</button>
-        </div>
-      </div>
-
-      {showLint && (
-        <div className="lint-panel" data-testid="lint-panel">
-          <div className="lint-panel-header">
-            <strong>Замечания</strong>
-            <button type="button" className="lint-panel-close" onClick={() => setLintOpen(false)}>×</button>
-          </div>
-          <div className="lint-panel-body">
-            {findings.map((f, i) => (
-              <button type="button" className="lint-finding" key={i} onClick={() => jumpToFinding(f.rules, f.chain)}>
-                <span className={`badge badge-${f.severity === "warning" ? "warn" : "info"}`}>{f.severity}</span>
-                <span className="lint-finding-chain">{f.chain}</span>
-                <span className="lint-finding-msg">{f.message}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <table className="data-table" id="rules-table" data-testid="rules-table">
-        <thead>
-          <tr>
-            <th /><th>Имя</th><th>Комментарий</th><th>Src</th><th>Dst</th>
-            <th>Proto</th><th>Src Ports</th><th>Dst Ports</th><th>Action</th><th>Зеркало</th><th />
-          </tr>
-        </thead>
-        <tbody>
-          {chain.rules.map((r, i) => (
-            <tr key={r.name} className={highlighted.includes(r.name) ? "lint-highlighted" : undefined}>
-              <td className="row-index-cell">
-                <button type="button" className="icon-btn move" title={`Переместить правило ${r.name} выше`} onClick={() => moveRule(i, -1)} disabled={i === 0}>▲</button>
-                <button type="button" className="icon-btn move" title={`Переместить правило ${r.name} ниже`} onClick={() => moveRule(i, 1)} disabled={i === chain.rules.length - 1}>▼</button>
-              </td>
-              <td>{r.name}</td>
-              <td>{r.comment || "—"}</td>
-              <td>{r.src.join(", ") || "any"}</td>
-              <td>{r.dst.join(", ") || "any"}</td>
-              <td>{r.proto || "any"}</td>
-              <td>{(r.srcPorts ?? []).join(",")}</td>
-              <td>{(r.dstPorts ?? []).join(",")}</td>
-              <td>{r.action}{r.jumpTo ? ` → ${r.jumpTo}` : ""}</td>
-              <td>{r.mirror ? "да" : "—"}</td>
-              <td>
-                <button type="button" className="icon-btn edit" title={`Изменить правило ${r.name}`} onClick={() => openRule(i)}><EditIcon /></button>
-                <button type="button" className="icon-btn delete" title={`Удалить правило ${r.name}`} onClick={() => removeRule(i)}><DeleteIcon /></button>
-              </td>
-            </tr>
-          ))}
-          {chain.rules.length === 0 && (
-            <tr><td className="empty-cell" colSpan={11}>Правил нет — добавьте первое</td></tr>
+              {active === 0 && (
+                <label>
+                  Позиция
+                  <select
+                    value={chainDraft.chainPosition ?? "top"}
+                    onChange={(e) => setChainDraft({ ...chainDraft, chainPosition: e.target.value as "top" | "bottom" })}
+                  >
+                    <option value="top">top</option>
+                    <option value="bottom">bottom</option>
+                  </select>
+                </label>
+              )}
+              <div className="settings-edit-actions">
+                <button type="button" onClick={() => { setChainEditing(false); setChainDraft(null); }}>Отмена</button>
+                <button type="button" className="primary" onClick={submitChain}>Сохранить</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <span className="settings-badge">Действие: <strong>{chain.defaultAction}</strong></span>
+              {active === 0 && <span className="settings-badge">Позиция: <strong>{chain.chainPosition ?? "top"}</strong></span>}
+              <button type="button" onClick={() => { setChainDraft(chain); setChainEditing(true); }}>⚙ Изменить параметры</button>
+            </>
           )}
-        </tbody>
-      </table>
+        </div>
+      </section>
+
+      <section className="rules-table-surface" data-testid="rules-table-surface">
+        <div className="table-toolbar">
+          <div className="toolbar-text rules-table-heading">
+            <span className="rules-eyebrow">{chain.name || "—"}</span>
+            <h2>Правила</h2>
+            <span className="rules-count">{chain.rules.length} {chain.rules.length === 1 ? "правило" : "правил"}</span>
+          </div>
+          <div className="toolbar-actions">
+            <button type="button" onClick={() => { setLintOpen(true); void lint.refetch(); }}>Проверить</button>
+            <button type="button" className="primary" title="Добавить правило" onClick={() => openRule(-1)}>+ Правило</button>
+          </div>
+        </div>
+
+        {showLint && (
+          <div className="lint-panel" data-testid="lint-panel">
+            <div className="lint-panel-header">
+              <strong>Замечания</strong>
+              <button type="button" className="lint-panel-close" onClick={() => setLintOpen(false)}>×</button>
+            </div>
+            <div className="lint-panel-body">
+              {findings.map((f, i) => (
+                <button type="button" className="lint-finding" key={i} onClick={() => jumpToFinding(f.rules, f.chain)}>
+                  <span className={`badge badge-${f.severity === "warning" ? "warn" : "info"}`}>{f.severity}</span>
+                  <span className="lint-finding-chain">{f.chain}</span>
+                  <span className="lint-finding-msg">{f.message}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="rules-table-scroll">
+          <table className="data-table" id="rules-table" data-testid="rules-table">
+            <thead>
+              <tr>
+                <th /><th>Имя</th><th>Комментарий</th><th>Src</th><th>Dst</th>
+                <th>Proto</th><th>Src Ports</th><th>Dst Ports</th><th>Action</th><th>Зеркало</th><th />
+              </tr>
+            </thead>
+            <tbody>
+              {chain.rules.map((r, i) => (
+                <tr key={r.name} className={highlighted.includes(r.name) ? "lint-highlighted" : undefined}>
+                  <td className="row-index-cell">
+                    <button type="button" className="icon-btn move" title={`Переместить правило ${r.name} выше`} onClick={() => moveRule(i, -1)} disabled={i === 0}>▲</button>
+                    <button type="button" className="icon-btn move" title={`Переместить правило ${r.name} ниже`} onClick={() => moveRule(i, 1)} disabled={i === chain.rules.length - 1}>▼</button>
+                  </td>
+                  <td className="rule-name">{r.name}</td>
+                  <td className="rule-comment">{r.comment || "—"}</td>
+                  <td className="rule-members">{r.src.length ? r.src.map((member, index) => <span className="rule-member" key={`${member}-${index}`}>{member}</span>) : <span className="rule-member rule-member-empty">any</span>}</td>
+                  <td className="rule-members">{r.dst.length ? r.dst.map((member, index) => <span className="rule-member" key={`${member}-${index}`}>{member}</span>) : <span className="rule-member rule-member-empty">any</span>}</td>
+                  <td><span className="rule-proto">{r.proto || "any"}</span></td>
+                  <td className="rule-ports">{(r.srcPorts ?? []).join(",") || "—"}</td>
+                  <td className="rule-ports">{(r.dstPorts ?? []).join(",") || "—"}</td>
+                  <td><span className={`rule-action rule-action-${r.action}`}>{r.action}{r.jumpTo ? ` → ${r.jumpTo}` : ""}</span></td>
+                  <td>{r.mirror ? <span className="rule-mirror">да</span> : <span className="hint">—</span>}</td>
+                  <td>
+                    <div className="rule-actions">
+                      <button type="button" className="icon-btn rule-action-button edit" title={`Изменить правило ${r.name}`} aria-label={`Изменить правило ${r.name}`} onClick={() => openRule(i)}><EditIcon /></button>
+                      <button type="button" className="icon-btn rule-action-button delete" title={`Удалить правило ${r.name}`} aria-label={`Удалить правило ${r.name}`} onClick={() => removeRule(i)}><DeleteIcon /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {chain.rules.length === 0 && (
+                <tr><td className="empty-cell" colSpan={11}>Правил нет — добавьте первое</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <Modal
         open={!!editing}

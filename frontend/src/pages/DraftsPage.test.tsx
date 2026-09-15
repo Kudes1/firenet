@@ -23,7 +23,34 @@ describe("DraftsPage", () => {
     );
     renderPage(<DraftsPage />, "/ui/drafts");
     expect(await screen.findByText("правки")).toBeInTheDocument();
-    expect(screen.getByText("open")).toBeInTheDocument();
+    expect(screen.getByTestId("data-table")).toHaveAttribute("id", "drafts-table");
+    expect(screen.getByRole("heading", { name: "Черновики", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("open")).toHaveClass("draft-status", "draft-status-open");
+    expect(screen.getByRole("button", { name: "Сбросить ширины колонок" })).toBeInTheDocument();
+
+    expect(screen.getByTitle("Открыть черновик правки")).not.toHaveClass("btn-link");
+    expect(screen.getByTitle("Изменения черновика правки")).toHaveClass("secondary");
+    expect(screen.getByTitle("Подтвердить черновик правки")).toHaveClass("primary");
+  });
+
+  it("uses the shared table surface and filters drafts", async () => {
+    server.use(
+      http.get("/api/me", () => HttpResponse.json({
+        id: "u1", username: "admin", role: "admin", activated: true, createdAt: "2026-09-01T10:00:00Z",
+      })),
+      http.get("/api/drafts", () => HttpResponse.json([
+        fx.draftFixture,
+        { ...fx.draftFixture, id: "d2", name: "релиз" },
+      ])),
+    );
+    const { user } = renderPage(<DraftsPage />, "/ui/drafts");
+    expect(await screen.findByTestId("data-table")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Открыть поиск" }));
+    await user.type(screen.getByPlaceholderText("Название"), "релиз");
+
+    expect(screen.getByText("релиз")).toBeInTheDocument();
+    expect(screen.queryByText("правки")).not.toBeInTheDocument();
   });
 
   it("shows all drafts for admins when toggled", async () => {

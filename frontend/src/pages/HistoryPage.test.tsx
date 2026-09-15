@@ -16,6 +16,28 @@ const VERSIONS = [
 ];
 
 describe("HistoryPage", () => {
+  it("uses the shared table surface and filters versions", async () => {
+    server.use(http.get("/api/versions", () => HttpResponse.json([
+      { ...VERSIONS[0], note: "релиз", confirmedBy: "operator" },
+      { ...VERSIONS[1], note: "черновая проверка" },
+    ])));
+    const { user } = renderPage(<HistoryPage />, "/ui/history");
+
+    expect(await screen.findByTestId("page-history")).toHaveClass("history-page");
+    expect(await screen.findByText("3")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "История версий" })).toBeInTheDocument();
+    expect(screen.getByTestId("data-table")).toHaveAttribute("id", "history-table");
+    expect(screen.getByRole("button", { name: "Сбросить ширины колонок" })).toBeInTheDocument();
+    expect(screen.getByTitle("Дифф версии 3")).toHaveClass("secondary");
+    expect(screen.getByTitle("Восстановить версию 3")).toHaveClass("primary");
+
+    await user.click(screen.getByRole("button", { name: "Открыть поиск" }));
+    await user.type(screen.getByPlaceholderText("Заметка"), "релиз");
+
+    expect(screen.getByText("релиз")).toBeInTheDocument();
+    expect(screen.queryByText("черновая проверка")).not.toBeInTheDocument();
+  });
+
   it("lists versions newest first", async () => {
     server.use(http.get("/api/versions", () => HttpResponse.json(VERSIONS)));
     renderPage(<HistoryPage />, "/ui/history");

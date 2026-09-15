@@ -11,6 +11,14 @@ afterEach(() => { server.resetHandlers(); sessionStorage.clear(); });
 afterAll(() => server.close());
 
 describe("NetworksPage", () => {
+  it("uses the redesigned data surface", async () => {
+    renderPage(<NetworksPage />, "/ui/networks", "d1");
+    await screen.findByText("office");
+
+    expect(screen.getByTestId("page-networks")).toHaveClass("networks-page");
+    expect(screen.getByRole("heading", { name: "Сети", level: 1 })).toBeInTheDocument();
+  });
+
   it("lists networks with their subnets", async () => {
     renderPage(<NetworksPage />, "/ui/networks", "d1");
     expect(await screen.findByText("office")).toBeInTheDocument();

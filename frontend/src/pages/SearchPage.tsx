@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useSearchIndex } from "../api/queries";
 import type { SearchEntry, SearchEntryType } from "../api/types";
 import { containsFold, matchPrefixQuery } from "../lib/search";
+import DataTable, { type Column } from "../components/ui/DataTable";
 
 const TYPE_LABEL: Record<SearchEntryType, string> = {
   device: "устройство", subnet: "подсеть", network: "сеть",
@@ -13,6 +14,25 @@ const HREFS: Record<SearchEntryType, string> = {
   device: "/ui/devices", subnet: "/ui/subnets", network: "/ui/networks",
   set: "/ui/sets", union: "/ui/unions", link: "/ui/links", rule: "/ui/rules",
 };
+
+const COLUMNS: Array<Column<SearchEntry>> = [
+  {
+    key: "type",
+    title: "Тип",
+    width: "16%",
+    minWidth: 130,
+    render: (entry) => <Link to={HREFS[entry.type]}><span className="badge badge-default">{TYPE_LABEL[entry.type]}</span></Link>,
+  },
+  {
+    key: "name",
+    title: "Имя",
+    width: "22%",
+    minWidth: 160,
+    render: (entry) => <Link to={HREFS[entry.type]}>{entry.name}</Link>,
+  },
+  { key: "details", title: "Детали", width: "27%", minWidth: 220, render: (entry) => entry.details || "—" },
+  { key: "description", title: "Описание", width: "35%", minWidth: 220, render: (entry) => entry.description || "—" },
+];
 
 export default function SearchPage() {
   const index = useSearchIndex();
@@ -31,44 +51,46 @@ export default function SearchPage() {
   }), [entries, type, query]);
 
   return (
-    <main className="page" data-testid="page-search">
-      <div className="search-controls">
-        <input
-          className="search-input"
-          type="search"
-          value={query}
-          placeholder="имя, CIDR или описание"
-          onChange={(e) => setParams(e.target.value ? { q: e.target.value } : {})}
-        />
-        <select className="search-type" value={type} onChange={(e) => setType(e.target.value as SearchEntryType | "all")}>
-          <option value="all">все</option>
-          {(Object.keys(TYPE_LABEL) as SearchEntryType[]).map((t) => (
-            <option key={t} value={t}>{TYPE_LABEL[t]}</option>
-          ))}
-        </select>
-      </div>
-      <table className="data-table">
-        <thead><tr><th>Тип</th><th>Имя</th><th>Детали</th><th>Описание</th></tr></thead>
-        <tbody>
-          {visible.map((e) => <SearchRow key={`${e.type}:${e.name}`} entry={e} />)}
-          {visible.length === 0 && (
-            <tr><td className="empty-cell" colSpan={4}>
-              {index.isLoading ? "Загрузка…" : "Ничего не найдено"}
-            </td></tr>
-          )}
-        </tbody>
-      </table>
+    <main className="page search-page" data-testid="page-search">
+      <DataTable
+        id="search-table"
+        columns={COLUMNS}
+        rows={visible}
+        rowKey={(entry) => `${entry.type}:${entry.name}`}
+        empty={index.isLoading ? "Загрузка…" : "Ничего не найдено"}
+        resizable
+        storageKey="firenet:search:column-widths"
+        hint={(
+          <div className="search-heading">
+            <h1>Поиск</h1>
+            <p className="hint">Найдите устройства, сети и правила по имени, адресу или описанию.</p>
+          </div>
+        )}
+        actions={(
+          <div className="search-page-controls">
+            <label>
+              <span>Поиск</span>
+              <input
+                className="search-input"
+                type="search"
+                value={query}
+                aria-label="Поиск"
+                placeholder="имя, CIDR или описание"
+                onChange={(e) => setParams(e.target.value ? { q: e.target.value } : {})}
+              />
+            </label>
+            <label>
+              <span>Тип</span>
+              <select className="search-type" aria-label="Тип" value={type} onChange={(e) => setType(e.target.value as SearchEntryType | "all")}>
+                <option value="all">все</option>
+                {(Object.keys(TYPE_LABEL) as SearchEntryType[]).map((t) => (
+                  <option key={t} value={t}>{TYPE_LABEL[t]}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+      />
     </main>
-  );
-}
-
-function SearchRow({ entry }: { entry: SearchEntry }) {
-  return (
-    <tr className="search-hit">
-      <td><Link to={HREFS[entry.type]}><span className="badge badge-default">{TYPE_LABEL[entry.type]}</span></Link></td>
-      <td><Link to={HREFS[entry.type]}>{entry.name}</Link></td>
-      <td>{entry.details || "—"}</td>
-      <td>{entry.description || "—"}</td>
-    </tr>
   );
 }

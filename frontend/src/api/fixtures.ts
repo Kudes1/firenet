@@ -158,7 +158,7 @@ export const linkExportsFixture: LinkExportsResponse = {
 
 export const lintResponseFixture: LintResponse = { findings: lintFixture };
 
-// validate: пустой результат — это null, а не [] (handlers.go:542).
+// validate: пустой результат — это null, а не [] (handlers.go/validateDoc).
 export const validateResponseFixture: ValidateResponse = { valid: true, errors: null };
 
 export const restoreResponseFixture: RestoreResponse = { version: 12 };

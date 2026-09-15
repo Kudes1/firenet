@@ -42,10 +42,12 @@ export default function NetworksPage() {
   };
 
   const columns: Column<NetworkDoc>[] = [
-    { key: "name", title: "Имя", render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
+    { key: "name", title: "Имя", width: "22%", minWidth: 160, render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
     {
       key: "subnets",
       title: "Подсети",
+      width: "38%",
+      minWidth: 250,
       render: (r) => (r.subnets?.length
         ? r.subnets.map((s) => <span className="owner-badge" key={s}>{s}</span>)
         : <span className="hint">нет подсетей</span>),
@@ -54,18 +56,22 @@ export default function NetworksPage() {
     {
       key: "description",
       title: "Описание",
+      width: "28%",
+      minWidth: 180,
       render: (r) => r.description || "—",
       filter: (r, q) => containsFold(r.description, q),
     },
     {
       key: "actions",
       title: "",
+      width: "12%",
+      minWidth: 84,
       filterReset: true,
       render: (r) => (
-        <>
-          <button type="button" className="icon-btn edit" title={`Изменить сеть ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
-          <button type="button" className="icon-btn delete" title={`Удалить сеть ${r.name}`} onClick={() => run({ kind: "delete-network", networkName: r.name }, "Сети сохранены")}><DeleteIcon /></button>
-        </>
+        <div className="network-actions">
+          <button type="button" className="icon-btn network-action edit" title={`Изменить сеть ${r.name}`} aria-label={`Изменить сеть ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
+          <button type="button" className="icon-btn network-action delete" title={`Удалить сеть ${r.name}`} aria-label={`Удалить сеть ${r.name}`} onClick={() => run({ kind: "delete-network", networkName: r.name }, "Сети сохранены")}><DeleteIcon /></button>
+        </div>
       ),
     },
   ];
@@ -73,13 +79,20 @@ export default function NetworksPage() {
   const network = editing === null ? null : rows[editing];
 
   return (
-    <main className="page" data-testid="page-networks">
+    <main className="page networks-page" data-testid="page-networks">
       <DataTable
         columns={columns}
         rows={rows}
         rowKey={(r) => r.name}
         empty="Сетей нет — создайте их на схеме"
-        hint={<><h3>Сети</h3><p className="hint">L2-сегменты: привязка к устройствам и список подсетей.</p></>}
+        resizable
+        storageKey="firenet:networks:column-widths"
+        hint={(
+          <div className="networks-heading">
+            <h1>Сети</h1>
+            <p className="hint">L2-сегменты: привязка к устройствам и список подсетей.</p>
+          </div>
+        )}
       />
       <Modal
         open={!!network}

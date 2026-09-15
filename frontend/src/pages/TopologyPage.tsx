@@ -310,6 +310,7 @@ export default function TopologyPage() {
           onDelete={(ids) => guard(() => editor.removeSelected(ids))}
           onNodeContextMenu={handleNodeContextMenu}
           onEdgeContextMenu={handleEdgeContextMenu}
+          canvasChildren={pendingCenter && cursor ? <ConnectPreview from={pendingCenter} to={cursor} /> : null}
           onWaypointsChange={(edgeId, points) => {
             // id ребра строит scene.ts: link:<a>|<b>#<offset>; attach-рёбра
             // изгибов не имеют (бэкенд хранит waypoints только по парам устройств).
@@ -319,12 +320,6 @@ export default function TopologyPage() {
             guard(() => editor.setLinkWaypoints(a, b, Number(edgeId.slice(edgeId.lastIndexOf("#") + 1)), points));
           }}
         >
-          {/* Превью-линия connect-инструмента: от центра ожидающего объекта
-              к курсору (легаси previewWire). Пока курсор не замерян, линии
-              нет — один клик подсвечивает только сам узел. */}
-          {pendingCenter && cursor && (
-            <ConnectPreview from={pendingCenter} to={cursor} />
-          )}
           <div className="topo-toolbar" role="toolbar" aria-label="Инструменты топологии">
             <div className="topo-tool-group topo-search-group">
               <button
@@ -408,8 +403,8 @@ export default function TopologyPage() {
             </div>
           </div>
           {menu && <ContextMenu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
-          {/* Панели редактирования — children канвы: координаты канвовые,
-              панель обрезается рамкой .canvas-wrap (см. CanvasPanel). */}
+          {/* Панели редактирования — overlay-объекты canvas-shell: координаты
+              канвовые, но .canvas-wrap их не обрезает (см. CanvasPanel). */}
           {editDevice && (
             <CanvasPanel title={`Изменить устройство ${editDevice.name}`} onClose={() => setEditTarget(null)}>
               <DeviceEditForm

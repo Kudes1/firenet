@@ -4,6 +4,7 @@ import { useMe, useUsers } from "../api/queries";
 import type { UserResponse, UserRole } from "../api/types";
 import { containsFold } from "../lib/search";
 import Modal from "../components/ui/Modal";
+import DataTable, { type Column } from "../components/ui/DataTable";
 import { notify } from "../components/notify";
 import { DeleteIcon } from "../components/icons";
 
@@ -16,10 +17,9 @@ export default function UsersPage() {
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState<UserRole>("user");
   const [invite, setInvite] = useState<Invite | null>(null);
-  const [filter, setFilter] = useState("");
 
   const forbidden = users.error instanceof Error && (users.error as { status?: number }).status === 403;
-  const rows = (users.data ?? []).filter((u) => containsFold(u.username, filter));
+  const rows = users.data ?? [];
 
   const create = async () => {
     try {
@@ -63,60 +63,114 @@ export default function UsersPage() {
     }
   };
 
+  const columns: Column<UserResponse>[] = [
+    {
+      key: "username",
+      title: "Логин",
+      width: "26%",
+      minWidth: 180,
+      render: (user) => user.username,
+      filter: (user, query) => containsFold(user.username, query),
+    },
+    {
+      key: "role",
+      title: "Роль",
+      width: "18%",
+      minWidth: 140,
+      render: (user) => user.id === me.data?.id
+        ? <span className={`user-role user-role-${user.role}`}>{user.role}</span>
+        : (
+          <select
+            className="user-role-select"
+            value={user.role}
+            aria-label={`Роль пользователя ${user.username}`}
+            onChange={(event) => void changeRole(user, event.target.value as UserRole)}
+          >
+            <option value="admin">admin</option>
+            <option value="user">user</option>
+          </select>
+        ),
+      filter: (user, query) => containsFold(user.role, query),
+    },
+    {
+      key: "status",
+      title: "Статус",
+      width: "17%",
+      minWidth: 130,
+      render: (user) => (
+        <span className={`badge badge-${user.activated ? "ok" : "warn"}`}>
+          {user.activated ? "Активен" : "Ожидает"}
+        </span>
+      ),
+      filter: (user, query) => containsFold(user.activated ? "Активен" : "Ожидает", query),
+    },
+    {
+      key: "createdAt",
+      title: "Создан",
+      width: "21%",
+      minWidth: 160,
+      render: (user) => new Date(user.createdAt).toLocaleDateString("ru-RU"),
+      filter: (user, query) => containsFold(new Date(user.createdAt).toLocaleDateString("ru-RU"), query),
+    },
+    {
+      key: "actions",
+      title: "",
+      width: "18%",
+      minWidth: 150,
+      filterReset: true,
+      render: (user) => (
+        <div className="users-actions">
+          {!user.activated && (
+            <button
+              type="button"
+              className="btn-link user-invite-action"
+              title={`Показать ссылку для ${user.username}`}
+              onClick={() => void showInvite(user)}
+            >
+              Ссылка
+            </button>
+          )}
+          {user.id !== me.data?.id && (
+            <button
+              type="button"
+              className="icon-btn user-action delete"
+              title={`Удалить пользователя ${user.username}`}
+              aria-label={`Удалить пользователя ${user.username}`}
+              onClick={() => void remove(user)}
+            >
+              <DeleteIcon />
+            </button>
+          )}
+        </div>
+      ),
+    },
+  ];
+
   if (forbidden) {
     return (
-      <main className="page" data-testid="page-users">
+      <main className="page users-page" data-testid="page-users">
         <div className="banner error">Доступ только для администраторов</div>
       </main>
     );
   }
 
   return (
-    <main className="page" data-testid="page-users">
-      <div className="table-toolbar">
-        <div className="toolbar-text">
-          <h3>Пользователи</h3>
-          <p className="hint">Учётные записи и ссылки приглашения.</p>
-        </div>
-        <div className="toolbar-actions">
-          <input placeholder="логин" value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <button type="button" className="primary" title="Добавить пользователя" onClick={() => setCreating(true)}>+ Пользователь</button>
-        </div>
-      </div>
-
-      <table className="data-table">
-        <thead><tr><th>Логин</th><th>Роль</th><th>Статус</th><th>Создан</th><th /></tr></thead>
-        <tbody>
-          {rows.map((u) => (
-            <tr key={u.id}>
-              <td>{u.username}</td>
-              <td>
-                {u.id === me.data?.id ? u.role : (
-                  <select value={u.role} onChange={(e) => changeRole(u, e.target.value as UserRole)}>
-                    <option value="admin">admin</option>
-                    <option value="user">user</option>
-                  </select>
-                )}
-              </td>
-              <td>
-                <span className={`badge badge-${u.activated ? "ok" : "warn"}`}>{u.activated ? "Активен" : "Ожидает"}</span>
-              </td>
-              <td>{new Date(u.createdAt).toLocaleDateString("ru-RU")}</td>
-              <td>
-                {!u.activated && (
-                  <button type="button" className="btn-link" title={`Показать ссылку для ${u.username}`} onClick={() => showInvite(u)}>Ссылка</button>
-                )}
-                {u.id !== me.data?.id && (
-                  <button type="button" className="icon-btn delete" title={`Удалить пользователя ${u.username}`} onClick={() => remove(u)}><DeleteIcon /></button>
-                )}
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr><td className="empty-cell" colSpan={5}>Пользователей нет</td></tr>
-          )}
-        </tbody>
-      </table>
+    <main className="page users-page" data-testid="page-users">
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(user) => user.id}
+        empty="Пользователей нет — добавьте первого"
+        resizable
+        storageKey="firenet:users:column-widths"
+        hint={(
+          <div className="users-heading">
+            <h1>Пользователи</h1>
+            <p className="hint">Учётные записи и ссылки приглашения.</p>
+          </div>
+        )}
+        actions={<button type="button" className="primary" title="Добавить пользователя" onClick={() => setCreating(true)}>+ Пользователь</button>}
+      />
 
       <Modal
         open={creating}

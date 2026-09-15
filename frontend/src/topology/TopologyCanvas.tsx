@@ -79,8 +79,11 @@ type Props = {
   // (link:<a>|<b>#<offset>) и полный массив точек этого дубликата.
   // undefined — рёбра не интерактивны.
   onWaypointsChange?: (edgeId: string, waypoints: Array<{ x: number; y: number }>) => void;
-  // Оверлеи страницы (тулбар, панели) — внутри обёртки канвы, чтобы
-  // позиционироваться относительно неё; .canvas-wrap остаётся один.
+  // Оверлеи, которые должны оставаться внутри обрезаемой поверхности канвы
+  // (например, preview линии соединения).
+  canvasChildren?: ReactNode;
+  // Оверлеи страницы (тулбар, панели) — в соседнем overlay-слое canvas-shell,
+  // чтобы они не обрезались .canvas-wrap.
   children?: ReactNode;
 };
 
@@ -105,7 +108,8 @@ function TransformSync({ onTransform }: { onTransform: (t: [number, number, numb
 function TopologyCanvasInner({
   topology, layout, editable, subnets = [], tool = "select", pendingId, onConnectPick, markOf,
   onMoveEnd, onNodeDragStop, onNodeClick, onPaneClick, onDelete, onSelectionChange,
-  onNodeContextMenu, onEdgeContextMenu, onWaypointsChange, onSceneMouseMove, children,
+  onNodeContextMenu, onEdgeContextMenu, onWaypointsChange, onSceneMouseMove,
+  canvasChildren, children,
 }: Props) {
   const scene = useMemo(() => buildScene(topology, layout), [topology, layout]);
   const ref = useRef<HTMLDivElement>(null);
@@ -256,8 +260,8 @@ function TopologyCanvasInner({
 
   // Del удаляет выбранные узлы: события клавиатуры идут на контейнер,
   // потому что фокус у React Flow, а не у инпутов страницы. Панели редактиро-
-  // вания рендерятся внутри .canvas-wrap — их keydown (в т.ч. Delete при
-  // наборе текста) не должен доходить до удаления узлов.
+  // вания находятся в overlay-слое — их keydown (в т.ч. Delete при наборе
+  // текста) не должен доходить до удаления узлов.
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key !== "Delete" || !onDelete) return;
     const target = event.target;
@@ -303,46 +307,50 @@ function TopologyCanvasInner({
   const infoNode = rfNodes.find((item) => item.id === networkInfoId);
 
   return (
-    <div
-      ref={ref}
-      className={`canvas-wrap${connecting ? " connecting" : ""}`}
-      data-testid="topo-canvas"
-      style={{ width: "100%", height: "100%" }}
-      onKeyDown={handleKeyDown}
-      tabIndex={0}
-    >
-      <ViewportContext.Provider value={transform}>
-        <EdgeActionsContext.Provider value={editable && onWaypointsChange ? { changeWaypoints: onWaypointsChange } : undefined}>
-        <ReactFlow
-          nodes={[...unionNodes, ...nodes]}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView={!scene.viewport}
-          defaultViewport={scene.viewport}
-          nodesDraggable={editable}
-          nodesConnectable={editable}
-          elementsSelectable
-          onMoveEnd={handleMoveEnd}
-          onMoveStart={() => setNetworkInfoId(null)}
-          onNodeDragStart={() => setNetworkInfoId(null)}
-          onNodeDragStop={(_event, node) => onNodeDragStop?.(node.id, node.position)}
-          onNodeClick={handleNodeClick}
-          onPaneClick={handlePaneClick}
-          onPaneMouseMove={handlePaneMouseMove}
-          onSelectionChange={handleSelectionChange}
-          onNodeContextMenu={handleNodeContextMenu}
-          onEdgeContextMenu={handleEdgeContextMenu}
-          onPaneContextMenu={(e) => e.preventDefault()}
-          proOptions={{ hideAttribution: true }}
+    <ViewportContext.Provider value={transform}>
+      <div className="canvas-shell" style={{ width: "100%", height: "100%" }}>
+        <div
+          ref={ref}
+          className={`canvas-wrap${connecting ? " connecting" : ""}`}
+          data-testid="topo-canvas"
+          style={{ width: "100%", height: "100%" }}
+          onKeyDown={handleKeyDown}
+          tabIndex={0}
         >
-          <TransformSync onTransform={onTransform} />
-          <Background gap={24} />
-          <Controls />
-          <MiniMap pannable zoomable />
-        </ReactFlow>
+          <EdgeActionsContext.Provider value={editable && onWaypointsChange ? { changeWaypoints: onWaypointsChange } : undefined}>
+            <ReactFlow
+              nodes={[...unionNodes, ...nodes]}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              fitView={!scene.viewport}
+              defaultViewport={scene.viewport}
+              nodesDraggable={editable}
+              nodesConnectable={editable}
+              elementsSelectable
+              onMoveEnd={handleMoveEnd}
+              onMoveStart={() => setNetworkInfoId(null)}
+              onNodeDragStart={() => setNetworkInfoId(null)}
+              onNodeDragStop={(_event, node) => onNodeDragStop?.(node.id, node.position)}
+              onNodeClick={handleNodeClick}
+              onPaneClick={handlePaneClick}
+              onPaneMouseMove={handlePaneMouseMove}
+              onSelectionChange={handleSelectionChange}
+              onNodeContextMenu={handleNodeContextMenu}
+              onEdgeContextMenu={handleEdgeContextMenu}
+              onPaneContextMenu={(e) => e.preventDefault()}
+              proOptions={{ hideAttribution: true }}
+            >
+              <TransformSync onTransform={onTransform} />
+              <Background gap={24} />
+              <Controls />
+              <MiniMap pannable zoomable />
+            </ReactFlow>
+            {canvasChildren}
+          </EdgeActionsContext.Provider>
+        </div>
         {infoNetwork && infoNode && (
           <NetworkInfo
             network={infoNetwork}
@@ -351,9 +359,8 @@ function TopologyCanvasInner({
             onClose={() => setNetworkInfoId(null)}
           />
         )}
-        </EdgeActionsContext.Provider>
         {children}
-      </ViewportContext.Provider>
-    </div>
+      </div>
+    </ViewportContext.Provider>
   );
 }

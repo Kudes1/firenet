@@ -11,6 +11,15 @@ afterEach(() => { server.resetHandlers(); sessionStorage.clear(); });
 afterAll(() => server.close());
 
 describe("SearchPage", () => {
+  it("renders the redesigned search table surface", async () => {
+    server.use(http.get("/api/versions/current/search-index", () => HttpResponse.json(fx.searchIndexFixture)));
+    renderPage(<SearchPage />, "/ui/search");
+
+    expect(await screen.findByRole("heading", { name: "Поиск" })).toBeInTheDocument();
+    expect(screen.getByTestId("data-table")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Тип" })).toBeInTheDocument();
+  });
+
   it("lists all entries with a type badge", async () => {
     server.use(http.get("/api/versions/current/search-index", () => HttpResponse.json(fx.searchIndexFixture)));
     renderPage(<SearchPage />, "/ui/search");

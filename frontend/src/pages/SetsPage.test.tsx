@@ -11,6 +11,17 @@ afterEach(() => { server.resetHandlers(); sessionStorage.clear(); });
 afterAll(() => server.close());
 
 describe("SetsPage", () => {
+  it("uses the shared redesigned data surface", async () => {
+    renderPage(<SetsPage />, "/ui/sets", "d1");
+    await screen.findByText("srv");
+
+    expect(screen.getByTestId("page-sets")).toHaveClass("sets-page");
+    expect(screen.getByRole("heading", { name: "Наборы", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Сбросить ширины колонок" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Изменить набор srv")).toBeInTheDocument();
+    expect(screen.getByLabelText("Удалить набор srv")).toBeInTheDocument();
+  });
+
   it("lists sets with addresses", async () => {
     renderPage(<SetsPage />, "/ui/sets", "d1");
     expect(await screen.findByText("srv")).toBeInTheDocument();

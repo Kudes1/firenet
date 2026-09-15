@@ -54,6 +54,26 @@ describe("ContextMenu", () => {
     expect(action).toHaveBeenCalledOnce();
   });
 
+  it("flips a submenu relative to the canvas shell when it reaches the right edge", () => {
+    render(
+      <div className="canvas-shell">
+        <ContextMenu
+          at={at}
+          items={[{ label: "Добавить в объединение", children: [leaf("u1", { action: () => {} })] }]}
+          onClose={() => {}}
+        />
+      </div>,
+    );
+    const shell = document.querySelector(".canvas-shell")!;
+    const submenu = document.querySelector(".submenu")!;
+    vi.spyOn(shell, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 400, 300));
+    vi.spyOn(submenu, "getBoundingClientRect").mockReturnValue(new DOMRect(350, 0, 100, 100));
+
+    fireEvent.mouseEnter(screen.getByTestId("ctx-sub-Добавить в объединение"));
+
+    expect(submenu).toHaveClass("submenu-left");
+  });
+
   it("closes on outside click", () => {
     const onClose = vi.fn();
     render(<div data-testid="outside"><ContextMenu at={at} items={[leaf("x", { action: () => {} })]} onClose={onClose} /></div>);

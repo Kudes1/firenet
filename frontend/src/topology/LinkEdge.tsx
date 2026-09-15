@@ -26,8 +26,37 @@ function edgePoints(from: { x: number; y: number }, to: { x: number; y: number }
   return [from, mid, to];
 }
 
-const toPath = (pts: Array<{ x: number; y: number }>) =>
-  pts.map((p, i) => `${i ? "L" : "M"} ${p.x} ${p.y}`).join(" ");
+const toPath = (pts: Array<{ x: number; y: number }>, rounded = false) => {
+  if (!pts.length) return "";
+  if (!rounded || pts.length < 3) return pts.map((p, i) => `${i ? "L" : "M"} ${p.x} ${p.y}`).join(" ");
+
+  const path = [`M ${pts[0].x} ${pts[0].y}`];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const point = pts[i], prev = pts[i - 1], next = pts[i + 1];
+    const prevLength = Math.hypot(point.x - prev.x, point.y - prev.y);
+    const nextLength = Math.hypot(next.x - point.x, next.y - point.y);
+    const radius = Math.min(8, prevLength / 2, nextLength / 2);
+    if (!radius) {
+      path.push(`L ${point.x} ${point.y}`);
+      continue;
+    }
+    const entry = {
+      x: point.x - ((point.x - prev.x) / prevLength) * radius,
+      y: point.y - ((point.y - prev.y) / prevLength) * radius,
+    };
+    const exit = {
+      x: point.x + ((next.x - point.x) / nextLength) * radius,
+      y: point.y + ((next.y - point.y) / nextLength) * radius,
+    };
+    path.push(`L ${entry.x} ${entry.y}`, `Q ${point.x} ${point.y} ${exit.x} ${exit.y}`);
+  }
+  const last = pts[pts.length - 1];
+  path.push(`L ${last.x} ${last.y}`);
+  return path.join(" ");
+};
+
+type Waypoint = { x: number; y: number };
+type OptimisticWaypoints = { points: Waypoint[]; source?: Waypoint[] };
 
 // Проекция p на сегмент ab — ближайшая точка линии (хит-тест двойного клика).
 function projectOnSegment(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) {
@@ -53,6 +82,14 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
   const actions = useEdgeActions();
   const { screenToFlowPosition } = useReactFlow();
   const editable = !!actions;
+  // Layout приходит через несколько React-обновлений: кэш меняется сразу,
+  // а scene/rfEdges — после подписки и effect. До этого держим отправленную
+  // геометрию поверх старых props, иначе после изменения путь возвращается.
+  const [optimistic, setOptimistic] = useState<OptimisticWaypoints | null>(null);
+  const liveWaypoints = optimistic?.points ?? waypoints ?? [];
+  useEffect(() => {
+    if (optimistic && waypoints !== optimistic.source) setOptimistic(null);
+  }, [optimistic, waypoints]);
 
   // Двойной клик по линии: ближайший сегмент полилинии (только реальные
   // waypoints — синтетическая средняя точка дуги в полилинию не входит),
@@ -62,9 +99,10 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
     if (!actions || !from || !to) return;
     event.stopPropagation();
     const flow = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    const existing = waypoints ?? [];
+    const existing = liveWaypoints;
     const without = existing.filter((w) => Math.hypot(w.x - flow.x, w.y - flow.y) > 8);
     if (without.length !== existing.length) {
+      setOptimistic({ points: without, source: waypoints });
       actions.changeWaypoints(id, without);
       return;
     }
@@ -78,12 +116,14 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
     if (best.at < 0) return;
     const next = [...existing];
     next.splice(best.at, 0, best.point);
+    setOptimistic({ points: next, source: waypoints });
     actions.changeWaypoints(id, next);
-  }, [actions, from, to, id, waypoints, screenToFlowPosition]);
+  }, [actions, from, to, id, liveWaypoints, waypoints, screenToFlowPosition]);
 
   // Drag точки изгиба: локальное смещение в стейте на время drag, фиксация
   // одним изменением на pointerup (не спамя очередь операций).
   const [drag, setDrag] = useState<{ index: number; at: { x: number; y: number } } | null>(null);
+
   useEffect(() => {
     if (!drag) return;
     const move = (event: PointerEvent) => {
@@ -92,8 +132,9 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
     };
     const up = (event: PointerEvent) => {
       const flow = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      const next = [...(waypoints ?? [])];
+      const next = [...liveWaypoints];
       next[drag.index] = flow;
+      setOptimistic({ points: next, source: waypoints });
       actions?.changeWaypoints(id, next);
       setDrag(null);
     };
@@ -103,7 +144,7 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [drag, waypoints, id, actions, screenToFlowPosition]);
+  }, [drag, liveWaypoints, waypoints, id, actions, screenToFlowPosition]);
 
   const startDrag = (index: number) => (event: React.PointerEvent) => {
     if (!actions) return;
@@ -112,11 +153,11 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
     // между pointerdown и первым pointermove отрисовывался бы в начале
     // координат: пользователь видел бы прыжок точки в левый верхний угол,
     // а dblclick по маркеру не дошёл бы до него (цель первого клика уехала).
-    setDrag({ index, at: (waypoints ?? [])[index] ?? { x: 0, y: 0 } });
+    setDrag({ index, at: liveWaypoints[index] ?? { x: 0, y: 0 } });
   };
 
-  const live = drag ? (waypoints ?? []).map((w, i) => (i === drag.index ? drag.at : w)) : waypoints;
-  const livePath = toPath(from && to ? edgePoints(from, to, offset, live) : []);
+  const live = drag ? liveWaypoints.map((w, i) => (i === drag.index ? drag.at : w)) : liveWaypoints;
+  const livePath = toPath(from && to ? edgePoints(from, to, offset, live) : [], live.length > 0);
   const edgeClass = [filtered ? "link-edge filtered" : "link-edge", diagnosticMark].filter(Boolean).join(" ");
 
   return (
@@ -149,7 +190,9 @@ export function LinkEdge({ id, data, selected, markerEnd }: EdgeProps) {
               pointerEvents="all"
               onDoubleClick={(event) => {
                 event.stopPropagation();
-                actions!.changeWaypoints(id, (waypoints ?? []).filter((_, j) => j !== i));
+                const next = liveWaypoints.filter((_, j) => j !== i);
+                setOptimistic({ points: next, source: waypoints });
+                actions!.changeWaypoints(id, next);
               }}
               onPointerDown={startDrag(i)}
             />

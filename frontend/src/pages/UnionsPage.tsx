@@ -66,10 +66,12 @@ export default function UnionsPage() {
   };
 
   const columns: Column<UnionDoc>[] = [
-    { key: "name", title: "Имя", render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
+    { key: "name", title: "Имя", width: "20%", minWidth: 150, render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
     {
       key: "devices",
       title: "Устройства",
+      width: "28%",
+      minWidth: 220,
       render: (r) => (r.devices?.length
         ? r.devices.map((d) => <span className="owner-badge" key={d}>{d}</span>)
         : <span className="hint">нет устройств</span>),
@@ -78,6 +80,8 @@ export default function UnionsPage() {
     {
       key: "networks",
       title: "Сети",
+      width: "22%",
+      minWidth: 180,
       render: (r) => (r.networks?.length
         ? r.networks.map((n) => <span className="owner-badge" key={n}>{n}</span>)
         : <span className="hint">нет сетей</span>),
@@ -86,30 +90,41 @@ export default function UnionsPage() {
     {
       key: "description",
       title: "Описание",
+      width: "20%",
+      minWidth: 180,
       render: (r) => r.description || "—",
       filter: (r, q) => containsFold(r.description, q),
     },
     {
       key: "actions",
       title: "",
+      width: "10%",
+      minWidth: 84,
       filterReset: true,
       render: (r) => (
-        <>
-          <button type="button" className="icon-btn edit" title={`Изменить объединение ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
-          <button type="button" className="icon-btn delete" title={`Удалить объединение ${r.name}`} onClick={() => remove(rows.indexOf(r))}><DeleteIcon /></button>
-        </>
+        <div className="union-actions">
+          <button type="button" className="icon-btn union-action edit" title={`Изменить объединение ${r.name}`} aria-label={`Изменить объединение ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
+          <button type="button" className="icon-btn union-action delete" title={`Удалить объединение ${r.name}`} aria-label={`Удалить объединение ${r.name}`} onClick={() => remove(rows.indexOf(r))}><DeleteIcon /></button>
+        </div>
       ),
     },
   ];
 
   return (
-    <main className="page" data-testid="page-unions">
+    <main className="page unions-page" data-testid="page-unions">
       <DataTable
         columns={columns}
         rows={rows}
         rowKey={(r) => r.name}
         empty="Объединений нет — создайте на схеме"
-        hint={<><h3>Объединения</h3><p className="hint">Визуальные группы устройств и сетей.</p></>}
+        resizable
+        storageKey="firenet:unions:column-widths"
+        hint={(
+          <div className="unions-heading">
+            <h1>Объединения</h1>
+            <p className="hint">Визуальные группы устройств и сетей.</p>
+          </div>
+        )}
         actions={<button type="button" className="primary" title="Добавить объединение" onClick={() => open(-1)}>+ Объединение</button>}
       />
       <Modal

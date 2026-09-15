@@ -11,11 +11,37 @@ afterEach(() => { server.resetHandlers(); sessionStorage.clear(); });
 afterAll(() => server.close());
 
 describe("DevicesPage", () => {
+  it("exposes the devices data surface and semantic device kinds", async () => {
+    renderPage(<DevicesPage />, "/ui/devices", "d1");
+
+    expect(await screen.findByTestId("page-devices")).toHaveClass("devices-page");
+    expect(await screen.findByRole("heading", { level: 1, name: "Устройства" })).toBeInTheDocument();
+    await screen.findByText("r1");
+    expect(screen.queryByText(/^Всего:/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("data-table")).toBeInTheDocument();
+    expect(screen.getByText("маршрутизатор")).toHaveClass("device-kind", "device-kind-router");
+    expect(screen.getByText("коммутатор")).toHaveClass("device-kind", "device-kind-switch");
+  });
+
   it("translates kinds to Russian", async () => {
     renderPage(<DevicesPage />, "/ui/devices", "d1");
     expect(await screen.findByText("r1")).toBeInTheDocument();
     expect(screen.getByText("маршрутизатор")).toBeInTheDocument();
     expect(screen.getByText("коммутатор")).toBeInTheDocument();
+  });
+
+  it("exposes resizable columns and a unified action group", async () => {
+    renderPage(<DevicesPage />, "/ui/devices", "d1");
+
+    await screen.findByText("r1");
+    expect(screen.getByRole("button", { name: "Сбросить ширины колонок" })).toBeInTheDocument();
+    const nameKindSeparator = screen.getByRole("separator", { name: /Имя.*Тип/ });
+    expect(nameKindSeparator).toHaveAttribute("aria-valuemin", "0");
+    expect(nameKindSeparator).toHaveAttribute("aria-valuemax", "100");
+    expect(nameKindSeparator).toHaveAttribute("aria-valuenow", "22");
+    expect(nameKindSeparator).toHaveAttribute("aria-valuetext", "22%");
+    expect(screen.getByTitle("Изменить устройство r1").parentElement).toHaveClass("device-actions");
+    expect(screen.getByTitle("Удалить устройство r1")).toHaveClass("device-action");
   });
 
   it("saves a rename as a single operation when the union is unchanged", async () => {

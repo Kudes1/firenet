@@ -14,15 +14,35 @@ type Props = {
   at?: { x: number; y: number };
 };
 
-// Плавающая панель редактирования на канве: absolute внутри .canvas-wrap
-// (рендерится children'ом TopologyCanvas, как ContextMenu). Привязана к
+type Point = { x: number; y: number };
+
+const PANEL_EDGE_GAP = 12;
+
+function clampAnchor(point: Point, panel: DOMRect, surface: DOMRect, tx: number, ty: number, zoom: number): Point {
+  if (surface.width <= 0 || surface.height <= 0) return point;
+  const minX = (PANEL_EDGE_GAP - tx) / zoom;
+  const minY = (PANEL_EDGE_GAP - ty) / zoom;
+  const maxX = Math.max(minX, (surface.width - panel.width - PANEL_EDGE_GAP - tx) / zoom);
+  const maxY = Math.max(minY, (surface.height - panel.height - PANEL_EDGE_GAP - ty) / zoom);
+  return {
+    x: Math.min(Math.max(point.x, minX), maxX),
+    y: Math.min(Math.max(point.y, minY), maxY),
+  };
+}
+
+function samePoint(a: Point | null, b: Point): boolean {
+  return a?.x === b.x && a.y === b.y;
+}
+
+// Плавающая панель редактирования на канве: absolute внутри canvas-shell
+// (рендерится overlay-слоем TopologyCanvas, как ContextMenu). Привязана к
 // координатам сцены: при движении камеры уезжает вместе с сеткой, размер
 // не масштабируется (панель всегда 1:1). Немодальная: фокуса не ловим,
 // канва остаётся доступной; Esc закрывает, если фокус не в текстовом поле
 // (Esc внутри Combo гасится им самим и закрывает только подсказки).
 export default function CanvasPanel({ title, onClose, children, wide, compact, testId, at }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ startX: number; startY: number; baseX: number; baseY: number; max: { x: number; y: number }; zoom: number } | null>(null);
+  const drag = useRef<{ startX: number; startY: number; baseX: number; baseY: number; tx: number; ty: number; zoom: number } | null>(null);
   const [tx, ty, zoom] = useContext(ViewportContext);
   // Якорь в координатах сцены. Позиция известна после измерения
   // (центрирование) — до этого панель скрыта.
@@ -30,31 +50,38 @@ export default function CanvasPanel({ title, onClose, children, wide, compact, t
 
   useLayoutEffect(() => {
     if (at || !ref.current) return;
-    const canvas = ref.current.closest(".canvas-wrap")!.getBoundingClientRect();
+    const surface = ref.current.closest(".canvas-shell, .canvas-wrap");
+    if (!surface) return;
+    const canvas = surface.getBoundingClientRect();
     const r = ref.current.getBoundingClientRect();
     // Центр канвы в экранных координатах переводим в координаты сцены:
     // anchor = (screen - transform) / zoom.
-    setAnchor({
+    const centered = {
       x: (canvas.width - r.width) / 2 / zoom - tx / zoom,
       y: (canvas.height - r.height) / 2 / zoom - ty / zoom,
-    });
+    };
+    setAnchor(clampAnchor(centered, r, canvas, tx, ty, zoom));
     // Центрируем один раз при открытии; дальше панель двигают вручную.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useLayoutEffect(() => {
-    if (!compact || !at || !ref.current) return;
-    const canvas = ref.current.closest(".canvas-wrap")!.getBoundingClientRect();
-    const panel = ref.current.getBoundingClientRect();
-    const minX = -tx / zoom;
-    const minY = -ty / zoom;
-    const maxX = Math.max(minX, (canvas.width - panel.width - tx) / zoom);
-    const maxY = Math.max(minY, (canvas.height - panel.height - ty) / zoom);
-    setAnchor({
-      x: Math.min(Math.max(at.x, minX), maxX),
-      y: Math.min(Math.max(at.y, minY), maxY),
-    });
-  }, [at, compact, tx, ty, zoom]);
+    if (!at || !ref.current) return;
+    const surface = ref.current.closest(".canvas-shell, .canvas-wrap");
+    if (!surface) return;
+    const canvas = surface.getBoundingClientRect();
+    const next = clampAnchor(at, ref.current.getBoundingClientRect(), canvas, tx, ty, zoom);
+    setAnchor((current) => samePoint(current, next) ? current : next);
+  }, [at?.x, at?.y, tx, ty, zoom]);
+
+  useLayoutEffect(() => {
+    if (!ref.current || !anchor || at) return;
+    const surface = ref.current.closest(".canvas-shell, .canvas-wrap");
+    if (!surface) return;
+    const canvas = surface.getBoundingClientRect();
+    const next = clampAnchor(anchor, ref.current.getBoundingClientRect(), canvas, tx, ty, zoom);
+    setAnchor((current) => samePoint(current, next) ? current : next);
+  }, [anchor, at, tx, ty, zoom]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -69,15 +96,8 @@ export default function CanvasPanel({ title, onClose, children, wide, compact, t
 
   const onHeaderMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0 || !ref.current || !anchor) return;
-    const canvas = ref.current.closest(".canvas-wrap")!.getBoundingClientRect();
-    const r = ref.current.getBoundingClientRect();
     drag.current = {
-      startX: e.clientX, startY: e.clientY, baseX: anchor.x, baseY: anchor.y, zoom,
-      // Зажим ручного драга — в экранной системе канвы.
-      max: {
-        x: anchor.x + (canvas.width - r.width - (anchor.x * zoom + tx)) / zoom,
-        y: anchor.y + (canvas.height - r.height - (anchor.y * zoom + ty)) / zoom,
-      },
+      startX: e.clientX, startY: e.clientY, baseX: anchor.x, baseY: anchor.y, tx, ty, zoom,
     };
   };
 
@@ -85,9 +105,13 @@ export default function CanvasPanel({ title, onClose, children, wide, compact, t
     const move = (e: MouseEvent) => {
       const d = drag.current;
       if (!d) return;
-      const x = Math.min(Math.max(d.baseX + (e.clientX - d.startX) / d.zoom, 0), d.max.x);
-      const y = Math.min(Math.max(d.baseY + (e.clientY - d.startY) / d.zoom, 0), d.max.y);
-      setAnchor({ x, y });
+      const next = {
+        x: d.baseX + (e.clientX - d.startX) / d.zoom,
+        y: d.baseY + (e.clientY - d.startY) / d.zoom,
+      };
+      const surface = ref.current?.closest(".canvas-shell, .canvas-wrap");
+      if (!surface || !ref.current) return;
+      setAnchor(clampAnchor(next, ref.current.getBoundingClientRect(), surface.getBoundingClientRect(), d.tx, d.ty, d.zoom));
     };
     const up = () => { drag.current = null; };
     window.addEventListener("mousemove", move);

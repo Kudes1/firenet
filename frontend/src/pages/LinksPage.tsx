@@ -59,52 +59,77 @@ export default function LinksPage() {
     {
       key: "pair",
       title: "Устройства",
+      width: "26%",
+      minWidth: 220,
       render: (r) => `${r.a} ↔ ${r.b}`,
       filter: (r, q) => containsFold(r.a, q) || containsFold(r.b, q),
     },
     {
       key: "mode",
       title: "Режим",
-      render: (r) => (r.filter ? <span className="owner-badge">фильтрованная</span> : <span className="hint">обычная</span>),
+      width: "17%",
+      minWidth: 145,
+      render: (r) => (
+        <span className={`link-mode ${r.filter ? "link-mode-filtered" : "link-mode-plain"}`}>
+          {r.filter ? "фильтрованная" : "обычная"}
+        </span>
+      ),
       filter: (r, q) => containsFold(r.filter ? "фильтрованная" : "обычная", q),
     },
     {
       key: "aExports",
       title: "Экспорт →",
+      width: "20%",
+      minWidth: 170,
       render: (r) => badges(r.filter?.aExports),
       filter: (r, q) => matchSubnetMembers(r.filter?.aExports, cidrOf, q),
     },
     {
       key: "bExports",
       title: "← Экспорт",
+      width: "20%",
+      minWidth: 170,
       render: (r) => badges(r.filter?.bExports),
       filter: (r, q) => matchSubnetMembers(r.filter?.bExports, cidrOf, q),
     },
     {
       key: "actions",
       title: "",
+      width: "17%",
+      minWidth: 140,
       filterReset: true,
-      render: (r) => (r.filter ? (
-        <>
-          <button type="button" className="icon-btn edit" title={`Изменить фильтр связи ${r.a} ↔ ${r.b}`} onClick={() => open(r.index)}><EditIcon /></button>
-          <button type="button" className="btn-link" title={`Вернуть обычную связь ${r.a} ↔ ${r.b}`} onClick={() => setFilter(r, undefined)}>Обычная</button>
-        </>
-      ) : (
-        <button type="button" className="btn-link" title={`Сделать фильтрованной связь ${r.a} ↔ ${r.b}`} onClick={() => setFilter(r, { aExports: [], bExports: [] })}>Фильтровать</button>
-      )),
+      render: (r) => (
+        <div className="link-actions">
+          {r.filter ? (
+            <>
+              <button type="button" className="icon-btn link-action edit" title={`Изменить фильтр связи ${r.a} ↔ ${r.b}`} aria-label={`Изменить фильтр связи ${r.a} ↔ ${r.b}`} onClick={() => open(r.index)}><EditIcon /></button>
+              <button type="button" className="btn-link link-toggle" title={`Вернуть обычную связь ${r.a} ↔ ${r.b}`} onClick={() => setFilter(r, undefined)}>Обычная</button>
+            </>
+          ) : (
+            <button type="button" className="btn-link link-toggle" title={`Сделать фильтрованной связь ${r.a} ↔ ${r.b}`} onClick={() => setFilter(r, { aExports: [], bExports: [] })}>Фильтровать</button>
+          )}
+        </div>
+      ),
     },
   ];
 
   const link = editing === null ? null : links[editing];
 
   return (
-    <main className="page" data-testid="page-links">
+    <main className="page links-page" data-testid="page-links">
       <DataTable
         columns={columns}
         rows={rows}
         rowKey={(r) => r.key}
         empty="Связей нет — создайте их на схеме"
-        hint={<><h3>Связи</h3><p className="hint">Логические соединения между устройствами и их фильтры.</p></>}
+        resizable
+        storageKey="firenet:links:column-widths"
+        hint={(
+          <div className="links-heading">
+            <h1>Связи</h1>
+            <p className="hint">Логические соединения между устройствами и их фильтры.</p>
+          </div>
+        )}
       />
       <Modal
         open={!!link}

@@ -99,7 +99,7 @@ export default function Sidebar() {
         aria-expanded={!collapsed}
         aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
       >
-        <CollapseIcon />
+        <CollapseIcon collapsed={collapsed} />
       </button>
       <div className="user-box">
         <span className="user-name">{me?.username ?? ""}</span>

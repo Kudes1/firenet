@@ -91,6 +91,24 @@ describe("TopologyCanvas", () => {
     expect(document.querySelector(".react-flow__attribution")).toBeNull();
   });
 
+  it("renders overlays outside the clipped canvas surface", () => {
+    render(
+      <TopologyCanvas
+        topology={topology}
+        layout={layout}
+        editable={false}
+        canvasChildren={<div data-testid="canvas-content-child" />}
+      >
+        <div data-testid="canvas-overlay-child" />
+      </TopologyCanvas>,
+    );
+    const canvasChild = screen.getByTestId("canvas-content-child");
+    const shellChild = screen.getByTestId("canvas-overlay-child");
+    expect(canvasChild.closest(".canvas-wrap")).not.toBeNull();
+    expect(shellChild.parentElement).toHaveClass("canvas-shell");
+    expect(shellChild.closest(".canvas-wrap")).toBeNull();
+  });
+
   it("creates a node on pane click only, not on node click", async () => {
     const onPaneClick = vi.fn();
     render(<TopologyCanvas topology={topology} layout={layout} editable onPaneClick={onPaneClick} />);
@@ -109,9 +127,8 @@ describe("TopologyCanvas", () => {
     expect(onDelete).toHaveBeenCalledWith(["device:r1"]);
   });
 
-  // Панели редактирования рендерятся внутри .canvas-wrap: Delete, нажатый
-  // в инпуте панели (или любом другом поле), не должен удалять выбранные
-  // узлы канвы.
+  // Панели редактирования рендерятся в overlay-слое: Delete, нажатый в
+  // инпуте панели (или любом другом поле), не должен удалять узлы канвы.
   it("ignores Delete from panel inputs and other form fields", async () => {
     const onDelete = vi.fn();
     render(<TopologyCanvas topology={topology} layout={layout} editable onDelete={onDelete} />);
@@ -322,7 +339,7 @@ describe("TopologyCanvas", () => {
   });
 
   // ПКМ по узлу/ребру отдаёт странице id объекта и координаты в системе
-  // канвы: меню позиционируется absolute внутри .canvas-wrap, поэтому
+  // канвы: меню позиционируется absolute внутри canvas-shell, поэтому
   // viewport-ные clientX/clientY нужно пересчитать (offset канвы вычитается).
   it("reports node and edge context menu with canvas-relative position", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {

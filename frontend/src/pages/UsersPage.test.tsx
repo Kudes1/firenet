@@ -36,6 +36,21 @@ describe("UsersPage", () => {
     expect(screen.getByText("Активен")).toBeInTheDocument();
   });
 
+  it("uses the shared users table shell and column search", async () => {
+    server.use(
+      http.get("/api/users", () => HttpResponse.json(USERS)),
+      http.get("/api/me", () => HttpResponse.json(fx.userFixture)),
+    );
+    const { user } = renderPage(<UsersPage />, "/ui/users");
+
+    expect(await screen.findByRole("heading", { name: "Пользователи" })).toBeInTheDocument();
+    expect(screen.getByTestId("page-users")).toHaveClass("users-page");
+    await user.click(screen.getByRole("button", { name: "Открыть поиск" }));
+    await user.type(screen.getByPlaceholderText("Логин"), "bob");
+    expect(screen.queryByText("admin", { selector: "td" })).toBeNull();
+    expect(screen.getByText("bob")).toBeInTheDocument();
+  });
+
   it("creates a user and shows the invite link", async () => {
     server.use(
       http.get("/api/users", () => HttpResponse.json([])),

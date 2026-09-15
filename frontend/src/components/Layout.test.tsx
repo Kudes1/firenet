@@ -116,6 +116,22 @@ describe("Layout", () => {
     );
   });
 
+  it("clips horizontal overflow from the scrolling sidebar navigation", () => {
+    const style = document.createElement("style");
+    style.textContent = styles;
+    document.head.append(style);
+
+    try {
+      renderLayout();
+      const nav = document.querySelector("nav.side-nav") as HTMLElement;
+      const computed = getComputedStyle(nav);
+      expect(computed.overflowY).toBe("auto");
+      expect(computed.overflowX).toBe("hidden");
+    } finally {
+      style.remove();
+    }
+  });
+
   it("keeps closed navigation groups represented by an operable control", async () => {
     expect(styles).not.toMatch(
       /\.sidebar(?:\.collapsed)? \.nav-group-header\s*\{\s*display:\s*none\s*;\s*\}/,
@@ -134,6 +150,30 @@ describe("Layout", () => {
 });
 
 describe("Sidebar collapse and theme", () => {
+  it("points the collapse control toward the next sidebar state", async () => {
+    renderLayout();
+    const button = screen.getByRole("button", { name: "Свернуть меню" });
+
+    expect(button.querySelector("path")).toHaveAttribute("d", "M15 6l-6 6 6 6");
+
+    await userEvent.click(button);
+    expect(button.querySelector("path")).toHaveAttribute("d", "M9 6l6 6-6 6");
+  });
+
+  it("centers the short brand in a collapsed sidebar", () => {
+    const style = document.createElement("style");
+    style.textContent = styles;
+    document.head.append(style);
+
+    try {
+      localStorage.setItem("ui.sidebar", "collapsed");
+      renderLayout();
+      expect(getComputedStyle(document.querySelector(".brand") as HTMLElement).textAlign).toBe("center");
+    } finally {
+      style.remove();
+    }
+  });
+
   it("collapses via toggle, persists and toggles aria state", async () => {
     renderLayout();
     const btn = screen.getByRole("button", { name: "Свернуть меню" });

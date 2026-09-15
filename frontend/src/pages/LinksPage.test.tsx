@@ -11,6 +11,15 @@ afterEach(() => { server.resetHandlers(); sessionStorage.clear(); });
 afterAll(() => server.close());
 
 describe("LinksPage", () => {
+  it("shows the redesigned heading, status styling, and table controls", async () => {
+    renderPage(<LinksPage />, "/ui/links", "d1");
+
+    expect(await screen.findByRole("heading", { name: "Связи", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("Логические соединения между устройствами и их фильтры.")).toBeInTheDocument();
+    expect(await screen.findByText("обычная")).toHaveClass("link-mode", "link-mode-plain");
+    expect(screen.getByRole("button", { name: "Сбросить ширины колонок" })).toBeInTheDocument();
+  });
+
   it("shows the endpoint pair and the mode", async () => {
     renderPage(<LinksPage />, "/ui/links", "d1");
     expect(await screen.findByText("r1 ↔ sw1")).toBeInTheDocument();

@@ -86,10 +86,12 @@ export default function SetsPage() {
   };
 
   const columns: Column<SetDoc>[] = [
-    { key: "name", title: "Имя", render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
+    { key: "name", title: "Имя", width: "20%", minWidth: 150, render: (r) => r.name, filter: (r, q) => containsFold(r.name, q) },
     {
       key: "subnets",
       title: "Подсети",
+      width: "24%",
+      minWidth: 190,
       render: (r) => (r.subnets?.length
         ? r.subnets.map((s) => <span className="owner-badge" key={s}>{s}</span>)
         : <span className="hint">нет подсетей</span>),
@@ -98,6 +100,8 @@ export default function SetsPage() {
     {
       key: "addresses",
       title: "Адреса",
+      width: "28%",
+      minWidth: 220,
       render: (r) => (r.addresses?.length
         ? r.addresses.map((a) => <span className="owner-badge" key={a}>{a}</span>)
         : <span className="hint">нет адресов</span>),
@@ -106,30 +110,41 @@ export default function SetsPage() {
     {
       key: "description",
       title: "Описание",
+      width: "16%",
+      minWidth: 150,
       render: (r) => r.description || "—",
       filter: (r, q) => containsFold(r.description, q),
     },
     {
       key: "actions",
       title: "",
+      width: "12%",
+      minWidth: 84,
       filterReset: true,
       render: (r) => (
-        <>
-          <button type="button" className="icon-btn edit" title={`Изменить набор ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
-          <button type="button" className="icon-btn delete" title={`Удалить набор ${r.name}`} onClick={() => remove(rows.indexOf(r))}><DeleteIcon /></button>
-        </>
+        <div className="set-actions">
+          <button type="button" className="icon-btn set-action edit" title={`Изменить набор ${r.name}`} aria-label={`Изменить набор ${r.name}`} onClick={() => open(rows.indexOf(r))}><EditIcon /></button>
+          <button type="button" className="icon-btn set-action delete" title={`Удалить набор ${r.name}`} aria-label={`Удалить набор ${r.name}`} onClick={() => remove(rows.indexOf(r))}><DeleteIcon /></button>
+        </div>
       ),
     },
   ];
 
   return (
-    <main className="page" data-testid="page-sets">
+    <main className="page sets-page" data-testid="page-sets">
       <DataTable
         columns={columns}
         rows={rows}
         rowKey={(r) => r.name}
         empty="Наборов нет — добавьте первый"
-        hint={<><h3>Наборы</h3><p className="hint">Именованные группы адресов для правил.</p></>}
+        resizable
+        storageKey="firenet:sets:column-widths"
+        hint={(
+          <div className="sets-heading">
+            <h1>Наборы</h1>
+            <p className="hint">Именованные группы адресов для правил.</p>
+          </div>
+        )}
         actions={<button type="button" className="primary" title="Добавить набор" onClick={() => open(-1)}>+ Набор</button>}
       />
       <Modal

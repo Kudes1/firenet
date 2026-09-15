@@ -24,14 +24,14 @@ function Submenu({ item, onClose }: { item: MenuItem; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const subRef = useRef<HTMLDivElement>(null);
 
-  // Не хватило места справа до края .canvas-wrap — переоткрываем влево
+  // Не хватило места справа до края canvas-shell — переоткрываем влево
   // (легаси flipIfClipped): mouseenter стреляет после применения :hover,
   // поэтому размеры уже актуальны.
   const flipIfClipped = () => {
     const sub = subRef.current;
     if (!sub) return;
     sub.classList.remove("submenu-left");
-    const bound = sub.closest(".canvas-wrap")?.getBoundingClientRect();
+    const bound = sub.closest(".canvas-shell, .canvas-wrap")?.getBoundingClientRect();
     if (bound && sub.getBoundingClientRect().right > bound.right) {
       sub.classList.add("submenu-left");
     }

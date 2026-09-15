@@ -124,8 +124,11 @@ describe("Modal", () => {
     );
   });
 
-  it("keeps modal content close to the body's scrollbar", () => {
+  it("uses equal horizontal padding for modal content", () => {
     expect(styles).toMatch(
+      /dialog\.modal \.modal-body \{[^}]*padding:\s*var\(--space-3\)\s+var\(--space-4\);/,
+    );
+    expect(styles).not.toMatch(
       /dialog\.modal \.modal-body \{[^}]*padding-right:\s*var\(--space-2\);/,
     );
   });

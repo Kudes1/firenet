@@ -11,7 +11,7 @@
 // где Go собирает его как `var x []T` + append, и не nullable там, где
 // гарантирован make/литерал. Правило проверено запуском encoding/json.
 // Nullable (var + append):
-//  - ValidateResponse.errors — handlers.go:542, на валидном проекте
+//  - ValidateResponse.errors — handlers.go/validateDoc, на валидном проекте
 //    {"valid":true,"errors":null};
 //  - LintResponse.findings — lint.go:40, на чистом линте {"findings":null};
 //  - TopologyDoc.* / SubnetsDoc.subnets / PolicyDoc.chains —
@@ -21,7 +21,7 @@
 //    всегда реконструируется из БД; см. комментарий к типу про PUT;
 //  - DiagnoseReport.paths — diagnose.go:105 литерал []PathResult{};
 //  - MapMark.* — mapmark.go:38-45 инициализирует все семь полей;
-//  - LinkExportsResponse.entities — handlers.go:360 make(..., 0, len).
+//  - LinkExportsResponse.entities — handlers.go/writeLinkExports make(..., 0, len).
 // Плюс указатели: DiagnoseReport.mapMark, SpreadResult.mark (*MapMark) и
 // SpreadResult.reports[].report (*Report) — nullable, приходят как null.
 
@@ -264,7 +264,7 @@ export type SpreadResult = {
 
 export type LinkExportsResponse = { entities: EntityDoc[] };
 // errors/findings — nil-слайсы при пустом результате: {"errors":null} при
-// валидном проекте (handlers.go:542, 561) и {"findings":null} при чистом
+// валидном проекте (handlers.go/validateDoc) и {"findings":null} при чистом
 // линте (lint.go:40). Ловить .length без проверки на null нельзя.
 export type LintResponse = { findings: LintFinding[] | null };
 export type ValidateResponse = { valid: boolean; errors: string[] | null };

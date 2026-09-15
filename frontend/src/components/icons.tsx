@@ -114,6 +114,12 @@ export const ResetIcon = () => (
   </svg>
 );
 
+export const ColumnWidthIcon = () => (
+  <svg {...toolOpen} className="column-width-icon" strokeWidth={1.7}>
+    <path d="M4 3v18M20 3v18M7 12h10M7 12l2-2M7 12l2 2M17 12l-2-2M17 12l-2 2" />
+  </svg>
+);
+
 export const SunIcon = () => (
   <svg {...toolOpen}>
     <circle cx="12" cy="12" r="4" />
@@ -127,9 +133,9 @@ export const MoonIcon = () => (
   </svg>
 );
 
-export const CollapseIcon = () => (
+export const CollapseIcon = ({ collapsed = false }: { collapsed?: boolean }) => (
   <svg {...toolOpen}>
-    <path d="M15 6l-6 6 6 6" />
+    <path d={collapsed ? "M9 6l6 6-6 6" : "M15 6l-6 6 6 6"} />
   </svg>
 );
 
