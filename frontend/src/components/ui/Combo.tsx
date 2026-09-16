@@ -55,7 +55,7 @@ export default function Combo({ items, placeholder, onPick }: Props) {
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (inputRef.current?.contains(t)) return;
-      if ((e.target as HTMLElement).closest?.(".member-suggestions")) return;
+      if ((e.target as HTMLElement).closest?.(".member-combo-toggle, .member-suggestions")) return;
       setOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -71,9 +71,13 @@ export default function Combo({ items, placeholder, onPick }: Props) {
         value={search}
         placeholder={placeholder ?? "начните вводить для поиска"}
         onChange={(e) => { setSearch(e.target.value); setOpen(true); setCursor(0); }}
-        onFocus={() => { measure(); setOpen(true); }}
+        // Список открывает только явное намерение: клик по полю или
+        // стрелка вниз. Фокус от label (клик по «Подсети») список
+        // не открывает — пробрасывать фокус в поле можно без побочек.
+        onPointerDown={() => setOpen(true)}
+        onFocus={measure}
         onKeyDown={(e) => {
-          if (e.key === "ArrowDown") { e.preventDefault(); setCursor(Math.min(cursor + 1, filtered.length - 1)); }
+          if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setCursor(Math.min(cursor + 1, filtered.length - 1)); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setCursor(Math.max(cursor - 1, 0)); }
           else if (e.key === "Enter") { e.preventDefault(); if (filtered[cursor]) pick(filtered[cursor]); }
           else if (e.key === "Escape") setOpen(false);

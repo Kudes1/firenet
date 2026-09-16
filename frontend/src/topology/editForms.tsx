@@ -9,8 +9,7 @@ import MemberList from "../components/ui/MemberList";
 import { notify } from "../components/notify";
 
 // Формы редактирования без оболочки Modal: страницы-таблицы и канва
-// оборачивают их в свой Modal и подставляют свой способ сохранения
-// (страницы — mutateAsync, канва — очередь useTopologyEditor).
+// оборачивают их в свой Modal и передают операции в useTopologyEditor.
 
 type SubmitProps = {
   onSubmit: (operations: TopologyOperation[]) => void;
@@ -120,7 +119,8 @@ export function NetworkEditForm({
         Описание
         <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
       </label>
-      <label>
+      {/* div, а не label: label пересылает клик по строке участника кнопке «×». */}
+      <div className="modal-field">
         Подсети
         <MemberList
           members={subnets}
@@ -131,7 +131,7 @@ export function NetworkEditForm({
           onAdd={(raw) => setSubnets([...subnets, raw.split(" (")[0]])}
           empty="Подсети не добавлены"
         />
-      </label>
+      </div>
       {hint && <p className="cell-hint">{hint}</p>}
       <div className="modal-actions">
         <button type="button" onClick={onCancel}>Отмена</button>
@@ -152,8 +152,12 @@ export function LinkFilterForm({
   // Экспорты хранятся по сторонам A/B документа; канонический порядок может
   // их переставлять — переносим вместе с концами (1:1 со LinksPage.rows).
   const swapped = x !== a.device;
-  const [aExports, setAExports] = useState<string[]>(link.filter?.aExports ?? []);
-  const [bExports, setBExports] = useState<string[]>(link.filter?.bExports ?? []);
+  const [aExports, setAExports] = useState<string[]>(
+    (swapped ? link.filter?.bExports : link.filter?.aExports) ?? [],
+  );
+  const [bExports, setBExports] = useState<string[]>(
+    (swapped ? link.filter?.aExports : link.filter?.bExports) ?? [],
+  );
   const [exports, setExports] = useState<{ a: EntityDoc[]; b: EntityDoc[] }>({ a: [], b: [] });
   const { apiPath } = useDraft();
 
@@ -202,7 +206,7 @@ export function LinkFilterForm({
                   const next = side.mine.filter((v) => v !== name);
                   void persist(side.key === "a" ? next : aExports, side.key === "b" ? next : bExports);
                 }}
-                candidates={side.candidates.map((e) => `${e.name} (${e.cidr ?? ""})`)}
+                candidates={side.candidates.map((e) => (e.cidr ? `${e.name} (${e.cidr})` : e.name))}
                 onAdd={(raw) => {
                   const name = raw.split(" (")[0];
                   if (side.mine.includes(name)) return;

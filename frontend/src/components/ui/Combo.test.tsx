@@ -126,4 +126,83 @@ describe("Combo", () => {
     await user.click(document.body);
     expect(screen.queryByRole("button", { name: "lan" })).toBeNull();
   });
+
+  it("reopens the list when clicking the input after an outside click closed it", async () => {
+    const user = userEvent.setup();
+    render(<Combo items={["lan"]} onPick={vi.fn()} />);
+    await user.click(screen.getByRole("textbox"));
+    expect(screen.getByRole("button", { name: "lan" })).toBeInTheDocument();
+    await user.click(document.body);
+    expect(screen.queryByRole("button", { name: "lan" })).toBeNull();
+    // В браузере клик вне поля блюрит инпут; в jsdom фокус остаётся.
+    screen.getByRole("textbox").blur();
+    await user.click(screen.getByRole("textbox"));
+    expect(screen.getByRole("button", { name: "lan" })).toBeInTheDocument();
+  });
+
+  it("reopens the list when clicking the already-focused input", async () => {
+    const user = userEvent.setup();
+    render(
+      <label>
+        Подсети
+        <Combo items={["lan"]} onPick={vi.fn()} />
+      </label>,
+    );
+    await user.click(screen.getByRole("textbox"));
+    // Клик по лейблу закрывает список и возвращает фокус в инпут.
+    await user.click(screen.getByText("Подсети"));
+    expect(screen.queryByRole("button", { name: "lan" })).toBeNull();
+    // Инпут уже в фокусе — focus не сработает, но клик по полю должен
+    // снова открыть список.
+    await user.click(screen.getByRole("textbox"));
+    expect(screen.getByRole("button", { name: "lan" })).toBeInTheDocument();
+  });
+
+  it("stays closed when clicking the wrapping label re-focuses the input", async () => {
+    const user = userEvent.setup();
+    render(
+      <label>
+        Подсети
+        <Combo items={["lan"]} onPick={vi.fn()} />
+      </label>,
+    );
+    await user.click(screen.getByRole("textbox"));
+    expect(screen.getByRole("button", { name: "lan" })).toBeInTheDocument();
+    // Клик по тексту лейбла: браузер гасит список по pointerdown, но
+    // пробрасывает клик на инпут — фокус не должен переоткрыть список.
+    await user.click(screen.getByText("Подсети"));
+    expect(screen.queryByRole("button", { name: "lan" })).toBeNull();
+  });
+
+  it("does not open the list when clicking the wrapping label from a closed state", async () => {
+    const user = userEvent.setup();
+    render(
+      <label>
+        Подсети
+        <Combo items={["lan"]} onPick={vi.fn()} />
+      </label>,
+    );
+    // Клик по тексту лейбла фокусирует инпут, но список открыть не должен.
+    await user.click(screen.getByText("Подсети"));
+    expect(screen.queryByRole("button", { name: "lan" })).toBeNull();
+  });
+
+  it("opens the list with ArrowDown after keyboard focus", async () => {
+    const user = userEvent.setup();
+    render(<Combo items={["lan"]} onPick={vi.fn()} />);
+    await user.tab();
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "lan" })).toBeNull();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("button", { name: "lan" })).toBeInTheDocument();
+  });
+
+  it("closes the list via the toggle button", async () => {
+    const user = userEvent.setup();
+    render(<Combo items={["lan"]} onPick={vi.fn()} />);
+    await user.click(screen.getByRole("textbox"));
+    expect(screen.getByRole("button", { name: "lan" })).toBeInTheDocument();
+    await user.click(document.querySelector(".member-combo-toggle")!);
+    expect(screen.queryByRole("button", { name: "lan" })).toBeNull();
+  });
 });

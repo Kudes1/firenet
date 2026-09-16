@@ -61,6 +61,16 @@ describe("contextMenuItems", () => {
     expect(items.map((i) => i.label)).toEqual(["Редактировать фильтр", "Удалить связь r1–sw1"]);
   });
 
+  it("disables filter editing for a link whose creation is pending", () => {
+    const items = contextMenuItems({
+      doc, target: { kind: "link", id: "link:r1|sw1#0", a: "r1", b: "sw1", filtered: false }, editable: true,
+      isLinkPending: () => true,
+      actions: {} as never,
+    });
+    expect(items[0].action).toBeUndefined();
+    expect(items[1].action).toBeDefined();
+  });
+
   it("disables everything in read-only mode", () => {
     const items = contextMenuItems({
       doc, target: { kind: "node", id: "device:r1" }, editable: false,

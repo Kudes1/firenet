@@ -21,6 +21,8 @@ type Input = {
   doc: TopologyDoc;
   target: CanvasTarget;
   editable: boolean;
+  // Фильтры требуют, чтобы связь уже существовала на сервере.
+  isLinkPending?: (a: string, b: string) => boolean;
   // RF-выделение на момент ПКМ: если курсор на одном из выбранных узлов,
   // операции объединения применяются ко всем (паритет с легаси).
   selection?: string[];
@@ -32,12 +34,15 @@ type NamedNode = { name: string; kind: "device" | "network" };
 // menuItemsFor легаси: редактирование, объединения (с учётом мультивыбора),
 // удаление по идентичности — kind/name фиксируются строками при построении
 // меню, а не ссылками на живой документ.
-export function contextMenuItems({ doc, target, editable, selection = [], actions }: Input): MenuItem[] {
+export function contextMenuItems({ doc, target, editable, isLinkPending, selection = [], actions }: Input): MenuItem[] {
   if (target.kind === "link") {
     const { a, b } = target;
     const [x, y] = canonicalLink(a, b);
     return [
-      { label: target.filtered ? "Редактировать фильтр" : "Фильтровать", action: editable ? () => actions.editLinkFilter(a, b) : undefined },
+      {
+        label: target.filtered ? "Редактировать фильтр" : "Фильтровать",
+        action: editable && !isLinkPending?.(a, b) ? () => actions.editLinkFilter(a, b) : undefined,
+      },
       { label: `Удалить связь ${x}–${y}`, danger: true, action: editable ? () => actions.deleteLink(a, b) : undefined },
     ];
   }
@@ -55,8 +60,9 @@ export function contextMenuItems({ doc, target, editable, selection = [], action
 
   // Мультивыбор: курсор на выбранном узле → операции объединения для всех
   // выбранных узлов (связи/привязки в объединения не входят — отбрасываются).
-  const selectedNodes = selection.includes(target.id) && selection.length > 1
-    ? selection
+  const selectedNodeIds = selection.filter((id) => id.startsWith("device:") || id.startsWith("network:"));
+  const selectedNodes = selectedNodeIds.includes(target.id) && selectedNodeIds.length > 1
+    ? selectedNodeIds
       .map((id): NamedNode | null => (id.startsWith("device:") || id.startsWith("network:")
         ? { name: id.slice(id.indexOf(":") + 1), kind: id.startsWith("device:") ? "device" : "network" }
         : null))

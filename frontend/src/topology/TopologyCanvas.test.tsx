@@ -127,6 +127,15 @@ describe("TopologyCanvas", () => {
     expect(onDelete).toHaveBeenCalledWith(["device:r1"]);
   });
 
+  it("reports the selected edge id on Delete", async () => {
+    const onDelete = vi.fn();
+    render(<TopologyCanvas topology={topology} layout={layout} editable onDelete={onDelete} />);
+    const edge = await screen.findByTestId("link:r1|sw1#0");
+    fireEvent.click(edge);
+    fireEvent.keyDown(screen.getByTestId("topo-canvas"), { key: "Delete" });
+    expect(onDelete).toHaveBeenCalledWith(["link:r1|sw1#0"]);
+  });
+
   // Панели редактирования рендерятся в overlay-слое: Delete, нажатый в
   // инпуте панели (или любом другом поле), не должен удалять узлы канвы.
   it("ignores Delete from panel inputs and other form fields", async () => {

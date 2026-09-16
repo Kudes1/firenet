@@ -169,7 +169,8 @@ export default function SetsPage() {
               Описание
               <textarea rows={3} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
             </label>
-            <label>
+            {/* div, а не label: label пересылает клик по строке участника кнопке «×». */}
+            <div className="modal-field">
               Подсети
               <MemberList
                 members={editing.subnets}
@@ -179,8 +180,8 @@ export default function SetsPage() {
                 onAdd={(raw) => setEditing({ ...editing, subnets: [...editing.subnets, raw.split(" (")[0]] })}
                 empty="Подсети не добавлены"
               />
-            </label>
-            <label>
+            </div>
+            <div className="modal-field">
               Адреса
               <MemberList
                 members={editing.addresses}
@@ -197,7 +198,7 @@ export default function SetsPage() {
                 <button type="button" title="Добавить адрес" onClick={addAddress}>+</button>
               </div>
               {(addressError || hint) && <p className="cell-hint">{addressError || hint}</p>}
-            </label>
+            </div>
           </div>
         )}
       </Modal>

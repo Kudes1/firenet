@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useProjectResource, useProjectSave } from "../api/queries";
+import { useProjectResource } from "../api/queries";
 import type { LinkDoc, SubnetsDoc, TopologyDoc } from "../api/types";
 import { useDraft } from "../draft/DraftContext";
 import { containsFold, matchSubnetMembers } from "../lib/search";
@@ -8,6 +8,7 @@ import DataTable, { type Column } from "../components/ui/DataTable";
 import Modal from "../components/ui/Modal";
 import { notify } from "../components/notify";
 import { LinkFilterForm } from "../topology/editForms";
+import { useTopologyEditor } from "../topology/useTopologyEditor";
 import { EditIcon } from "../components/icons";
 
 type Row = { key: string; index: number; a: string; b: string; filter?: LinkDoc["filter"] };
@@ -19,32 +20,29 @@ export default function LinksPage() {
   const { isReadOnly } = useDraft();
   const topology = useProjectResource<TopologyDoc>("topology");
   const subnets = useProjectResource<SubnetsDoc>("subnets");
-  const save = useProjectSave<TopologyDoc>("topology");
+  const editor = useTopologyEditor();
   const [editing, setEditing] = useState<number | null>(null);
 
   const links = topology.data?.links ?? [];
 
   const rows: Row[] = useMemo(() => links.map((l, index) => {
+    const swapped = canonicalLink(l.a.device, l.b.device)[0] !== l.a.device;
+    // Стороны фильтра — это стороны A/B документа; при канонизации пары
+    // концы меняются местами, экспорты переезжают вместе с ними.
+    const filter = swapped
+      ? { aExports: l.filter?.bExports ?? [], bExports: l.filter?.aExports ?? [] }
+      : l.filter;
     const [a, b] = canonicalLink(l.a.device, l.b.device);
-    return { key: `${a}|${b}`, index, a, b, filter: l.filter };
+    return { key: `${a}|${b}`, index, a, b, filter };
   }), [links]);
 
   const cidrOf = (name: string) => subnets.data?.subnets?.find((s) => s.name === name)?.cidr ?? "";
 
-  const persist = async (next: LinkDoc[]) => {
-    if (!topology.data) return;
-    try {
-      await save.mutateAsync({ ...topology.data, links: next });
-      notify("Связи сохранены", "ok");
-    } catch (error) {
-      notify((error as Error).message);
-    }
-  };
-
-  const setFilter = (row: Row, filter: LinkDoc["filter"]) => {
-    const next = links.slice();
-    next[row.index] = { ...next[row.index], filter };
-    void persist(next);
+  const setFilter = async (row: Row, filter: LinkDoc["filter"]) => {
+    const link = links[row.index];
+    if (!link) return;
+    await editor.setLinkFilter(link.a.device, link.b.device, filter);
+    notify("Связи сохранены", "ok");
   };
 
   const open = (index: number) => {
@@ -146,9 +144,7 @@ export default function LinksPage() {
           <LinkFilterForm
             link={link}
             onSave={async (next) => {
-              const nextLinks = links.slice();
-              nextLinks[editing!] = next;
-              await persist(nextLinks);
+              editor.setLinkFilter(next.a.device, next.b.device, next.filter);
             }}
           />
         )}

@@ -68,7 +68,7 @@ type Props = {
   onNodeClick?: NodeMouseHandler;
   // Клик по пустому полю (создание устройства/сети активным инструментом).
   onPaneClick?: (position: { x: number; y: number }) => void;
-  // Удаление выбранных узлов по Del. ids — id узлов RF (device:r1).
+  // Удаление выбранных объектов по Del. ids — id узлов и рёбер RF.
   onDelete?: (ids: string[]) => void;
   // Единый источник истины о выделении — RF; страница подписывается сюда.
   onSelectionChange?: (ids: string[]) => void;
@@ -258,7 +258,7 @@ function TopologyCanvasInner({
     [connecting, onConnectPick, onNodeClick, tool],
   );
 
-  // Del удаляет выбранные узлы: события клавиатуры идут на контейнер,
+  // Del удаляет выбранные узлы и рёбра: события клавиатуры идут на контейнер,
   // потому что фокус у React Flow, а не у инпутов страницы. Панели редактиро-
   // вания находятся в overlay-слое — их keydown (в т.ч. Delete при наборе
   // текста) не должен доходить до удаления узлов.
@@ -271,14 +271,21 @@ function TopologyCanvasInner({
       target instanceof HTMLSelectElement ||
       (target instanceof Element && target.closest(".canvas-panel"))
     ) return;
-    const ids = rfNodes.filter((n) => n.selected).map((n) => n.id);
+    const ids = [
+      ...rfNodes.filter((n) => n.selected).map((n) => n.id),
+      ...rfEdges.filter((e) => e.selected).map((e) => e.id),
+    ];
     if (ids.length) onDelete(ids);
-  }, [rfNodes, onDelete]);
+  }, [rfNodes, rfEdges, onDelete]);
 
   // RF сам отслеживает выделение (в т.ч. через рамку и multiSelectionKeyCode);
-  // свой список по кликам дублировал бы это состояние.
+  // свой список по кликам дублировал бы это состояние. Важны и nodes, и
+  // edges: страница использует список для состояния кнопки удаления.
   const handleSelectionChange = useCallback<OnSelectionChangeFunc>(
-    ({ nodes }) => onSelectionChange?.(nodes.map((n) => n.id)),
+    ({ nodes, edges: selectedEdges }) => onSelectionChange?.([
+      ...nodes.map((n) => n.id),
+      ...selectedEdges.map((e) => e.id),
+    ]),
     [onSelectionChange],
   );
 

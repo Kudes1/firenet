@@ -341,6 +341,24 @@ describe("TopologyPage", () => {
     void user;
   });
 
+  it("enables toolbar deletion for a selected link", async () => {
+    useRichLayout();
+    let body: unknown;
+    server.use(http.post("/api/drafts/d1/topology/operations", async ({ request }) => {
+      body = await request.json();
+      return HttpResponse.json({ topology: {}, layout: {} });
+    }));
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    const edge = await screen.findByTestId("link:r1|sw1#0");
+    fireEvent.click(edge);
+    expect(screen.getByTestId("topo-delete")).not.toBeDisabled();
+    await user.click(screen.getByTestId("topo-delete"));
+    await waitFor(() => expect(body).toEqual({
+      kind: "delete-link",
+      link: { a: { device: "r1" }, b: { device: "sw1" } },
+    }), { timeout: 2000 });
+  });
+
   // --- connect-инструмент: клик по первому объекту, клик по второму ---
 
   it("creates a link between two devices", async () => {
@@ -355,6 +373,7 @@ describe("TopologyPage", () => {
     expect(screen.getByTestId("rf__node-device:r1").className).toContain("pending");
     expect(bodies).toEqual([]);
     await pickAsync("rf__node-device:sw1");
+    expect(screen.getByTestId("link:r1|sw1#0")).toBeInTheDocument();
     await waitFor(() => expect(bodies).toEqual([
       { kind: "create-link", link: { a: { device: "r1" }, b: { device: "sw1" } } },
     ]), { timeout: 2000 });
@@ -368,6 +387,7 @@ describe("TopologyPage", () => {
     await user.click(screen.getByTestId("tool-connect"));
     await pickAsync("rf__node-network:office");
     await pickAsync("rf__node-device:r1");
+    expect(screen.getByTestId("attach:office|r1")).toBeInTheDocument();
     await waitFor(() => expect(bodies).toEqual([
       { kind: "attach-network", networkName: "office", attach: { device: "r1" } },
     ]), { timeout: 2000 });

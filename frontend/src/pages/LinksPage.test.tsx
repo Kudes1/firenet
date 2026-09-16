@@ -26,31 +26,59 @@ describe("LinksPage", () => {
     expect(screen.getByText("обычная")).toBeInTheDocument();
   });
 
+  it("moves the filter sides with the swapped endpoint pair", async () => {
+    // Связь хранится как sw1→r1: после канонизации строки в «r1 ↔ sw1»
+    // экспорт, записанный на стороне sw1 (aExports), должен оказаться
+    // в колонке «← Экспорт» (sw1), а не «Экспорт →» (r1).
+    server.use(http.get("/api/drafts/d1/topology", () => HttpResponse.json({
+      ...fx.topologyFixture,
+      links: [{ a: { device: "sw1" }, b: { device: "r1" }, filter: { aExports: ["lan"], bExports: [] } }],
+    })));
+    renderPage(<LinksPage />, "/ui/links", "d1");
+
+    expect(await screen.findByText("r1 ↔ sw1")).toBeInTheDocument();
+    const cell = screen.getByText("lan").closest("td");
+    expect(cell).not.toBeNull();
+    // Порядок колонок: pair(0), mode(1), aExports(2), bExports(3).
+    // Экспорт sw1 должен быть в «← Экспорт» (колонка 3), а не в «Экспорт →» (2).
+    const row = cell!.closest("tr")!;
+    const index = Array.from(row.querySelectorAll("td")).indexOf(cell!);
+    expect(index).toBe(3);
+  });
+
   it("makes a link filtered", async () => {
     let body: unknown;
-    server.use(http.put("/api/drafts/d1/topology", async ({ request }) => {
+    server.use(http.post("/api/drafts/d1/topology/operations", async ({ request }) => {
       body = await request.json();
-      return HttpResponse.json(fx.topologyFixture);
+      return HttpResponse.json({
+        topology: {
+          ...fx.topologyFixture,
+          links: [{ a: { device: "r1" }, b: { device: "sw1" }, filter: { aExports: [], bExports: [] } }],
+        },
+        layout: fx.layoutFixture,
+      });
     }));
     const { user } = renderPage(<LinksPage />, "/ui/links", "d1");
     await screen.findByText("r1 ↔ sw1");
     await user.click(screen.getByTitle("Сделать фильтрованной связь r1 ↔ sw1"));
     expect(await screen.findByText("Связи сохранены")).toBeInTheDocument();
-    expect(body).toMatchObject({
-      links: [{ a: { device: "r1" }, b: { device: "sw1" }, filter: { aExports: [], bExports: [] } }],
+    expect(body).toEqual({
+      kind: "set-link-filter",
+      link: { a: { device: "r1" }, b: { device: "sw1" } },
+      filter: { aExports: [], bExports: [] },
     });
   });
 
   it("loads export candidates for both sides by device pair", async () => {
     const urls: string[] = [];
-    // PUT должен вернуть уже фильтрованную связь: onSuccess кладёт ответ в
+    // Операция должна вернуть уже фильтрованную связь: onSuccess кладёт ответ в
     // кэш, и только после этого в строке появляется «Изменить фильтр».
     const filtered = {
       ...fx.topologyFixture,
       links: [{ a: { device: "r1" }, b: { device: "sw1" }, filter: { aExports: [], bExports: [] } }],
     };
     server.use(
-      http.put("/api/drafts/d1/topology", () => HttpResponse.json(filtered)),
+      http.post("/api/drafts/d1/topology/operations", () => HttpResponse.json({ topology: filtered, layout: fx.layoutFixture })),
       http.get("/api/drafts/d1/link-exports", ({ request }) => {
         urls.push(new URL(request.url).search);
         return HttpResponse.json({ entities: [{ name: "lan", cidr: "10.0.0.0/24" }] });

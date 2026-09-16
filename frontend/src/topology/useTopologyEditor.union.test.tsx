@@ -2,6 +2,7 @@ import { renderHook, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import type { TopologyDoc } from "../api/types";
 import { beforeAll, afterAll, afterEach, describe, expect, it } from "vitest";
 import { server } from "../test/msw";
 import { DraftProvider } from "../draft/DraftContext";
@@ -44,6 +45,9 @@ describe("useTopologyEditor union operations", () => {
 
     // sw1 не входит в u1 фикстуры — add проходит целиком.
     act(() => { result.current.setUnion("sw1", "device", "u1"); });
+    expect(qc.getQueryData<TopologyDoc>(projectKeys.resource("draft:d1", "topology"))?.unions).toEqual([
+      { name: "u1", devices: ["r1", "sw1"] },
+    ]);
     await act(async () => { await result.current.flush(); });
 
     expect(body).toEqual({ kind: "union-add-device", unionName: "u1", deviceName: "sw1" });
@@ -60,6 +64,9 @@ describe("useTopologyEditor union operations", () => {
     const { result } = renderHook(() => useTopologyEditor(), { wrapper: makeWrapper(qc) });
 
     act(() => { result.current.setUnion("r1", "device", null); });
+    expect(qc.getQueryData<TopologyDoc>(projectKeys.resource("draft:d1", "topology"))?.unions).toEqual([
+      { name: "u1", devices: [] },
+    ]);
     await act(async () => { await result.current.flush(); });
 
     // u1 — единственное объединение r1 в фикстуре: одна union-remove.
@@ -77,6 +84,9 @@ describe("useTopologyEditor union operations", () => {
     const { result } = renderHook(() => useTopologyEditor(), { wrapper: makeWrapper(qc) });
 
     act(() => { result.current.setUnion("office", "network", "u1"); });
+    expect(qc.getQueryData<TopologyDoc>(projectKeys.resource("draft:d1", "topology"))?.unions).toEqual([
+      { name: "u1", devices: ["r1"], networks: ["office"] },
+    ]);
     await act(async () => { await result.current.flush(); });
 
     expect(body).toEqual({ kind: "union-add-network", unionName: "u1", networkName: "office" });

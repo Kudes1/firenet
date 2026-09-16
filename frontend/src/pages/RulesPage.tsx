@@ -327,7 +327,8 @@ export default function RulesPage() {
           <div className="modal-grid">
             <label>Имя<input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
             <label>Комментарий<input value={editing.comment} onChange={(e) => setEditing({ ...editing, comment: e.target.value })} /></label>
-            <label>
+            {/* div, а не label: label пересылает клик по строке участника кнопке «×». */}
+            <div className="modal-field">
               Src
               <MemberList
                 members={editing.src}
@@ -338,8 +339,8 @@ export default function RulesPage() {
                 if (editing.src.includes(n)) return;
                 setEditing({ ...editing, src: [...editing.src, n] });
               }} />
-            </label>
-            <label>
+            </div>
+            <div className="modal-field">
               Dst
               <MemberList
                 members={editing.dst}
@@ -350,7 +351,7 @@ export default function RulesPage() {
                 if (editing.dst.includes(n)) return;
                 setEditing({ ...editing, dst: [...editing.dst, n] });
               }} />
-            </label>
+            </div>
             <label>Протокол
               <select value={editing.proto} onChange={(e) => setEditing({ ...editing, proto: e.target.value })}>
                 {PROTOS.map((p) => <option key={p} value={p}>{p}</option>)}

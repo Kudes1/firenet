@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useProjectResource, useProjectSave } from "../api/queries";
+import { useProjectResource } from "../api/queries";
 import type { LayoutDoc, SubnetsDoc, TopologyDoc } from "../api/types";
 import { useDraft } from "../draft/DraftContext";
 import { containsFold, matchPrefixQuery } from "../lib/search";
@@ -38,7 +38,6 @@ export default function TopologyPage() {
   const layoutQuery = useProjectResource<LayoutDoc>("layout");
   const subnets = useProjectResource<SubnetsDoc>("subnets");
   const editor = useTopologyEditor();
-  const save = useProjectSave<TopologyDoc>("topology");
 
   const [tool, setTool] = useState<CanvasTool>("select");
   // Первый объект connect-инструмента (легаси pending): ждёт пары.
@@ -222,6 +221,7 @@ export default function TopologyPage() {
       doc,
       target,
       editable: true,
+      isLinkPending: editor.isLinkPending,
       selection,
       actions: {
         editDevice: (name) => setEditTarget({ kind: "device", name }),
@@ -437,13 +437,7 @@ export default function TopologyPage() {
               <LinkFilterForm
                 link={editLink}
                 onSave={async (next) => {
-                  const links = (doc.links ?? []).slice();
-                  if (editTarget?.kind === "link") links[editTarget.index] = next;
-                  try {
-                    await save.mutateAsync({ ...doc, links });
-                  } catch (error) {
-                    notify((error as Error).message);
-                  }
+                  editor.setLinkFilter(next.a.device, next.b.device, next.filter);
                 }}
               />
             </CanvasPanel>
