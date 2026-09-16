@@ -71,6 +71,13 @@ func (g *Graph) AllSimplePaths(src, dst Node, limits Limits) ([]Path, error) {
 		if len(stack) > limits.MaxHops {
 			return nil
 		}
+		// A subnet is a terminal segment, never transit: only src and dst
+		// may be subnets, so once on one, the path cannot continue. Traffic
+		// enters a network at its router and stops — riding it to another
+		// attached router would model a multi-homed network as a link.
+		if cur.Kind == NodeSubnet && cur != src {
+			return nil
+		}
 		for _, e := range g.adj[cur] {
 			if visited[e.To] {
 				continue

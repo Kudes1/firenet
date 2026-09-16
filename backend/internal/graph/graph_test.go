@@ -108,6 +108,79 @@ func TestBuild_RedundantPaths(t *testing.T) {
 	}
 }
 
+// A network dual-homed to two routers is a terminal segment, not a transit
+// link: b→c must not route b-r1-A-r2-c (entering A mid-path just to leave
+// it via the other router), even though that is the only simple path.
+func TestBuild_MultiHomedNetworkIsNotTransit(t *testing.T) {
+	topo := &topology.Topology{
+		Devices: map[string]topology.Device{
+			"r1": {Name: "r1", Kind: topology.DeviceRouter},
+			"r2": {Name: "r2", Kind: topology.DeviceRouter},
+		},
+		Subnets: map[string]topology.Subnet{
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
+			"C": {Name: "C", CIDR: prefix(t, "10.0.2.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nA": netWithSubnets("nA", []string{"A"},
+				topology.Endpoint{Device: "r1"}, topology.Endpoint{Device: "r2"}),
+			"nB": netWithSubnets("nB", []string{"B"}, topology.Endpoint{Device: "r1"}),
+			"nC": netWithSubnets("nC", []string{"C"}, topology.Endpoint{Device: "r2"}),
+		},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("invalid fixture: %v", err)
+	}
+	g, err := Build(topo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	paths, err := g.AllSimplePaths(SubnetNode("B"), SubnetNode("C"), DefaultLimits())
+	if err != nil {
+		t.Fatalf("pathfind: %v", err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("subnet must be terminal: got %d transit paths, want 0", len(paths))
+	}
+}
+
+// The dual-homed network still works as an endpoint: it is reachable from
+// any of its routers, and its own hosts reach other networks through any
+// of them.
+func TestBuild_MultiHomedNetworkEndpointReachable(t *testing.T) {
+	topo := &topology.Topology{
+		Devices: map[string]topology.Device{
+			"r1": {Name: "r1", Kind: topology.DeviceRouter},
+			"r2": {Name: "r2", Kind: topology.DeviceRouter},
+			"r3": {Name: "r3", Kind: topology.DeviceRouter},
+		},
+		Subnets: map[string]topology.Subnet{
+			"A": {Name: "A", CIDR: prefix(t, "10.0.0.0/24")},
+			"B": {Name: "B", CIDR: prefix(t, "10.0.1.0/24")},
+		},
+		Networks: map[string]topology.Network{
+			"nA": netWithSubnets("nA", []string{"A"},
+				topology.Endpoint{Device: "r1"}, topology.Endpoint{Device: "r2"}),
+			"nB": netWithSubnets("nB", []string{"B"},
+				topology.Endpoint{Device: "r2"}, topology.Endpoint{Device: "r3"}),
+		},
+	}
+	if err := topo.Validate(); err != nil {
+		t.Fatalf("invalid fixture: %v", err)
+	}
+	g, err := Build(topo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, pair := range [][2]string{{"A", "B"}, {"B", "A"}} {
+		paths, err := g.AllSimplePaths(SubnetNode(pair[0]), SubnetNode(pair[1]), DefaultLimits())
+		if err != nil || len(paths) == 0 {
+			t.Fatalf("%s→%s expected reachable via shared router r2, got %d paths (%v)", pair[0], pair[1], len(paths), err)
+		}
+	}
+}
+
 func TestBuild_SwitchChainCollapses(t *testing.T) {
 	topo := &topology.Topology{
 		Devices: map[string]topology.Device{
