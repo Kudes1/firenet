@@ -1046,7 +1046,6 @@ td:has(> input[type="checkbox"]) {
   min-height: 0;
 }
 .data-table { table-layout: fixed; width: 100%; }
-#rules-table { min-width: 702px; }
 .data-table th:not(:first-child),
 .data-table td:not(:first-child) { border-left: 1px solid var(--border); }
 .data-table th {
@@ -1398,8 +1397,18 @@ dialog.modal .modal-actions.modal-footer {
   border-top: 1px solid var(--border);
 }
 .modal-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-3); }
-.modal-grid label,
-.modal-grid .modal-field { margin-bottom: 0; }
+/* Специфичность dialog.modal label/.modal-field (2 класса) иначе бьёт этот
+   сброс (1 класс + тип) — оставляя паразитный margin-bottom между полем и
+   его предупреждением. */
+dialog.modal .modal-grid label,
+dialog.modal .modal-grid .modal-field,
+.modal-grid .member-combo { margin-bottom: 0; }
+.modal-field.invalid input,
+.modal-field.invalid select { border-color: var(--danger); }
+/* Форма правила: плотнее базового modal-grid (одна колонка на широкой модалке
+   оставляла много пустого места). */
+.rule-form { gap: var(--space-2); }
+.rule-form .cell-hint { margin: 0; }
 .modal-check {
   flex-direction: row !important;
   align-items: center;
@@ -1497,7 +1506,9 @@ dialog.modal textarea { width: 100%; }
 
 /* Searchable subnet picker (network editor modal). Список рендерится
    порталом в ближайший label/fieldset, за пределами скролл-контейнера
-   участников; position: relative у .member-combo нужен для кнопки-триггера. */
+   участников; position: relative у .member-combo нужен для кнопки-триггера.
+   Позицию списка Combo пересчитывает при скролле/ресайзе и при нехватке
+   места снизу открывает список над полем. */
 .member-combo { position: relative; margin-bottom: var(--space-3); }
 .member-combo input { width: 100%; padding-right: 2.2rem; }
 .member-combo-toggle {
@@ -1533,7 +1544,13 @@ dialog.modal textarea { width: 100%; }
   font-size: 0.88rem;
 }
 .member-suggestion.active, .member-suggestion:hover { background: var(--panel-bg-hover); }
-.member-suggestion.literal-add { color: var(--accent); }
+.member-suggestion.literal-add, .member-suggestion-literal { color: var(--accent); }
+.member-suggestion-hint {
+  margin-left: 0.5rem;
+  color: var(--muted);
+  font-size: 0.8em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 .member-clear {
   position: absolute;
   top: 50%;
@@ -2601,7 +2618,8 @@ dialog.modal textarea { width: 100%; }
   overflow: auto;
 }
 .rules-table-surface .data-table {
-  min-width: 1120px;
+  /* Держим в синхроне с суммой ширин <colgroup> в RulesPage.tsx. */
+  min-width: 1312px;
   margin: 0;
   background: var(--panel-bg);
 }
@@ -2641,6 +2659,10 @@ dialog.modal textarea { width: 100%; }
   white-space: nowrap;
 }
 .rule-member-empty { color: var(--muted); }
+.rule-member-literal {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+}
 .rule-proto {
   border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
   background: color-mix(in srgb, var(--accent) 9%, var(--panel-bg));

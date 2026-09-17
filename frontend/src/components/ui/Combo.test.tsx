@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import Combo from "./Combo";
@@ -76,6 +76,160 @@ describe("Combo", () => {
     expect(list.style.left).toBe("100px"); // 300 - 200
   });
 
+  it("keeps the list anchored to the input when the dialog itself is scrolled", async () => {
+    const user = userEvent.setup();
+    render(
+      <Modal open title="Правило" onClose={vi.fn()}>
+        <Combo items={["lan"]} onPick={vi.fn()} />
+      </Modal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => new DOMRect(200, 150, 300, 200),
+      configurable: true,
+    });
+    const input = screen.getByRole("textbox");
+    Object.defineProperty(input, "getBoundingClientRect", {
+      value: () => new DOMRect(300, 200, 200, 30),
+      configurable: true,
+    });
+    // Прокручен сам <dialog> (в модалке правил длинное тело скроллит диалог,
+    // а не .modal-body). Абсолютный список живёт в content-координатах, и без
+    // поправки на scrollTop он уезжал вверх, перекрывая поле ввода.
+    Object.defineProperty(dialog, "scrollTop", { value: 50, configurable: true });
+    await user.click(input);
+    const list = document.querySelector(".member-suggestions") as HTMLElement;
+    expect(list.style.top).toBe("134px"); // (200 + 30 + 4) - (150 - 50)
+  });
+
+  it("opens the list upward when the visible area has no room below the input", async () => {
+    const user = userEvent.setup();
+    render(
+      <Modal open title="Сеть" onClose={vi.fn()}>
+        <Combo items={["lan"]} onPick={vi.fn()} />
+      </Modal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => new DOMRect(200, 100, 300, 500),
+      configurable: true,
+    });
+    const input = screen.getByRole("textbox");
+    // Инпут у нижнего края видимой области (вьюпорт усечён до 620px):
+    // ниже поля видно только 26px, список открывается над ним.
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "innerHeight", { value: 620, configurable: true, writable: true });
+    Object.defineProperty(input, "getBoundingClientRect", {
+      value: () => new DOMRect(300, 560, 200, 30),
+      configurable: true,
+    });
+    try {
+      await user.click(input);
+      const list = document.querySelector(".member-suggestions") as HTMLElement;
+      expect(list.style.top).toBe("456px"); // 560 - 100 - 4 (список над инпутом, диалог-относительно)
+      expect(list.style.transform).toBe("translateY(-100%)");
+      expect(list.style.maxHeight).toBe("220px");
+    } finally {
+      Object.defineProperty(window, "innerHeight", { value: originalHeight, configurable: true, writable: true });
+    }
+  });
+
+  it("clamps the list height to the visible space below the input", async () => {
+    const user = userEvent.setup();
+    render(
+      <Modal open title="Сеть" onClose={vi.fn()}>
+        <Combo items={["lan", "guest"]} onPick={vi.fn()} />
+      </Modal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => new DOMRect(200, 100, 300, 500),
+      configurable: true,
+    });
+    const input = screen.getByRole("textbox");
+    // Внизу видно 176px, сверху меньше (146px) — список открывается вниз,
+    // но его высота ограничена видимым местом снизу.
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, "innerHeight", { value: 360, configurable: true, writable: true });
+    Object.defineProperty(input, "getBoundingClientRect", {
+      value: () => new DOMRect(300, 150, 200, 30),
+      configurable: true,
+    });
+    try {
+      await user.click(input);
+      const list = document.querySelector(".member-suggestions") as HTMLElement;
+      expect(list.style.maxHeight).toBe("176px");
+      expect(list.style.transform).toBe("");
+    } finally {
+      Object.defineProperty(window, "innerHeight", { value: originalHeight, configurable: true, writable: true });
+    }
+  });
+
+  it("remeasures the list position when the modal body scrolls", async () => {
+    const user = userEvent.setup();
+    render(
+      <Modal open title="Сеть" onClose={vi.fn()}>
+        <Combo items={["lan"]} onPick={vi.fn()} />
+      </Modal>,
+    );
+    const dialog = screen.getByRole("dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => new DOMRect(200, 150, 300, 200),
+      configurable: true,
+    });
+    const input = screen.getByRole("textbox");
+    Object.defineProperty(input, "getBoundingClientRect", {
+      value: () => new DOMRect(300, 200, 200, 30),
+      configurable: true,
+    });
+    await user.click(input);
+    const list = document.querySelector(".member-suggestions") as HTMLElement;
+    expect(list.style.top).toBe("84px");
+    // Инпут уехал вверх вместе с контентом модалки при прокрутке.
+    Object.defineProperty(input, "getBoundingClientRect", {
+      value: () => new DOMRect(300, 120, 200, 30),
+      configurable: true,
+    });
+    // Перезамер происходит по событию scroll от .modal-body (capture, bubbling).
+    act(() => {
+      document.querySelector(".modal-body")!.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    expect(list.style.top).toBe("4px");
+  });
+
+  it("follows the input on the next frame without any scroll event", async () => {
+    const user = userEvent.setup();
+    render(
+      <Modal open title="Сеть" onClose={vi.fn()}>
+        <Combo items={["lan"]} onPick={vi.fn()} />
+      </Modal>,
+    );
+    let offsetY = 0;
+    const dialog = screen.getByRole("dialog");
+    Object.defineProperty(dialog, "getBoundingClientRect", {
+      value: () => new DOMRect(200, 100 + offsetY, 300, 500),
+      configurable: true,
+    });
+    const input = screen.getByRole("textbox");
+    Object.defineProperty(input, "getBoundingClientRect", {
+      value: () => new DOMRect(300, 200 + offsetY, 200, 30),
+      configurable: true,
+    });
+    await user.click(input);
+    const list = document.querySelector(".member-suggestions") as HTMLElement;
+    expect(list.style.top).toBe("134px"); // (200 + 30 + 4) - 100
+    // Диалог перетащили вниз (обе коробки уехали на 60px): на следующем
+    // кадре список пересчитывается сам, без события scroll.
+    offsetY = 60;
+    await act(async () => {
+      await new Promise((r) =>
+        typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => r(null)) : setTimeout(r, 20),
+      );
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(list.style.top).toBe("134px");
+  });
+
   it("renders the list inside a canvas panel when used in one", async () => {
     const user = userEvent.setup();
     render(
@@ -94,7 +248,7 @@ describe("Combo", () => {
 
   it("positions the list under the input (fixed coordinates)", async () => {
     const user = userEvent.setup();
-    const { container } = render(<Combo items={["lan"]} onPick={vi.fn()} />);
+    render(<Combo items={["lan"]} onPick={vi.fn()} />);
     const input = screen.getByRole("textbox");
     // jsdom: rect инпута задаём вручную, список должен использовать его.
     Object.defineProperty(input, "getBoundingClientRect", {
@@ -106,7 +260,7 @@ describe("Combo", () => {
     expect(list.style.top).toBe("124px"); // 90 + 30 + 4 отступ
     expect(list.style.left).toBe("120px");
     expect(list.style.width).toBe("200px");
-    expect(container).toBeTruthy();
+    expect(list.style.maxHeight).toBe("220px");
   });
 
   it("picks an item on click", async () => {
@@ -204,5 +358,41 @@ describe("Combo", () => {
     expect(screen.getByRole("button", { name: "lan" })).toBeInTheDocument();
     await user.click(document.querySelector(".member-combo-toggle")!);
     expect(screen.queryByRole("button", { name: "lan" })).toBeNull();
+  });
+
+  it("shows item hints next to the names and filters by them", async () => {
+    const user = userEvent.setup();
+    render(<Combo items={["office"]} hint={(i) => (i === "office" ? "10.0.0.0/24" : undefined)} onPick={vi.fn()} />);
+    await user.click(screen.getByRole("textbox"));
+    expect(screen.getByText("10.0.0.0/24")).toBeInTheDocument();
+    // Поиск матчит и CIDR, и имя.
+    await user.type(screen.getByRole("textbox"), "10.0.0");
+    expect(screen.getByRole("button", { name: /office/ })).toBeInTheDocument();
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "office");
+    expect(screen.getByRole("button", { name: /office/ })).toBeInTheDocument();
+  });
+
+  it("offers a parsed literal when the search matches no item", async () => {
+    const user = userEvent.setup();
+    const onPick = vi.fn();
+    render(<Combo items={["lan"]} parse={(raw) => (/^\d/.test(raw) ? `${raw}` : null)} onPick={onPick} />);
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "10.0.0.0/24");
+    expect(screen.getByRole("button", { name: /Добавить «10\.0\.0\.0\/24»/ })).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(onPick).toHaveBeenCalledWith("10.0.0.0/24");
+    // После добавления поле очищено, список закрыт.
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /Добавить/ })).toBeNull();
+  });
+
+  it("does not offer a literal when parse rejects the search", async () => {
+    const user = userEvent.setup();
+    render(<Combo items={["lan"]} parse={() => null} onPick={vi.fn()} />);
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "10.0.0.999");
+    expect(screen.queryByRole("button", { name: /Добавить/ })).toBeNull();
+    expect(screen.getByText("Ничего не найдено")).toBeInTheDocument();
   });
 });

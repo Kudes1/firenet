@@ -40,6 +40,23 @@ export function parseHostAddress(raw: string): string | null {
   return null;
 }
 
+// parseRuleLiteral принимает литеральный src/dst правила так же, как бэкенд
+// (topology.ParseEndpointPrefix): голый IPv4 → /32, IPv4 CIDR (маскируется
+// к границе сети, как netip.ParsePrefix.Masked). IPv6 и прочее — null.
+export function parseRuleLiteral(raw: string): string | null {
+  const v = raw.trim();
+  if (!v) return null;
+  const [addr, bitsRaw, ...extra] = v.split("/");
+  if (extra.length) return null;
+  const m = IPV4.exec(addr);
+  if (!m || m.slice(1).some((o) => Number(o) > 255)) return null;
+  const bits = bitsRaw === undefined ? 32 : Number(bitsRaw);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return null;
+  const bytes = m.slice(1).map(Number);
+  const masked = bytes.map((byte, i) => (bits >= (i + 1) * 8 ? byte : Math.max(0, bits - i * 8) > 0 ? (byte >> (8 - (bits - i * 8))) << (8 - (bits - i * 8)) : 0));
+  return `${masked.join(".")}/${bits}`;
+}
+
 // validPortSpec валидирует один или несколько (через запятую) спецификаций
 // портов. Разделитель диапазона — «-», как в легаси rules.js и в
 // internal/rules/validate.go (validatePortSpec): «80», «1024-2048».

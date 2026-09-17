@@ -342,7 +342,10 @@ describe("TopologyCanvas", () => {
     expect(rect!.getAttribute("stroke")).toBe(unionColor(0));
     expect(box.querySelector(".union-outline-label")!.textContent).toBe("u1");
     // Не мешает взаимодействию: без выделения и через слои под узлами.
+    // pointer-events: none задан inline-стилем, потому что RF перебивает
+    // CSS-класс inline-стилем pointer-events: all (из-за общего onNodeClick).
     expect(box.className).toContain("union-outline");
+    expect(box.style.pointerEvents).toBe("none");
     expect(box.className).not.toContain("selected");
     expect(document.querySelector('[data-testid="rf__node-device:r1"]')!.compareDocumentPosition(box)).toBeGreaterThan(0);
   });

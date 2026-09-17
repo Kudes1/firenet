@@ -175,6 +175,10 @@ function TopologyCanvasInner({
       selectable: false,
       selectablePriority: 0,
       zIndex: -1,
+      // RF ставит обёртке inline pointer-events: all (из-за общего onNodeClick)
+      // и отбрасывает всплывшие до pane клики, поэтому без этого стиля клик по
+      // пустому месту внутри объединения не открывал бы окно создания.
+      style: { pointerEvents: "none" },
       className: ["union-outline", markOf?.(`union:${b.name}`)].filter(Boolean).join(" "),
     })),
     [topology, livePositions, markOf],

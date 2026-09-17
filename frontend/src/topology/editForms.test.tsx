@@ -150,6 +150,24 @@ describe("LinkFilterForm", () => {
     expect(screen.getByText("lan (10.0.0.0/24)")).toBeInTheDocument();
   });
 
+  it("hides already-exported entities from the add candidates", async () => {
+    server.use(http.get("/api/versions/current/link-exports", () =>
+      HttpResponse.json({ entities: [{ name: "office" }, { name: "lan", cidr: "10.0.0.0/24" }] })));
+    wrapper(
+      <LinkFilterForm
+        link={{ a: { device: "r1" }, b: { device: "sw1" }, filter: { aExports: ["office"], bExports: [] } }}
+        onSave={async () => {}}
+      />,
+    );
+    const combo = (await screen.findAllByPlaceholderText(/начните вводить/))[0];
+    fireEvent.pointerDown(combo);
+    // office уже экспортируется стороной A — в списке добавления его нет,
+    // а остальное (lan) доступно.
+    expect(await screen.findByText("lan (10.0.0.0/24)")).toBeInTheDocument();
+    const suggestions = Array.from(document.querySelectorAll(".member-suggestions"));
+    expect(suggestions.some((el) => el.textContent?.includes("office"))).toBe(false);
+  });
+
   it("saves the filter through PUT topology", async () => {
     let saved: unknown;
     wrapper(

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useLint, useProjectResource, useProjectSave } from "../api/queries";
 import type { ChainDoc, PolicyDoc, RuleDoc, SubnetsDoc, TopologyDoc } from "../api/types";
 import { useDraft } from "../draft/DraftContext";
-import { validPortSpec } from "../lib/validate";
+import { parseRuleLiteral, validPortSpec } from "../lib/validate";
 import Combo from "../components/ui/Combo";
 import MemberList from "../components/ui/MemberList";
 import Modal from "../components/ui/Modal";
@@ -13,6 +13,8 @@ type RuleDraft = {
   index: number; name: string; comment: string; src: string[]; dst: string[];
   proto: string; srcPorts: string; dstPorts: string; action: string; jumpTo: string; mirror: boolean;
 };
+
+type RuleHints = { name?: string; src?: string; dst?: string; ports?: string; jump?: string };
 
 const PROTOS = ["any", "tcp", "udp", "icmp"];
 const ACTIONS = ["allow", "deny", "return", "jump"];
@@ -42,11 +44,13 @@ export default function RulesPage() {
   const chain = chains[active];
   const totalRules = chains.reduce((total, item) => total + item.rules.length, 0);
 
+  const subnetCidr = useMemo(() => new Map((subnets.data?.subnets ?? []).map((s) => [s.name, s.cidr])), [subnets.data]);
   const endpoints = useMemo(() => [
     "any",
     ...(subnets.data?.subnets ?? []).map((s) => s.name).sort(),
     ...(topology.data?.sets ?? []).map((s) => s.name).sort(),
   ], [subnets.data, topology.data]);
+  const endpointHint = (name: string) => subnetCidr.get(name);
 
   const persist = async (next: PolicyDoc) => {
     try {
@@ -75,7 +79,7 @@ export default function RulesPage() {
     });
   };
 
-  const hints = editing ? ruleHint(editing, chain) : [];
+  const hints = editing ? ruleHint(editing, chain) : {};
 
   const submitRule = () => {
     if (!editing || !rules.data) return;
@@ -273,6 +277,21 @@ export default function RulesPage() {
 
         <div className="rules-table-scroll">
           <table className="data-table" id="rules-table" data-testid="rules-table">
+            {/* table-layout:fixed без colgroup делил бы все столбцы поровну — Src/Dst
+                (пилюли участников) получали бы ту же ширину, что Proto или Зеркало. */}
+            <colgroup>
+              <col style={{ width: "64px" }} />
+              <col style={{ width: "140px" }} />
+              <col style={{ width: "160px" }} />
+              <col style={{ width: "180px" }} />
+              <col style={{ width: "180px" }} />
+              <col style={{ width: "84px" }} />
+              <col style={{ width: "104px" }} />
+              <col style={{ width: "104px" }} />
+              <col style={{ width: "128px" }} />
+              <col style={{ width: "84px" }} />
+              <col style={{ width: "84px" }} />
+            </colgroup>
             <thead>
               <tr>
                 <th /><th>Имя</th><th>Комментарий</th><th>Src</th><th>Dst</th>
@@ -288,8 +307,8 @@ export default function RulesPage() {
                   </td>
                   <td className="rule-name">{r.name}</td>
                   <td className="rule-comment">{r.comment || "—"}</td>
-                  <td className="rule-members">{r.src.length ? r.src.map((member, index) => <span className="rule-member" key={`${member}-${index}`}>{member}</span>) : <span className="rule-member rule-member-empty">any</span>}</td>
-                  <td className="rule-members">{r.dst.length ? r.dst.map((member, index) => <span className="rule-member" key={`${member}-${index}`}>{member}</span>) : <span className="rule-member rule-member-empty">any</span>}</td>
+                  <td><div className="rule-members">{r.src.length ? r.src.map((member, index) => <span className={memberClass(member)} key={`${member}-${index}`}>{member}</span>) : <span className="rule-member rule-member-empty">any</span>}</div></td>
+                  <td><div className="rule-members">{r.dst.length ? r.dst.map((member, index) => <span className={memberClass(member)} key={`${member}-${index}`}>{member}</span>) : <span className="rule-member rule-member-empty">any</span>}</div></td>
                   <td><span className="rule-proto">{r.proto || "any"}</span></td>
                   <td className="rule-ports">{(r.srcPorts ?? []).join(",") || "—"}</td>
                   <td className="rule-ports">{(r.dstPorts ?? []).join(",") || "—"}</td>
@@ -319,38 +338,49 @@ export default function RulesPage() {
         footer={
           <>
             <button type="button" onClick={() => setEditing(null)}>Отмена</button>
-            <button type="button" className="primary" disabled={!!hints.length || save.isPending} onClick={submitRule}>Сохранить</button>
+            <button type="button" className="primary" disabled={!!hasHints(hints) || save.isPending} onClick={submitRule}>Сохранить</button>
           </>
         }
       >
         {editing && (
-          <div className="modal-grid">
-            <label>Имя<input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
+          <div className="modal-grid rule-form">
+            <div className={`modal-field${hints.name ? " invalid" : ""}`}>
+              <label>Имя<input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
+              {hints.name && <p className="cell-hint">{hints.name}</p>}
+            </div>
             <label>Комментарий<input value={editing.comment} onChange={(e) => setEditing({ ...editing, comment: e.target.value })} /></label>
             {/* div, а не label: label пересылает клик по строке участника кнопке «×». */}
-            <div className="modal-field">
+            <div className={`modal-field${hints.src ? " invalid" : ""}`}>
               Src
               <MemberList
                 members={editing.src}
                 onRemove={(n) => setEditing({ ...editing, src: editing.src.filter((x) => x !== n) })}
                 empty="—"
               />
-              <Combo items={endpoints} placeholder="any, подсеть или набор" onPick={(n) => {
-                if (editing.src.includes(n)) return;
-                setEditing({ ...editing, src: [...editing.src, n] });
-              }} />
+              <Combo
+                items={endpoints.filter((e) => !editing.src.includes(e))}
+                placeholder="any, подсеть, набор или IP/CIDR"
+                hint={endpointHint}
+                parse={parseRuleLiteral}
+                onPick={(n) => setEditing({ ...editing, src: [...editing.src, n] })}
+              />
+              {hints.src && <p className="cell-hint">{hints.src}</p>}
             </div>
-            <div className="modal-field">
+            <div className={`modal-field${hints.dst ? " invalid" : ""}`}>
               Dst
               <MemberList
                 members={editing.dst}
                 onRemove={(n) => setEditing({ ...editing, dst: editing.dst.filter((x) => x !== n) })}
                 empty="—"
               />
-              <Combo items={endpoints} placeholder="any, подсеть или набор" onPick={(n) => {
-                if (editing.dst.includes(n)) return;
-                setEditing({ ...editing, dst: [...editing.dst, n] });
-              }} />
+              <Combo
+                items={endpoints.filter((e) => !editing.dst.includes(e))}
+                placeholder="any, подсеть, набор или IP/CIDR"
+                hint={endpointHint}
+                parse={parseRuleLiteral}
+                onPick={(n) => setEditing({ ...editing, dst: [...editing.dst, n] })}
+              />
+              {hints.dst && <p className="cell-hint">{hints.dst}</p>}
             </div>
             <label>Протокол
               <select value={editing.proto} onChange={(e) => setEditing({ ...editing, proto: e.target.value })}>
@@ -363,24 +393,29 @@ export default function RulesPage() {
               </select>
             </label>
             {editing.action === "jump" && (
-              <label>Перейти в цепочку
-                <select value={editing.jumpTo} onChange={(e) => setEditing({ ...editing, jumpTo: e.target.value })}>
-                  <option value="">— выберите —</option>
-                  {chains.filter((_, i) => i !== active).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </select>
-              </label>
+              <div className={`modal-field${hints.jump ? " invalid" : ""}`}>
+                <label>Перейти в цепочку
+                  <select value={editing.jumpTo} onChange={(e) => setEditing({ ...editing, jumpTo: e.target.value })}>
+                    <option value="">— выберите —</option>
+                    {chains.filter((_, i) => i !== active).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+                  </select>
+                </label>
+                {hints.jump && <p className="cell-hint">{hints.jump}</p>}
+              </div>
             )}
             <label>Порты источника
               <input value={editing.srcPorts} onChange={(e) => setEditing({ ...editing, srcPorts: e.target.value })} placeholder="1024-2048" />
             </label>
-            <label>Порты получателя
-              <input value={editing.dstPorts} onChange={(e) => setEditing({ ...editing, dstPorts: e.target.value })} placeholder="80,443" />
-            </label>
+            <div className={`modal-field${hints.ports ? " invalid" : ""}`}>
+              <label>Порты получателя
+                <input value={editing.dstPorts} onChange={(e) => setEditing({ ...editing, dstPorts: e.target.value })} placeholder="80,443" />
+              </label>
+              {hints.ports && <p className="cell-hint">{hints.ports}</p>}
+            </div>
             <label className="modal-check">
               <input type="checkbox" checked={editing.mirror} onChange={(e) => setEditing({ ...editing, mirror: e.target.checked })} />
               Зеркало
             </label>
-            {hints.map((h) => <p className="cell-hint" key={h}>{h}</p>)}
           </div>
         )}
       </Modal>
@@ -390,27 +425,32 @@ export default function RulesPage() {
 
 const splitPorts = (spec: string) => spec.split(",").map((p) => p.trim()).filter(Boolean);
 
+// memberClass выделяет литеральные IP/CIDR отдельным стилем — так в таблице
+// видно, где правило ссылается на объект (подсеть/набор), а где на адрес.
+const memberClass = (member: string) => `rule-member${parseRuleLiteral(member) ? " rule-member-literal" : ""}`;
+
 // Та же последовательность, что в легаси: имя, уникальность в цепочке,
 // наличие концов, порты только для tcp/udp, корректность спецификации,
-// цель jump. Возвращает все подсказки сразу — источник и получатель
-// показываются вместе, а не по одному за раз.
-function ruleHint(draft: RuleDraft, chain: ChainDoc | undefined): string[] {
-  const hints: string[] = [];
-  if (!draft.name.trim()) hints.push("Имя обязательно");
+// цель jump. Подсказки разложены по полям формы.
+function ruleHint(draft: RuleDraft, chain: ChainDoc | undefined): RuleHints {
+  const hints: RuleHints = {};
+  if (!draft.name.trim()) hints.name = "Имя обязательно";
   else if (chain && chain.rules.some((r, i) => i !== draft.index && r.name === draft.name.trim())) {
-    hints.push("Имя уже используется");
+    hints.name = "Имя уже используется";
   }
-  if (!draft.src.length) hints.push("Нужен хотя бы один источник");
-  if (!draft.dst.length) hints.push("Нужен хотя бы один получатель");
+  if (!draft.src.length) hints.src = "Нужен хотя бы один источник";
+  if (!draft.dst.length) hints.dst = "Нужен хотя бы один получатель";
   const hasPorts = draft.srcPorts.trim() || draft.dstPorts.trim();
   if (hasPorts && draft.proto !== "tcp" && draft.proto !== "udp") {
-    hints.push("Порты допустимы только для tcp и udp");
+    hints.ports = "Порты допустимы только для tcp и udp";
   } else if (!validPortSpec(draft.srcPorts) || !validPortSpec(draft.dstPorts)) {
-    hints.push("Порты: 1..65535 или диапазон from-to");
+    hints.ports = "Порты: 1..65535 или диапазон from-to";
   }
   if (draft.action === "jump") {
-    if (!draft.jumpTo) hints.push("Укажите цепочку для jump");
-    else if (chain && draft.jumpTo === chain.name) hints.push("Цепочка не может переходить в себя");
+    if (!draft.jumpTo) hints.jump = "Укажите цепочку для jump";
+    else if (chain && draft.jumpTo === chain.name) hints.jump = "Цепочка не может переходить в себя";
   }
   return hints;
 }
+
+const hasHints = (hints: RuleHints) => Object.values(hints).some(Boolean);

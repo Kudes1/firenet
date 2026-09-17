@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseHostAddress, uniqueNameHint, validPortSpec } from "./validate";
+import { parseHostAddress, parseRuleLiteral, uniqueNameHint, validPortSpec } from "./validate";
 
 describe("uniqueNameHint", () => {
   const names = ["lan", "dmz"];
@@ -22,6 +22,21 @@ describe("parseHostAddress", () => {
   it("rejects garbage", () => {
     expect(parseHostAddress("office")).toBeNull();
     expect(parseHostAddress("10.0.0.5/32/1")).toBeNull();
+  });
+});
+
+describe("parseRuleLiteral", () => {
+  it("accepts a bare IPv4 as /32", () => expect(parseRuleLiteral("10.0.0.5")).toBe("10.0.0.5/32"));
+  it("accepts an IPv4 CIDR and masks it", () => {
+    expect(parseRuleLiteral("10.0.0.0/24")).toBe("10.0.0.0/24");
+    expect(parseRuleLiteral("10.0.0.5/24")).toBe("10.0.0.0/24");
+  });
+  it("rejects IPv6, bad octets and names", () => {
+    expect(parseRuleLiteral("2001:db8::1")).toBeNull();
+    expect(parseRuleLiteral("10.0.0.999")).toBeNull();
+    expect(parseRuleLiteral("10.0.0.0/33")).toBeNull();
+    expect(parseRuleLiteral("office")).toBeNull();
+    expect(parseRuleLiteral("")).toBeNull();
   });
 });
 

@@ -206,7 +206,10 @@ export function LinkFilterForm({
                   const next = side.mine.filter((v) => v !== name);
                   void persist(side.key === "a" ? next : aExports, side.key === "b" ? next : bExports);
                 }}
-                candidates={side.candidates.map((e) => (e.cidr ? `${e.name} (${e.cidr})` : e.name))}
+                // Уже экспортируемое не предлагается повторно.
+                candidates={side.candidates
+                  .filter((e) => !side.mine.includes(e.name))
+                  .map((e) => (e.cidr ? `${e.name} (${e.cidr})` : e.name))}
                 onAdd={(raw) => {
                   const name = raw.split(" (")[0];
                   if (side.mine.includes(name)) return;
