@@ -40,28 +40,52 @@ export default function InvitePage() {
   };
 
   return (
-    <main className="page" data-testid="page-invite">
-      <form className="modal-grid" onSubmit={submit}>
-        <h1>Активация{username ? `: ${username}` : ""}</h1>
-        {done ? (
-          <p data-testid="invite-done">Пароль задан. Можно войти.</p>
-        ) : (
-          <>
-            <label>
-              Пароль
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-            </label>
-            <label>
-              Повторите пароль
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-            </label>
-            <div className="modal-actions">
-              <button type="submit" className="primary" disabled={!password || !confirm}>Активировать</button>
-            </div>
-          </>
-        )}
-        {error && <p className="cell-hint" data-testid="invite-error">{error}</p>}
+    <main className="login-page" data-testid="page-invite">
+      <form className="login-card login-card--single" onSubmit={submit} data-testid="invite-form">
+        <div className="login-content">
+          <div className="login-brand" aria-label="firenet">
+            <span className="login-brand-mark">
+              <span />
+              <span />
+              <span />
+            </span>
+            <span>firenet</span>
+          </div>
+
+          <div className="login-heading">
+            <p className="login-kicker">Активация аккаунта</p>
+            <h1>{username || "Активация"}</h1>
+            {!done && <p>Задайте пароль, чтобы начать работу.</p>}
+          </div>
+
+          {done ? (
+            <p className="login-message login-message--success" data-testid="invite-done">Пароль задан. Можно войти.</p>
+          ) : (
+            <>
+              <div className="login-fields">
+                <label className="login-field">
+                  <span>Пароль</span>
+                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+                </label>
+                <label className="login-field">
+                  <span>Повторите пароль</span>
+                  <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+                </label>
+              </div>
+
+              {error && <p className="login-message login-message--error" data-testid="invite-error" role="alert">{error}</p>}
+
+              <div className="login-actions">
+                <button type="submit" className="primary login-submit" disabled={!password || !confirm}>
+                  <span>Активировать</span>
+                  <span className="login-submit-icon" aria-hidden="true">→</span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </form>
+      <p className="login-footer">firenet · topology control</p>
     </main>
   );
 }

@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { server } from "../test/msw";
@@ -75,7 +75,37 @@ describe("UsersPage", () => {
     renderPage(<UsersPage />, "/ui/users");
     await screen.findByText("bob");
     expect(screen.queryByTitle("Удалить пользователя admin")).toBeNull();
+    expect(screen.queryByTitle("Изменить роль admin")).toBeNull();
     expect(screen.getByTitle("Удалить пользователя bob")).toBeInTheDocument();
+    expect(screen.getByTitle("Изменить роль bob")).toBeInTheDocument();
+  });
+
+  it("shows the role as read-only text in the table", async () => {
+    server.use(
+      http.get("/api/users", () => HttpResponse.json(USERS)),
+      http.get("/api/me", () => HttpResponse.json(fx.userFixture)),
+    );
+    renderPage(<UsersPage />, "/ui/users");
+    await screen.findByText("bob");
+    expect(screen.queryByRole("combobox", { name: /Роль пользователя/ })).toBeNull();
+  });
+
+  it("changes a user's role through the edit modal", async () => {
+    let patchedBody: unknown;
+    server.use(
+      http.get("/api/users", () => HttpResponse.json(USERS)),
+      http.get("/api/me", () => HttpResponse.json(fx.userFixture)),
+      http.patch("/api/users/u2", async ({ request }) => {
+        patchedBody = await request.json();
+        return HttpResponse.json({ ...USERS[1], role: "admin" });
+      }),
+    );
+    const { user } = renderPage(<UsersPage />, "/ui/users");
+    await screen.findByText("bob");
+    await user.click(screen.getByTitle("Изменить роль bob"));
+    await user.selectOptions(await screen.findByLabelText("Роль пользователя bob"), "admin");
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(patchedBody).toEqual({ role: "admin" }));
   });
 
   it("copies the invite link to the clipboard", async () => {

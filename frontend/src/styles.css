@@ -1408,7 +1408,9 @@ dialog.modal .modal-grid .modal-field,
 /* Форма правила: плотнее базового modal-grid (одна колонка на широкой модалке
    оставляла много пустого места). */
 .rule-form { gap: var(--space-2); }
-.rule-form .cell-hint { margin: 0; }
+/* p имеет собственный вертикальный margin по умолчанию — вместе с gap
+   .modal-field это давало двойной отступ между полем и его подсказкой. */
+.modal-field .cell-hint { margin: 0; }
 .modal-check {
   flex-direction: row !important;
   align-items: center;
@@ -1691,6 +1693,12 @@ dialog.modal textarea { width: 100%; }
   background: var(--bg);
   box-shadow: 0 24px 70px color-mix(in srgb, var(--fg) 14%, transparent), 0 4px 14px rgba(20, 20, 30, 0.08);
 }
+.login-card--single {
+  grid-template-columns: 1fr;
+  width: min(480px, 100%);
+  min-height: auto;
+}
+.login-card--single .login-content { padding: 48px 44px; }
 .login-visual {
   position: relative;
   display: flex;
@@ -2217,7 +2225,6 @@ dialog.modal textarea { width: 100%; }
   background: var(--bg);
   border-color: var(--border);
 }
-.user-role-select { max-width: 10rem; }
 .drafts-heading { display: grid; gap: var(--space-1); }
 .draft-create-form {
   display: inline-flex;

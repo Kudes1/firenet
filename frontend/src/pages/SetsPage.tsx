@@ -57,7 +57,7 @@ export default function SetsPage() {
     setAddressError("");
   };
 
-  const hint = editing ? setHint(editing, rows) : "";
+  const hints = editing ? setHints(editing, rows) : {};
 
   const persist = async (sets: SetDoc[]) => {
     if (!topology.data) return;
@@ -155,16 +155,18 @@ export default function SetsPage() {
         footer={
           <>
             <button type="button" onClick={() => setEditing(null)}>Отмена</button>
-            <button type="button" className="primary" disabled={!!hint || save.isPending} onClick={submit}>Сохранить</button>
+            <button type="button" className="primary" disabled={hasHints(hints) || save.isPending} onClick={submit}>Сохранить</button>
           </>
         }
       >
         {editing && (
           <div className="modal-grid">
-            <label>
-              Имя
-              <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-            </label>
+            <div className={`modal-field${hints.name ? " invalid" : ""}`}>
+              <label>Имя
+                <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+              </label>
+              {hints.name && <p className="cell-hint">{hints.name}</p>}
+            </div>
             <label>
               Описание
               <textarea rows={3} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
@@ -181,7 +183,7 @@ export default function SetsPage() {
                 empty="Подсети не добавлены"
               />
             </div>
-            <div className="modal-field">
+            <div className={`modal-field${addressError || hints.members ? " invalid" : ""}`}>
               Адреса
               <MemberList
                 members={editing.addresses}
@@ -197,7 +199,7 @@ export default function SetsPage() {
                 />
                 <button type="button" title="Добавить адрес" onClick={addAddress}>+</button>
               </div>
-              {(addressError || hint) && <p className="cell-hint">{addressError || hint}</p>}
+              {(addressError || hints.members) && <p className="cell-hint">{addressError || hints.members}</p>}
             </div>
           </div>
         )}
@@ -206,9 +208,14 @@ export default function SetsPage() {
   );
 }
 
-function setHint(draft: Draft, rows: SetDoc[]): string {
+type SetHints = { name?: string; members?: string };
+
+function setHints(draft: Draft, rows: SetDoc[]): SetHints {
+  const hints: SetHints = {};
   const nameHint = uniqueNameHint(draft.name, rows.map((r) => r.name), draft.index);
-  if (nameHint) return nameHint;
-  if (!draft.subnets.length && !draft.addresses.length) return "Нужна хотя бы одна подсеть или адрес";
-  return "";
+  if (nameHint) hints.name = nameHint;
+  if (!draft.subnets.length && !draft.addresses.length) hints.members = "Нужна хотя бы одна подсеть или адрес";
+  return hints;
 }
+
+const hasHints = (hints: SetHints) => Object.values(hints).some(Boolean);

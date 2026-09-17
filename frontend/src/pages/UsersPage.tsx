@@ -6,7 +6,7 @@ import { containsFold } from "../lib/search";
 import Modal from "../components/ui/Modal";
 import DataTable, { type Column } from "../components/ui/DataTable";
 import { notify } from "../components/notify";
-import { DeleteIcon } from "../components/icons";
+import { DeleteIcon, EditIcon } from "../components/icons";
 
 type Invite = { username: string; url: string };
 
@@ -17,6 +17,8 @@ export default function UsersPage() {
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState<UserRole>("user");
   const [invite, setInvite] = useState<Invite | null>(null);
+  const [editing, setEditing] = useState<UserResponse | null>(null);
+  const [editRole, setEditRole] = useState<UserRole>("user");
 
   const forbidden = users.error instanceof Error && (users.error as { status?: number }).status === 403;
   const rows = users.data ?? [];
@@ -35,9 +37,16 @@ export default function UsersPage() {
     }
   };
 
-  const changeRole = async (user: UserResponse, role: UserRole) => {
+  const openEdit = (user: UserResponse) => {
+    setEditRole(user.role);
+    setEditing(user);
+  };
+
+  const saveRole = async () => {
+    if (!editing) return;
     try {
-      await api.patch(`/api/users/${user.id}`, { role });
+      await api.patch(`/api/users/${editing.id}`, { role: editRole });
+      setEditing(null);
       void users.refetch();
     } catch (error) {
       notify((error as Error).message);
@@ -77,19 +86,7 @@ export default function UsersPage() {
       title: "Роль",
       width: "18%",
       minWidth: 140,
-      render: (user) => user.id === me.data?.id
-        ? <span className={`user-role user-role-${user.role}`}>{user.role}</span>
-        : (
-          <select
-            className="user-role-select"
-            value={user.role}
-            aria-label={`Роль пользователя ${user.username}`}
-            onChange={(event) => void changeRole(user, event.target.value as UserRole)}
-          >
-            <option value="admin">admin</option>
-            <option value="user">user</option>
-          </select>
-        ),
+      render: (user) => <span className={`user-role user-role-${user.role}`}>{user.role}</span>,
       filter: (user, query) => containsFold(user.role, query),
     },
     {
@@ -128,6 +125,17 @@ export default function UsersPage() {
               onClick={() => void showInvite(user)}
             >
               Ссылка
+            </button>
+          )}
+          {user.id !== me.data?.id && (
+            <button
+              type="button"
+              className="icon-btn user-action edit"
+              title={`Изменить роль ${user.username}`}
+              aria-label={`Изменить роль ${user.username}`}
+              onClick={() => openEdit(user)}
+            >
+              <EditIcon />
             </button>
           )}
           {user.id !== me.data?.id && (
@@ -191,6 +199,32 @@ export default function UsersPage() {
           <label>
             Роль
             <select value={newRole} onChange={(e) => setNewRole(e.target.value as UserRole)}>
+              <option value="admin">admin</option>
+              <option value="user">user</option>
+            </select>
+          </label>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!editing}
+        title={`Изменить роль: ${editing?.username ?? ""}`}
+        onClose={() => setEditing(null)}
+        footer={
+          <>
+            <button type="button" onClick={() => setEditing(null)}>Отмена</button>
+            <button type="button" className="primary" onClick={saveRole}>Сохранить</button>
+          </>
+        }
+      >
+        <div className="modal-grid">
+          <label>
+            Роль
+            <select
+              aria-label={`Роль пользователя ${editing?.username ?? ""}`}
+              value={editRole}
+              onChange={(e) => setEditRole(e.target.value as UserRole)}
+            >
               <option value="admin">admin</option>
               <option value="user">user</option>
             </select>
