@@ -24,6 +24,7 @@ var (
 type Draft struct {
 	ID            string
 	Owner         string
+	OwnerUsername string
 	Name          string
 	BaseVersionID int64
 	Status        string // open|conflict|merged|closed
@@ -34,9 +35,19 @@ type Draft struct {
 
 const draftColumns = "id, owner::text, name, base_version_id, status, revision, created_at, updated_at"
 
+// draftColumnsJoined is draftColumns qualified for a query joined against
+// users, with the owner's username resolved alongside the UUID.
+const draftColumnsJoined = "d.id, d.owner::text, u.username, d.name, d.base_version_id, d.status, d.revision, d.created_at, d.updated_at"
+
 func scanDraft(row pgx.Row) (Draft, error) {
 	var d Draft
 	err := row.Scan(&d.ID, &d.Owner, &d.Name, &d.BaseVersionID, &d.Status, &d.Revision, &d.CreatedAt, &d.UpdatedAt)
+	return d, err
+}
+
+func scanDraftJoined(row pgx.Row) (Draft, error) {
+	var d Draft
+	err := row.Scan(&d.ID, &d.Owner, &d.OwnerUsername, &d.Name, &d.BaseVersionID, &d.Status, &d.Revision, &d.CreatedAt, &d.UpdatedAt)
 	return d, err
 }
 
@@ -56,6 +67,7 @@ func (s *Store) CreateDraft(ctx context.Context, owner auth.User, name string) (
 		}
 		return Draft{}, fmt.Errorf("create draft: %w", err)
 	}
+	d.OwnerUsername = owner.Username
 	return d, nil
 }
 
@@ -65,9 +77,9 @@ func (s *Store) ListDrafts(ctx context.Context, owner *auth.User) ([]Draft, erro
 	var rows pgx.Rows
 	var err error
 	if owner != nil {
-		rows, err = s.db.Query(ctx, `SELECT `+draftColumns+` FROM drafts WHERE owner = $1 ORDER BY created_at DESC`, owner.ID)
+		rows, err = s.db.Query(ctx, `SELECT `+draftColumnsJoined+` FROM drafts d JOIN users u ON u.id = d.owner WHERE d.owner = $1 ORDER BY d.created_at DESC`, owner.ID)
 	} else {
-		rows, err = s.db.Query(ctx, `SELECT `+draftColumns+` FROM drafts ORDER BY created_at DESC`)
+		rows, err = s.db.Query(ctx, `SELECT `+draftColumnsJoined+` FROM drafts d JOIN users u ON u.id = d.owner ORDER BY d.created_at DESC`)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list drafts: %w", err)
@@ -76,7 +88,7 @@ func (s *Store) ListDrafts(ctx context.Context, owner *auth.User) ([]Draft, erro
 
 	var out []Draft
 	for rows.Next() {
-		d, err := scanDraft(rows)
+		d, err := scanDraftJoined(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan draft: %w", err)
 		}
@@ -89,7 +101,7 @@ func (s *Store) ListDrafts(ctx context.Context, owner *auth.User) ([]Draft, erro
 // revision) without resolving its document — used by internal/httpapi
 // for ownership checks before a full ReadDraft/WriteDraft.
 func (s *Store) GetDraft(ctx context.Context, draftID string) (Draft, error) {
-	d, err := scanDraft(s.db.QueryRow(ctx, `SELECT `+draftColumns+` FROM drafts WHERE id = $1`, draftID))
+	d, err := scanDraftJoined(s.db.QueryRow(ctx, `SELECT `+draftColumnsJoined+` FROM drafts d JOIN users u ON u.id = d.owner WHERE d.id = $1`, draftID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Draft{}, ErrDraftNotFound
 	}

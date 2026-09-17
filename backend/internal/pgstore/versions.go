@@ -17,7 +17,7 @@ var ErrNoVersions = errors.New("no versions exist yet")
 type VersionInfo struct {
 	ID          int64
 	CreatedAt   time.Time
-	ConfirmedBy string // user id; empty for the seeded initial import
+	ConfirmedBy string // username; empty for the seeded initial import
 	DraftID     string // empty when the version didn't come from a draft (initial import, restore)
 	Note        string
 }
@@ -47,8 +47,9 @@ func (s *Store) ReadAt(ctx context.Context, version int64) (projectdoc.ProjectDo
 // History lists the most recent versions, newest first.
 func (s *Store) History(ctx context.Context, limit int) ([]VersionInfo, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, created_at, COALESCE(confirmed_by::text, ''), COALESCE(draft_id::text, ''), COALESCE(note, '')
-		FROM versions ORDER BY id DESC LIMIT $1`, limit)
+		SELECT v.id, v.created_at, COALESCE(u.username, ''), COALESCE(v.draft_id::text, ''), COALESCE(v.note, '')
+		FROM versions v LEFT JOIN users u ON u.id = v.confirmed_by
+		ORDER BY v.id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list history: %w", err)
 	}

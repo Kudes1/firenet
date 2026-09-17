@@ -23,7 +23,7 @@ type draftResponse struct {
 }
 
 func toDraftResponse(d pgstore.Draft) draftResponse {
-	return draftResponse{ID: d.ID, Owner: d.Owner, Name: d.Name, BaseVersionID: d.BaseVersionID, Status: d.Status}
+	return draftResponse{ID: d.ID, Owner: d.OwnerUsername, Name: d.Name, BaseVersionID: d.BaseVersionID, Status: d.Status}
 }
 
 func (h *handlers) createDraft(w http.ResponseWriter, r *http.Request) {

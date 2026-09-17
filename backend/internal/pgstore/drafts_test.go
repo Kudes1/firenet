@@ -21,6 +21,9 @@ func TestCreateDraftFromCurrentVersion(t *testing.T) {
 	if d.BaseVersionID != v1 || d.Status != "open" || d.Revision != 0 {
 		t.Fatalf("unexpected draft: %+v", d)
 	}
+	if d.OwnerUsername != author.Username {
+		t.Fatalf("got owner username %q, want %q", d.OwnerUsername, author.Username)
+	}
 }
 
 func TestCreateDraftDuplicateName(t *testing.T) {
@@ -160,6 +163,9 @@ func TestListDraftsFiltersByOwner(t *testing.T) {
 	if len(mine) != 1 {
 		t.Fatalf("got %d drafts, want 1", len(mine))
 	}
+	if mine[0].OwnerUsername != author.Username {
+		t.Fatalf("got owner username %q, want %q", mine[0].OwnerUsername, author.Username)
+	}
 
 	all, err := s.ListDrafts(ctx, nil)
 	if err != nil {
@@ -167,6 +173,27 @@ func TestListDraftsFiltersByOwner(t *testing.T) {
 	}
 	if len(all) != 1 {
 		t.Fatalf("got %d drafts, want 1", len(all))
+	}
+	if all[0].OwnerUsername != author.Username {
+		t.Fatalf("got owner username %q, want %q", all[0].OwnerUsername, author.Username)
+	}
+}
+
+func TestGetDraftIncludesOwnerUsername(t *testing.T) {
+	s, author := newTestStoreWithUser(t)
+	ctx := context.Background()
+	insertVersion(t, s, author, nil)
+	created, err := s.CreateDraft(ctx, author, "wip")
+	if err != nil {
+		t.Fatalf("CreateDraft: %v", err)
+	}
+
+	d, err := s.GetDraft(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetDraft: %v", err)
+	}
+	if d.OwnerUsername != author.Username {
+		t.Fatalf("got owner username %q, want %q", d.OwnerUsername, author.Username)
 	}
 }
 

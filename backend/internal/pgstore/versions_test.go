@@ -59,6 +59,9 @@ func TestHistoryOrdersNewestFirstAndRespectsLimit(t *testing.T) {
 	if len(all) != 3 || all[0].ID != v3 || all[2].ID != v1 {
 		t.Fatalf("got %+v, want newest-first [%d,%d,%d]", all, v3, v2, v1)
 	}
+	if all[0].ConfirmedBy != author.Username {
+		t.Fatalf("got confirmed by %q, want username %q", all[0].ConfirmedBy, author.Username)
+	}
 
 	limited, err := s.History(context.Background(), 2)
 	if err != nil {
