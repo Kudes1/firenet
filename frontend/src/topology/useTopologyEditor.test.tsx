@@ -413,6 +413,32 @@ describe("useTopologyEditor", () => {
     ]);
   });
 
+  it("removeSelected deletes a link and an attach by edge id without deleting their nodes", async () => {
+    const bodies: unknown[] = [];
+    const record = async ({ request }: { request: Request }) => {
+      bodies.push(await request.json());
+      return HttpResponse.json(fx.editorSnapshotFixture);
+    };
+    server.use(http.post("/api/drafts/d1/topology/operations/batch", record));
+    server.use(http.post("/api/drafts/d1/topology/operations", record));
+    sessionStorage.setItem(storageKeys.draftId, "d1");
+    const { result } = renderHook(() => useTopologyEditor(), { wrapper });
+
+    act(() => {
+      result.current.removeSelected(["link:r1|r2#0", "attach:office|sw1"]);
+    });
+    await act(async () => { await result.current.flush(); });
+    await act(async () => { await result.current.flush(); });
+
+    const kinds = bodies.flatMap((b) => {
+      const body = b as { operations?: Array<{ kind: string }>; kind?: string };
+      return body.operations ? body.operations.map((o) => o.kind) : [body.kind!];
+    });
+    expect(kinds).toEqual(expect.arrayContaining(["delete-link", "detach-network"]));
+    expect(kinds).not.toContain("delete-device");
+    expect(kinds).not.toContain("delete-network");
+  });
+
   it("optimistically sets a link filter and sends an operation immediately", async () => {
     let body: unknown;
     server.use(http.post("/api/drafts/d1/topology/operations", async ({ request }) => {

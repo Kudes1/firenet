@@ -5,7 +5,7 @@ import type { DeviceDoc, EditorSnapshot, LayoutDoc, LayoutPoint, LinkDoc, LinkFi
 import { layoutLinkKey } from "../lib/links";
 import { useDraft } from "../draft/DraftContext";
 import { notify } from "../components/notify";
-import { defaultPoint } from "./scene";
+import { defaultPoint, parseEdgeId } from "./scene";
 
 export type SyncStatus = "saved" | "dirty" | "saving" | "error";
 
@@ -721,14 +721,16 @@ export function useTopologyEditor() {
       const name = rest.join(":");
       if (kind === "device") enqueue({ kind: "delete-device", deviceName: name });
       else if (kind === "network") enqueue({ kind: "delete-network", networkName: name });
-      else if (kind === "link") {
-        const key = name.slice(0, name.lastIndexOf("#"));
-        const [a, b] = key.split("|");
-        if (a && b && !selectedDevices.has(a) && !selectedDevices.has(b)) deleteLink(a, b);
-      } else if (kind === "attach") {
-        const [networkName, device] = name.split("|");
-        if (networkName && device && !selectedNetworks.has(networkName) && !selectedDevices.has(device)) {
-          detachNetwork(networkName, device);
+      else {
+        const parsed = parseEdgeId(id);
+        if (parsed?.kind === "link" && !selectedDevices.has(parsed.a) && !selectedDevices.has(parsed.b)) {
+          deleteLink(parsed.a, parsed.b);
+        } else if (
+          parsed?.kind === "attach"
+          && !selectedNetworks.has(parsed.network)
+          && !selectedDevices.has(parsed.device)
+        ) {
+          detachNetwork(parsed.network, parsed.device);
         }
       }
     }

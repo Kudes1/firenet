@@ -9,7 +9,7 @@ import { useEditorLock } from "../lib/editorLock";
 import { useTopologyEditor } from "../topology/useTopologyEditor";
 import TopologyCanvas, { type CanvasTool } from "../topology/TopologyCanvas";
 import { ConnectPreview } from "../topology/ConnectPreview";
-import { DEVICE_H, DEVICE_W, NET_H, NET_W } from "../topology/scene";
+import { DEVICE_H, DEVICE_W, NET_H, NET_W, parseEdgeId } from "../topology/scene";
 import ContextMenu, { type MenuItem } from "../topology/ContextMenu";
 import { contextMenuItems, type CanvasTarget } from "../topology/contextMenuItems";
 import { DeviceEditForm, NetworkEditForm, LinkFilterForm } from "../topology/editForms";
@@ -85,13 +85,11 @@ export default function TopologyPage() {
 
   const markOf = useCallback((id: string) => {
     if (linkEnds) {
-      // Подсветка концов редактируемой связи — поверх поиска: узлы концов
-      // получают цвета A/B, остальные узлы и связи затемняются (само ребро
-      // редактируемой связи остаётся обычным).
       const [a, b] = linkEnds;
       if (id === `device:${a}`) return "link-end-a";
       if (id === `device:${b}`) return "link-end-b";
-      if (id.startsWith(`link:${a}|${b}`) || id.startsWith(`link:${b}|${a}`)) return undefined;
+      const parsed = parseEdgeId(id);
+      if (parsed?.kind === "link" && parsed.a === a && parsed.b === b) return undefined;
       if (id.includes(":")) return "search-dim";
     }
     if (!matches) return undefined;
@@ -249,17 +247,17 @@ export default function TopologyPage() {
   }, [openMenu]);
 
   const handleEdgeContextMenu = useCallback((id: string, at: { x: number; y: number }) => {
-    // id ребра строит scene.ts: link:<a>|<b>#<offset> или attach:<net>|<device>.
-    const type = id.slice(0, id.indexOf(":"));
-    const rest = id.slice(id.indexOf(":") + 1);
-    const key = type === "link" ? rest.slice(0, rest.lastIndexOf("#")) : rest;
-    const [a, b] = key.split("|");
-    if (type === "link") {
+    const parsed = parseEdgeId(id);
+    if (!parsed) return;
+    if (parsed.kind === "link") {
+      const { a, b } = parsed;
       const filtered = (doc.links ?? []).some((l) => [l.a.device, l.b.device].includes(a)
         && [l.a.device, l.b.device].includes(b) && !!l.filter);
       openMenu({ kind: "link", id, a, b, filtered }, at);
     }
-    if (type === "attach") openMenu({ kind: "attach", id, network: a, device: b }, at);
+    if (parsed.kind === "attach") {
+      openMenu({ kind: "attach", id, network: parsed.network, device: parsed.device }, at);
+    }
   }, [openMenu, doc.links]);
 
   const statusLabel = editor.status === "saved" ? "Сохранено" : editor.status === "dirty" ? "Изменено" : editor.status === "saving" ? "Сохранение…" : "Ошибка";
@@ -312,12 +310,9 @@ export default function TopologyPage() {
           onEdgeContextMenu={handleEdgeContextMenu}
           canvasChildren={pendingCenter && cursor ? <ConnectPreview from={pendingCenter} to={cursor} /> : null}
           onWaypointsChange={(edgeId, points) => {
-            // id ребра строит scene.ts: link:<a>|<b>#<offset>; attach-рёбра
-            // изгибов не имеют (бэкенд хранит waypoints только по парам устройств).
-            if (!edgeId.startsWith("link:")) return;
-            const rest = edgeId.slice(5, edgeId.lastIndexOf("#"));
-            const [a, b] = rest.split("|");
-            guard(() => editor.setLinkWaypoints(a, b, Number(edgeId.slice(edgeId.lastIndexOf("#") + 1)), points));
+            const parsed = parseEdgeId(edgeId);
+            if (parsed?.kind !== "link") return;
+            guard(() => editor.setLinkWaypoints(parsed.a, parsed.b, parsed.offset, points));
           }}
         >
           <div className="topo-toolbar" role="toolbar" aria-label="Инструменты топологии">
