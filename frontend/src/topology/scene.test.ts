@@ -194,6 +194,13 @@ describe("edge id helpers", () => {
     expect(parseEdgeId("link:a|b#x")).toBeNull();
     expect(parseEdgeId("link:a|b|c#0")).toBeNull();
     expect(parseEdgeId("link:a#b|c#0")).toBeNull();
+    expect(parseEdgeId("link:a|b#")).toBeNull();
+    expect(parseEdgeId("link:a|b#1.0")).toBeNull();
+    expect(parseEdgeId("link:a|b#-0")).toBeNull();
+    expect(parseEdgeId("link:a|b#0x2")).toBeNull();
+    expect(parseEdgeId("link:a|b#1e2")).toBeNull();
+    expect(parseEdgeId("link:a|b#+1")).toBeNull();
+    expect(parseEdgeId("link:a|b#00")).toBeNull();
     expect(parseEdgeId("attach:a")).toBeNull();
     expect(parseEdgeId("attach:a|b|c")).toBeNull();
     expect(parseEdgeId("wat:a|b")).toBeNull();

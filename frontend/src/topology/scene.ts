@@ -106,10 +106,10 @@ export function parseEdgeId(id: string): ParsedEdgeId | null {
   if (type === "link") {
     const hash = rest.lastIndexOf("#");
     if (hash < 0) return null;
-    const offset = Number(rest.slice(hash + 1));
+    const token = rest.slice(hash + 1);
     const pair = pairOf(rest.slice(0, hash));
-    return Number.isInteger(offset) && offset >= 0 && pair
-      ? { kind: "link", a: pair[0], b: pair[1], offset }
+    return /^(0|[1-9]\d*)$/.test(token) && pair
+      ? { kind: "link", a: pair[0], b: pair[1], offset: Number(token) }
       : null;
   }
   return null;
