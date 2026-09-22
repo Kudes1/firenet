@@ -1,6 +1,6 @@
 # Topology Canvas Refactor Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Централизовать контракт id рёбер и геометрию узлов канвы, убрать побочный эффект из рендера очереди редактора и запретить `|`/`#` в именах устройств и сетей (фронт + бэкенд).
 
@@ -55,7 +55,7 @@
   - `type ParsedEdgeId = { kind: "link"; a: string; b: string; offset: number } | { kind: "attach"; network: string; device: string }`
   - `parseEdgeId(id: string): ParsedEdgeId | null`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Добавить в конец `frontend/src/topology/scene.test.ts` (импорт `formatAttachEdgeId, formatLinkEdgeId, parseEdgeId` из `./scene`):
 
@@ -95,12 +95,12 @@ describe("edge id helpers", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/topology/scene.test.ts`
 Expected: FAIL — `formatLinkEdgeId` is not exported / is not defined.
 
-- [ ] **Step 3: Implement helpers and switch `buildScene` to them**
+- [x] **Step 3: Implement helpers and switch `buildScene` to them**
 
 В `frontend/src/topology/scene.ts` добавить (после `defaultPoint`, до `linkOffsets`) и использовать в `buildScene`:
 
@@ -162,12 +162,12 @@ export function parseEdgeId(id: string): ParsedEdgeId | null {
 
 (строка с `id: \`attach:${n.name}|${a.device}\``).
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/topology/scene.test.ts`
 Expected: PASS (все старые тесты `buildScene` тоже зелёные — формат id не изменился).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/topology/scene.ts frontend/src/topology/scene.test.ts
@@ -186,7 +186,7 @@ git commit -m "refactor(frontend): centralize topology edge id format in scene.t
 - Consumes: `parseEdgeId` из Task 1.
 - Produces: ничего нового; поведение не меняется.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Зафиксировать контракт разбора на уровне редактора: в `frontend/src/topology/useTopologyEditor.test.tsx` (внутрь `describe("useTopologyEditor")`) добавить:
 
@@ -217,12 +217,12 @@ git commit -m "refactor(frontend): centralize topology edge id format in scene.t
   });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/topology/useTopologyEditor.test.tsx`
 Expected: FAIL — `removeSelected` не находит `link:`-id корректно (ищет `kind === "link"` после `split(":")`, имя `r1|r2#0` уезжает в `name`), `delete-link`/`detach-network` не попадают в очередь.
 
-- [ ] **Step 3: Switch `removeSelected` to `parseEdgeId`**
+- [x] **Step 3: Switch `removeSelected` to `parseEdgeId`**
 
 В `frontend/src/topology/useTopologyEditor.ts` добавить импорт:
 
@@ -253,7 +253,7 @@ import { defaultPoint, parseEdgeId } from "./scene";
     }
 ```
 
-- [ ] **Step 4: Switch `TopologyPage` to `parseEdgeId`**
+- [x] **Step 4: Switch `TopologyPage` to `parseEdgeId`**
 
 Импорт: в `frontend/src/pages/TopologyPage.tsx` существующий импорт из `../topology/scene` дополнить `parseEdgeId`:
 
@@ -309,7 +309,7 @@ import { DEVICE_H, DEVICE_W, NET_H, NET_W, parseEdgeId } from "../topology/scene
           }}
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/topology/useTopologyEditor.test.tsx src/pages/TopologyPage.test.tsx src/topology/scene.test.ts`
 Expected: PASS.
@@ -317,7 +317,7 @@ Expected: PASS.
 Run: `make fe-test`
 Expected: PASS (typecheck + весь Vitest).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/pages/TopologyPage.tsx frontend/src/topology/useTopologyEditor.ts frontend/src/topology/useTopologyEditor.test.tsx
@@ -341,7 +341,7 @@ git commit -m "refactor(frontend): parse topology edge ids via scene.parseEdgeId
   - `nodeCenter(type: "device" | "network", position: LayoutPoint): LayoutPoint`
   - `nodeGeometry(type: "device" | "network"): { width: number; height: number; handles: Array<{ type: "source" | "target"; position: Position; x: number; y: number }> }` — тот же объект, что сейчас строит `TopologyCanvas.nodeGeometry`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 В `frontend/src/topology/scene.test.ts` добавить (импорт `nodeCenter, nodeGeometry, nodeSize` из `./scene`):
 
@@ -375,12 +375,12 @@ describe("node geometry", () => {
 
 (Если `Position.Right` сериализуется как enum-число, сравнение с `"right"` заменить на `Position.Right` — импортировать `Position` из `@xyflow/react` в тест.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/topology/scene.test.ts`
 Expected: FAIL — `nodeSize` is not defined.
 
-- [ ] **Step 3: Implement geometry helpers in `scene.ts`**
+- [x] **Step 3: Implement geometry helpers in `scene.ts`**
 
 Импорт в `frontend/src/topology/scene.ts`:
 
@@ -421,7 +421,7 @@ export function nodeGeometry(type: "device" | "network") {
   }
 ```
 
-- [ ] **Step 4: Switch `TopologyCanvas` and `TopologyPage` to the helpers**
+- [x] **Step 4: Switch `TopologyCanvas` and `TopologyPage` to the helpers**
 
 `frontend/src/topology/TopologyCanvas.tsx`:
 
@@ -449,7 +449,7 @@ export function nodeGeometry(type: "device" | "network") {
 
 Импорт страницы: `import { nodeCenter, parseEdgeId } from "../topology/scene";` (убрать `DEVICE_H, DEVICE_W, NET_H, NET_W` из `../topology/scene`, если больше нигде не используются — проверить grep'ом по файлу).
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/topology/scene.test.ts src/topology/TopologyCanvas.test.tsx src/pages/TopologyPage.test.tsx`
 Expected: PASS.
@@ -457,7 +457,7 @@ Expected: PASS.
 Run: `make fe-test`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/topology/scene.ts frontend/src/topology/scene.test.ts frontend/src/topology/TopologyCanvas.tsx frontend/src/pages/TopologyPage.tsx
@@ -475,7 +475,7 @@ git commit -m "refactor(frontend): single source of node geometry in scene.ts"
 - Consumes: `EditorChannel.send` (локальный тип того же файла).
 - Produces: ничего нового.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Побочный эффект в рендере не имеет отдельного наблюдаемого поведения — тест цикла «render → enqueue → flush работает». В `frontend/src/topology/useTopologyEditor.test.tsx` (перед `it("queues a device position…")`) добавить:
 
@@ -501,12 +501,12 @@ git commit -m "refactor(frontend): single source of node geometry in scene.ts"
 
 (Он будет зелёным и до рефакторинга — это regression-pin на то, что перенос в эффект не сломает проводку `send`. Красным его делает только поломка цикла; поэтому Step 2 в этом таске — убедиться, что тест зелёный ДО правки, затем после правки прогнать весь файл. Это исключение из TDD-ритма осознанное: меняется не поведение, а фаза React, которую Vitest не наблюдает.)
 
-- [ ] **Step 2: Run test to verify it passes before the change**
+- [x] **Step 2: Run test to verify it passes before the change**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/topology/useTopologyEditor.test.tsx -t "flushes queued operations after mount"`
 Expected: PASS.
 
-- [ ] **Step 3: Move the assignment into an effect**
+- [x] **Step 3: Move the assignment into an effect**
 
 В `frontend/src/topology/useTopologyEditor.ts` удалить строку `channel.send = ops.mutateAsync;` из тела `useTopologyEditor` (строка 608) и добавить эффект рядом с существующим `useEffect` подписки listeners (строки 611-620):
 
@@ -516,12 +516,12 @@ Expected: PASS.
   }, [channel, ops.mutateAsync]);
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/topology/useTopologyEditor.test.tsx`
 Expected: PASS (весь файл, включая новый тест).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/topology/useTopologyEditor.ts frontend/src/topology/useTopologyEditor.test.tsx
@@ -542,7 +542,7 @@ git commit -m "refactor(frontend): wire editor channel send in an effect, not in
 - Consumes: `uniqueNameHint(name: string, taken: string[], selfIndex?: number): string` — сигнатура не меняется.
 - Produces: `uniqueNameHint` дополнительно возвращает `"Недопустимые символы в имени: | #"` при `|`/`#` в имени; `""` — валидно (как сейчас). `DeviceEditForm`/`NetworkEditForm`/`SubnetsPage`/`SetsPage`/`UnionsPage` подхватывают без правок.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 В `frontend/src/lib/validate.test.ts` внутри `describe("uniqueNameHint")` добавить:
 
@@ -617,12 +617,12 @@ git commit -m "refactor(frontend): wire editor channel send in an effect, not in
   });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/lib/validate.test.ts src/topology/editForms.test.tsx src/pages/TopologyPage.test.tsx`
 Expected: FAIL — `uniqueNameHint("sw|core", …)` возвращает `""`; submit в create-панели и в `DeviceEditForm` не disabled.
 
-- [ ] **Step 3: Implement the name check**
+- [x] **Step 3: Implement the name check**
 
 `frontend/src/lib/validate.ts` — заменить `uniqueNameHint`:
 
@@ -639,7 +639,7 @@ export function uniqueNameHint(name: string, taken: string[], selfIndex = -1): s
 }
 ```
 
-- [ ] **Step 4: Wire the create panel on the canvas**
+- [x] **Step 4: Wire the create panel on the canvas**
 
 `frontend/src/pages/TopologyPage.tsx`:
 
@@ -686,7 +686,7 @@ export function uniqueNameHint(name: string, taken: string[], selfIndex = -1): s
 
 (строка 469: было `disabled={!createName.trim()}`).
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `docker compose --profile test run --rm frontend-test npx vitest run src/lib/validate.test.ts src/pages/TopologyPage.test.tsx src/topology/editForms.test.tsx`
 Expected: PASS.
@@ -694,7 +694,7 @@ Expected: PASS.
 Run: `make fe-test`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/lib/validate.ts frontend/src/lib/validate.test.ts frontend/src/pages/TopologyPage.tsx frontend/src/pages/TopologyPage.test.tsx frontend/src/topology/editForms.test.tsx
@@ -715,7 +715,7 @@ git commit -m "feat(frontend): forbid edge-id separator characters in entity nam
 - Consumes: ничего нового (пакет `topology` уже существует).
 - Produces: `topology.ValidateName(name string) string` — `""` если имя допустимо, иначе текст ошибки по-английски.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 В `backend/internal/topology/validate_test.go` добавить (пакет `topology`, стиль соседних тестов):
 
@@ -773,12 +773,12 @@ func TestApplyTopologyOperation_AllowsSpacedAndCyrillicNames(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `docker compose --profile test run --rm backend-test go test ./internal/topology/ ./internal/httpapi/ -run "ValidateName|EdgeIDSeparator|SpacedAndCyrillic" -v`
 Expected: FAIL — `ValidateName` is not defined; `create-device` с `sw|core` проходит без ошибки.
 
-- [ ] **Step 3: Implement `ValidateName`**
+- [x] **Step 3: Implement `ValidateName`**
 
 `backend/internal/topology/validate.go` — добавить (импорт `strings` уже есть; `fmt` уже есть):
 
@@ -798,7 +798,7 @@ func ValidateName(name string) string {
 }
 ```
 
-- [ ] **Step 4: Call it from create/update operations**
+- [x] **Step 4: Call it from create/update operations**
 
 `backend/internal/httpapi/topology_operations.go` — импорт дополнить:
 
@@ -843,7 +843,7 @@ import (
 		}
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `docker compose --profile test run --rm backend-test go test ./internal/topology/ ./internal/httpapi/ -v`
 Expected: PASS.
@@ -851,7 +851,7 @@ Expected: PASS.
 Run: `make test`
 Expected: PASS (весь Go-набор, включая Postgres-тесты).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/internal/topology/validate.go backend/internal/topology/validate_test.go backend/internal/httpapi/topology_operations.go backend/internal/httpapi/topology_operations_test.go
