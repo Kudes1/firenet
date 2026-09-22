@@ -75,6 +75,46 @@ export function defaultPoint(kind: "device" | "network", index: number) {
   return { x, y };
 }
 
+export type ParsedEdgeId =
+  | { kind: "link"; a: string; b: string; offset: number }
+  | { kind: "attach"; network: string; device: string };
+
+export function formatLinkEdgeId(a: string, b: string, offset: number): string {
+  return `link:${layoutLinkKey(a, b)}#${offset}`;
+}
+
+export function formatAttachEdgeId(network: string, device: string): string {
+  return `attach:${network}|${device}`;
+}
+
+const pairOf = (raw: string): [string, string] | null => {
+  const parts = raw.split("|");
+  return parts.length === 2 && parts[0] && parts[1] && !parts[0].includes("#") && !parts[1].includes("#")
+    ? [parts[0], parts[1]]
+    : null;
+};
+
+export function parseEdgeId(id: string): ParsedEdgeId | null {
+  const sep = id.indexOf(":");
+  if (sep < 0) return null;
+  const type = id.slice(0, sep);
+  const rest = id.slice(sep + 1);
+  if (type === "attach") {
+    const pair = pairOf(rest);
+    return pair ? { kind: "attach", network: pair[0], device: pair[1] } : null;
+  }
+  if (type === "link") {
+    const hash = rest.lastIndexOf("#");
+    if (hash < 0) return null;
+    const offset = Number(rest.slice(hash + 1));
+    const pair = pairOf(rest.slice(0, hash));
+    return Number.isInteger(offset) && offset >= 0 && pair
+      ? { kind: "link", a: pair[0], b: pair[1], offset }
+      : null;
+  }
+  return null;
+}
+
 // linkOffsets разносит резервные связи (одинаковая пара устройств) по
 // индексу-дубликату, чтобы они рисовались параллельными линиями.
 function linkOffsets(links: LinkDoc[]): number[] {
@@ -149,7 +189,7 @@ export function buildScene(topology: TopologyDoc, layout: LayoutDoc): Scene {
     const key = layoutLinkKey(l.a.device, l.b.device);
     const wps = layout.links?.[key]?.[offsets[i]];
     edges.push({
-      id: `link:${key}#${offsets[i]}`,
+      id: formatLinkEdgeId(l.a.device, l.b.device, offsets[i]),
       type: "link",
       source,
       target,
@@ -172,7 +212,7 @@ export function buildScene(topology: TopologyDoc, layout: LayoutDoc): Scene {
       const to = centerOf.get(target);
       if (!from || !to) continue;
       edges.push({
-        id: `attach:${n.name}|${a.device}`,
+        id: formatAttachEdgeId(n.name, a.device),
         type: "attach",
         source,
         target,

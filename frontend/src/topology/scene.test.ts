@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutDoc, TopologyDoc } from "../api/types";
 import { DEVICE_H, DEVICE_W, NET_H, NET_W } from "./icons";
-import { buildScene, defaultPoint, unionColor, unionBoxes, type PositionOf, type UnionBox } from "./scene";
+import { buildScene, defaultPoint, formatAttachEdgeId, formatLinkEdgeId, parseEdgeId, unionColor, unionBoxes, type PositionOf, type UnionBox } from "./scene";
 
 const topology: TopologyDoc = {
   devices: [
@@ -164,5 +164,39 @@ describe("unionBoxes", () => {
 describe("node sizes", () => {
   it("matches the legacy canvas geometry", () => {
     expect([DEVICE_W, DEVICE_H, NET_W, NET_H]).toEqual([140, 60, 160, 60]);
+  });
+});
+
+describe("edge id helpers", () => {
+  it("formats a link id from the canonical pair with offset", () => {
+    expect(formatLinkEdgeId("r2", "r1", 1)).toBe("link:r1|r2#1");
+  });
+
+  it("formats an attach id", () => {
+    expect(formatAttachEdgeId("office", "sw1")).toBe("attach:office|sw1");
+  });
+
+  it("parses a link id", () => {
+    expect(parseEdgeId("link:r1|r2#1")).toEqual({ kind: "link", a: "r1", b: "r2", offset: 1 });
+  });
+
+  it("parses an attach id", () => {
+    expect(parseEdgeId("attach:office|sw1")).toEqual({ kind: "attach", network: "office", device: "sw1" });
+  });
+
+  it("round-trips format and parse", () => {
+    expect(parseEdgeId(formatLinkEdgeId("r2", "r1", 0))).toEqual({ kind: "link", a: "r1", b: "r2", offset: 0 });
+    expect(parseEdgeId(formatAttachEdgeId("office", "sw1"))).toEqual({ kind: "attach", network: "office", device: "sw1" });
+  });
+
+  it("returns null on garbage ids", () => {
+    expect(parseEdgeId("link:a|b")).toBeNull();
+    expect(parseEdgeId("link:a|b#x")).toBeNull();
+    expect(parseEdgeId("link:a|b|c#0")).toBeNull();
+    expect(parseEdgeId("link:a#b|c#0")).toBeNull();
+    expect(parseEdgeId("attach:a")).toBeNull();
+    expect(parseEdgeId("attach:a|b|c")).toBeNull();
+    expect(parseEdgeId("wat:a|b")).toBeNull();
+    expect(parseEdgeId("no-colon")).toBeNull();
   });
 });
