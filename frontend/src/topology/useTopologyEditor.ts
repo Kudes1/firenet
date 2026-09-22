@@ -605,8 +605,11 @@ export function useTopologyEditor() {
   const ops = useTopologyOperations();
   const queryClient = useQueryClient();
   const channel = getEditorChannel(queryClient, scope);
-  channel.send = ops.mutateAsync;
   const [status, setStatus] = useState<SyncStatus>(() => channel.status);
+
+  useEffect(() => {
+    channel.send = ops.mutateAsync;
+  }, [channel, ops.mutateAsync]);
 
   useEffect(() => {
     channel.listeners.add(setStatus);

@@ -21,6 +21,24 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("useTopologyEditor", () => {
+  it("flushes queued operations after mount (send is wired in an effect)", async () => {
+    let body: unknown;
+    server.use(http.post("/api/drafts/d1/topology/operations", async ({ request }) => {
+      body = await request.json();
+      return HttpResponse.json(fx.editorSnapshotFixture);
+    }));
+    sessionStorage.setItem(storageKeys.draftId, "d1");
+    const { result } = renderHook(() => useTopologyEditor(), { wrapper });
+
+    await act(async () => {
+      result.current.moveDevice("r1", { x: 1, y: 2 });
+      await result.current.flush();
+    });
+
+    expect(body).toEqual({ kind: "set-device-position", deviceName: "r1", position: { x: 1, y: 2 } });
+    expect(result.current.status).toBe("saved");
+  });
+
   it("queues a device position and flushes it as one operation", async () => {
     let body: unknown;
     server.use(http.post("/api/drafts/d1/topology/operations", async ({ request }) => {
