@@ -1,5 +1,6 @@
 import type { LayoutDoc, LayoutPoint, LinkDoc, TopologyDoc } from "../api/types";
 import { layoutLinkKey } from "../lib/links";
+import { Position } from "@xyflow/react";
 import { DEVICE_H, DEVICE_W, NET_H, NET_W, UNION_COLORS } from "./icons";
 
 export { DEVICE_H, DEVICE_W, NET_H, NET_W };
@@ -73,6 +74,31 @@ export function defaultPoint(kind: "device" | "network", index: number) {
   const x = 40 + (index % 5) * 200;
   const y = kind === "device" ? 40 + Math.floor(index / 5) * 160 : 300 + Math.floor(index / 5) * 160;
   return { x, y };
+}
+
+export function nodeSize(type: "device" | "network"): { w: number; h: number } {
+  return type === "network" ? { w: NET_W, h: NET_H } : { w: DEVICE_W, h: DEVICE_H };
+}
+
+export function nodeCenter(type: "device" | "network", position: LayoutPoint): LayoutPoint {
+  const { w, h } = nodeSize(type);
+  return { x: position.x + w / 2, y: position.y + h / 2 };
+}
+
+// RF 12 рисует ребро только между «инициализированными» узлами: нужны
+// известные размеры и handle-границы. В jsdom ResizeObserver не работает
+// (замер через DOM невозможен), поэтому размеры и хэндлы задаются
+// декларативно. В браузере это тоже корректно: размеры узлов фиксированы,
+// а при замере через DOM internals.handleBounds имеет приоритет над пропом.
+export function nodeGeometry(type: "device" | "network") {
+  const { w, h } = nodeSize(type);
+  const handles = type === "device"
+    ? [
+      { type: "source" as const, position: Position.Right, x: w, y: h / 2 },
+      { type: "target" as const, position: Position.Left, x: 0, y: h / 2 },
+    ]
+    : [{ type: "target" as const, position: Position.Left, x: 0, y: h / 2 }];
+  return { width: w, height: h, handles };
 }
 
 export type ParsedEdgeId =
@@ -173,8 +199,7 @@ export function buildScene(topology: TopologyDoc, layout: LayoutDoc): Scene {
   // под тела узлов), а не между точками на границах.
   const centerOf = new Map<string, LayoutPoint>();
   for (const n of nodes) {
-    const [w, h] = n.type === "network" ? [NET_W, NET_H] : [DEVICE_W, DEVICE_H];
-    centerOf.set(n.id, { x: n.position.x + w / 2, y: n.position.y + h / 2 });
+    centerOf.set(n.id, nodeCenter(n.type, n.position));
   }
   const offsets = linkOffsets(links);
   const edges: SceneEdge[] = [];

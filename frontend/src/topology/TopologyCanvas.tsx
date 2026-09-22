@@ -1,5 +1,5 @@
 import {
-  applyEdgeChanges, applyNodeChanges, Background, Controls, MiniMap, Position, ReactFlow, ReactFlowProvider,
+  applyEdgeChanges, applyNodeChanges, Background, Controls, MiniMap, ReactFlow, ReactFlowProvider,
   useReactFlow, useStore, type NodeMouseHandler, type OnEdgesChange, type OnMove, type OnNodesChange,
   type OnSelectionChangeFunc, type ReactFlowProps,
 } from "@xyflow/react";
@@ -14,34 +14,11 @@ import { LinkEdge } from "./LinkEdge";
 import NetworkInfo from "./NetworkInfo";
 import { EdgeActionsContext } from "./edgeActions";
 import { ViewportContext } from "./viewport";
-import { buildScene, unionBoxes, DEVICE_H, DEVICE_W, NET_H, NET_W, type SceneEdge, type SceneNode } from "./scene";
+import { buildScene, nodeCenter, nodeGeometry, unionBoxes, type SceneEdge, type SceneNode, NET_W } from "./scene";
 
 const nodeTypes = { device: DeviceNode, network: NetworkNode, union: UnionNode };
 const edgeTypes = { link: LinkEdge, attach: LinkEdge };
 type CanvasEdge = SceneEdge & { selected?: boolean };
-
-// RF 12 рисует ребро только между «инициализированными» узлами: нужны
-// известные размеры и handle-границы. В jsdom ResizeObserver не работает
-// (замер через DOM невозможен), поэтому размеры и хэндлы задаются
-// декларативно. В браузере это тоже корректно: размеры узлов фиксированы,
-// а при замере через DOM internals.handleBounds имеет приоритет над пропом.
-function nodeGeometry(type: SceneNode["type"]) {
-  if (type === "device") {
-    return {
-      width: DEVICE_W,
-      height: DEVICE_H,
-      handles: [
-        { type: "source" as const, position: Position.Right, x: DEVICE_W, y: DEVICE_H / 2 },
-        { type: "target" as const, position: Position.Left, x: 0, y: DEVICE_H / 2 },
-      ],
-    };
-  }
-  return {
-    width: NET_W,
-    height: NET_H,
-    handles: [{ type: "target" as const, position: Position.Left, x: 0, y: NET_H / 2 }],
-  };
-}
 
 // Инструмент канвы. В "connect" узел не выделяется и не тащится: клик по
 // нему адресован соединению (паритет с легаси onPlainClick).
@@ -211,11 +188,9 @@ function TopologyCanvasInner({
   );
 
   const edges = useMemo(() => {
-    const centerOf = new Map(rfNodes.map((n) => {
-      const net = (n.type ?? "device") === "network";
-      const [w, h] = net ? [NET_W, NET_H] : [DEVICE_W, DEVICE_H];
-      return [n.id, { x: n.position.x + w / 2, y: n.position.y + h / 2 }] as const;
-    }));
+    const centerOf = new Map(rfNodes.map((n) => [
+      n.id, nodeCenter(((n.type ?? "device") as "device" | "network"), n.position),
+    ] as const));
     return rfEdges.map((e) => {
       const from = centerOf.get(e.source) ?? e.data.from;
       const to = centerOf.get(e.target) ?? e.data.to;

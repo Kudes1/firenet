@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutDoc, TopologyDoc } from "../api/types";
 import { DEVICE_H, DEVICE_W, NET_H, NET_W } from "./icons";
-import { buildScene, defaultPoint, formatAttachEdgeId, formatLinkEdgeId, parseEdgeId, unionColor, unionBoxes, type PositionOf, type UnionBox } from "./scene";
+import { buildScene, defaultPoint, formatAttachEdgeId, formatLinkEdgeId, nodeCenter, nodeGeometry, nodeSize, parseEdgeId, unionColor, unionBoxes, type PositionOf, type UnionBox } from "./scene";
 
 const topology: TopologyDoc = {
   devices: [
@@ -164,6 +164,32 @@ describe("unionBoxes", () => {
 describe("node sizes", () => {
   it("matches the legacy canvas geometry", () => {
     expect([DEVICE_W, DEVICE_H, NET_W, NET_H]).toEqual([140, 60, 160, 60]);
+  });
+});
+
+describe("node geometry", () => {
+  it("reports fixed sizes per node kind", () => {
+    expect(nodeSize("device")).toEqual({ w: DEVICE_W, h: DEVICE_H });
+    expect(nodeSize("network")).toEqual({ w: NET_W, h: NET_H });
+  });
+
+  it("computes node centers from position and size", () => {
+    expect(nodeCenter("device", { x: 10, y: 20 })).toEqual({ x: 10 + DEVICE_W / 2, y: 20 + DEVICE_H / 2 });
+    expect(nodeCenter("network", { x: 0, y: 0 })).toEqual({ x: NET_W / 2, y: NET_H / 2 });
+  });
+
+  it("declares edge handles on node borders", () => {
+    const device = nodeGeometry("device");
+    expect(device.width).toBe(DEVICE_W);
+    expect(device.handles).toEqual([
+      { type: "source", position: "right", x: DEVICE_W, y: DEVICE_H / 2 },
+      { type: "target", position: "left", x: 0, y: DEVICE_H / 2 },
+    ]);
+    const network = nodeGeometry("network");
+    expect(network.width).toBe(NET_W);
+    expect(network.handles).toEqual([
+      { type: "target", position: "left", x: 0, y: NET_H / 2 },
+    ]);
   });
 });
 

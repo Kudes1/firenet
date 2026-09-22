@@ -9,7 +9,7 @@ import { useEditorLock } from "../lib/editorLock";
 import { useTopologyEditor } from "../topology/useTopologyEditor";
 import TopologyCanvas, { type CanvasTool } from "../topology/TopologyCanvas";
 import { ConnectPreview } from "../topology/ConnectPreview";
-import { DEVICE_H, DEVICE_W, NET_H, NET_W, parseEdgeId } from "../topology/scene";
+import { nodeCenter, parseEdgeId } from "../topology/scene";
 import ContextMenu, { type MenuItem } from "../topology/ContextMenu";
 import { contextMenuItems, type CanvasTarget } from "../topology/contextMenuItems";
 import { DeviceEditForm, NetworkEditForm, LinkFilterForm } from "../topology/editForms";
@@ -178,10 +178,7 @@ export default function TopologyPage() {
     const point = pending.kind === "device"
       ? (layout.devices ?? {})[pending.name]
       : (layout.networks ?? {})[pending.name];
-    if (!point) return null;
-    const w = pending.kind === "device" ? DEVICE_W : NET_W;
-    const h = pending.kind === "device" ? DEVICE_H : NET_H;
-    return { x: point.x + w / 2, y: point.y + h / 2 };
+    return point ? nodeCenter(pending.kind, point) : null;
   }, [pending, layout]);
 
   const onPaneClick = useCallback((position: { x: number; y: number }) => {
