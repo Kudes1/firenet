@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/kudes1/firenet/internal/projectdoc"
+	"github.com/kudes1/firenet/internal/topology"
 )
 
 // canonicalLink orders two device names so a link's identity doesn't
@@ -169,11 +170,17 @@ func applyTopologyOperation(doc projectdoc.ProjectDoc, op topologyOperation) (pr
 		if op.Device == nil {
 			return doc, fmt.Errorf("create-device: missing device")
 		}
+		if why := topology.ValidateName(op.Device.Name); why != "" {
+			return doc, fmt.Errorf("create-device: %s", why)
+		}
 		topo.Devices = append(topo.Devices, *op.Device)
 
 	case "update-device":
 		if op.DeviceName == "" || op.Device == nil || op.Device.Name == "" {
 			return doc, fmt.Errorf("update-device: missing deviceName or device")
+		}
+		if why := topology.ValidateName(op.Device.Name); why != "" {
+			return doc, fmt.Errorf("update-device: %s", why)
 		}
 		i := deviceIndex(topo.Devices, op.DeviceName)
 		if i < 0 {
@@ -256,11 +263,17 @@ func applyTopologyOperation(doc projectdoc.ProjectDoc, op topologyOperation) (pr
 		if op.Network == nil {
 			return doc, fmt.Errorf("create-network: missing network")
 		}
+		if why := topology.ValidateName(op.Network.Name); why != "" {
+			return doc, fmt.Errorf("create-network: %s", why)
+		}
 		topo.Networks = append(topo.Networks, *op.Network)
 
 	case "update-network":
 		if op.NetworkName == "" || op.Network == nil || op.Network.Name == "" {
 			return doc, fmt.Errorf("update-network: missing networkName or network")
+		}
+		if why := topology.ValidateName(op.Network.Name); why != "" {
+			return doc, fmt.Errorf("update-network: %s", why)
 		}
 		i := networkIndex(topo.Networks, op.NetworkName)
 		if i < 0 {

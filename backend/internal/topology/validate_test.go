@@ -346,3 +346,28 @@ func TestValidate_Unions(t *testing.T) {
 		t.Fatalf("want unknown network error, got %v", err)
 	}
 }
+
+func TestValidateName(t *testing.T) {
+	cases := []struct {
+		name string
+		ok   bool
+	}{
+		{"r1", true},
+		{"Офис LAN", true},
+		{"r.1", true},
+		{"a:b", true},
+		{"", false},
+		{"  ", false},
+		{"sw|core", false},
+		{"sw#2", false},
+	}
+	for _, c := range cases {
+		why := ValidateName(c.name)
+		if c.ok && why != "" {
+			t.Errorf("ValidateName(%q) = %q, want ok", c.name, why)
+		}
+		if !c.ok && why == "" {
+			t.Errorf("ValidateName(%q) = ok, want error", c.name)
+		}
+	}
+}

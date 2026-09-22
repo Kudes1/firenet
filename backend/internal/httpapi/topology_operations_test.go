@@ -422,6 +422,29 @@ func TestApplyTopologyOperation_UnknownLink(t *testing.T) {
 	}
 }
 
+func TestApplyTopologyOperation_RejectsEdgeIDSeparatorNames(t *testing.T) {
+	cases := []topologyOperation{
+		{Kind: "create-device", Device: &DeviceDoc{Name: "sw|core", Kind: "router"}},
+		{Kind: "create-device", Device: &DeviceDoc{Name: "sw#2", Kind: "router"}},
+		{Kind: "create-network", Network: &NetworkDoc{Name: "n|dmz"}},
+		{Kind: "update-device", DeviceName: "r1", Device: &DeviceDoc{Name: "r|1", Kind: "router"}},
+		{Kind: "update-network", NetworkName: "n-office", Network: &NetworkDoc{Name: "of|fice"}},
+	}
+	for _, op := range cases {
+		if _, err := applyTopologyOperation(fixtureProjectDoc(), op); err == nil {
+			t.Errorf("%s: want error for name with | or #, got nil", op.Kind)
+		}
+	}
+}
+
+func TestApplyTopologyOperation_AllowsSpacedAndCyrillicNames(t *testing.T) {
+	if _, err := applyTopologyOperation(fixtureProjectDoc(), topologyOperation{
+		Kind: "create-device", Device: &DeviceDoc{Name: "Офис LAN", Kind: "router"},
+	}); err != nil {
+		t.Fatalf("create-device with cyrillic name: %v", err)
+	}
+}
+
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)

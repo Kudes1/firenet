@@ -9,6 +9,20 @@ import (
 
 // ParseEndpointPrefix parses a rule endpoint written literally as an IPv4
 // address (becomes /32) or CIDR. It rejects names, garbage, and IPv6.
+// ValidateName reports "" when name is usable as a device or network name,
+// otherwise the reason. Pipe and hash separate segments in canvas edge ids
+// (frontend scene.ts) and in layoutLinkKey/pgstore.linkKey, so they are
+// forbidden here.
+func ValidateName(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "name is empty"
+	}
+	if strings.ContainsAny(name, "|#") {
+		return fmt.Sprintf("name %q contains forbidden characters '|#'", name)
+	}
+	return ""
+}
+
 func ParseEndpointPrefix(s string) (netip.Prefix, bool) {
 	if i := strings.IndexByte(s, '/'); i >= 0 {
 		p, err := netip.ParsePrefix(s)
