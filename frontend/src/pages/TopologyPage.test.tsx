@@ -301,6 +301,33 @@ describe("TopologyPage", () => {
     expect(screen.queryByTestId("create-panel")).toBeNull();
   });
 
+  it("blocks creating a device whose name contains edge-id separators", async () => {
+    server.use(http.get("/api/drafts/d1/topology", () => HttpResponse.json({
+      devices: [], links: [], networks: [], sets: [], unions: [],
+    })));
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await user.click(await screen.findByTestId("tool-device"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 200, clientY: 100 });
+    expect(screen.getByTestId("create-panel")).toBeInTheDocument();
+    await user.type(await screen.findByLabelText("Имя"), "sw|core");
+    expect(screen.getByText("Недопустимые символы в имени: | #")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Создать" })).toBeDisabled();
+    expect(screen.queryByTestId("rf__node-device:sw|core")).toBeNull();
+  });
+
+  it("blocks creating a device with a duplicate name", async () => {
+    server.use(http.get("/api/drafts/d1/topology", () => HttpResponse.json({
+      devices: [{ name: "core-sw", kind: "switch" }],
+      links: [], networks: [], sets: [], unions: [],
+    })));
+    const { user } = renderPage(<TopologyPage />, "/ui/topology", "d1");
+    await user.click(await screen.findByTestId("tool-device"));
+    fireEvent.click(document.querySelector(".react-flow__pane")!, { clientX: 200, clientY: 100 });
+    await user.type(await screen.findByLabelText("Имя"), "core-sw");
+    expect(screen.getByText("Имя уже используется")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Создать" })).toBeDisabled();
+  });
+
   it("warns instead of creating when read-only", async () => {
     const { user } = renderPage(<TopologyPage />, "/ui/topology");
     await screen.findByTestId("tool-device");

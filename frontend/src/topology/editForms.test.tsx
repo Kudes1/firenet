@@ -61,6 +61,24 @@ describe("DeviceEditForm", () => {
     expect(await screen.findByText("Имя уже используется")).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
+
+  it("blocks submit on edge-id separator characters", async () => {
+    const onSubmit = vi.fn();
+    wrapper(
+      <DeviceEditForm
+        device={{ name: "r1", kind: "router" }}
+        unions={[]}
+        existingNames={["r1", "sw1"]}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    await screen.findByLabelText("Имя");
+    fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "sw|core" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Недопустимые символы в имени: | #")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 });
 
 describe("NetworkEditForm", () => {

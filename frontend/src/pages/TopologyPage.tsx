@@ -6,6 +6,7 @@ import { containsFold, matchPrefixQuery } from "../lib/search";
 import { canonicalLink } from "../lib/links";
 import { connectOutcome, type ConnectTarget } from "../lib/connect";
 import { useEditorLock } from "../lib/editorLock";
+import { uniqueNameHint } from "../lib/validate";
 import { useTopologyEditor } from "../topology/useTopologyEditor";
 import TopologyCanvas, { type CanvasTool } from "../topology/TopologyCanvas";
 import { ConnectPreview } from "../topology/ConnectPreview";
@@ -198,7 +199,7 @@ export default function TopologyPage() {
   }, [tool, canEdit, createTarget]);
 
   const create = () => {
-    if (!createTarget || !createName.trim()) return;
+    if (!createTarget || createHint) return;
     const name = createName.trim();
     guard(() => {
       if (createTarget.kind === "device") editor.createDevice(createTarget.position, createDeviceKind, name);
@@ -261,6 +262,13 @@ export default function TopologyPage() {
 
   const editDevice = editTarget?.kind === "device" ? devices.find((d) => d.name === editTarget.name) : undefined;
   const editNetwork = editTarget?.kind === "network" ? networks.find((n) => n.name === editTarget.name) : undefined;
+
+  const createHint = createTarget
+    ? uniqueNameHint(
+      createName,
+      createTarget.kind === "device" ? devices.map((d) => d.name) : networks.map((n) => n.name),
+    )
+    : "";
 
   return (
     <main className="page topology-page" data-testid="page-topology">
@@ -447,6 +455,7 @@ export default function TopologyPage() {
                   Имя
                   <input autoFocus value={createName} onChange={(event) => setCreateName(event.target.value)} />
                 </label>
+                {createHint && <p className="cell-hint">{createHint}</p>}
                 {createTarget.kind === "device" && (
                   <label>
                     Тип
@@ -458,7 +467,7 @@ export default function TopologyPage() {
                 )}
                 <div className="modal-actions">
                   <button type="button" onClick={() => setCreateTarget(null)}>Отмена</button>
-                  <button type="submit" className="primary" disabled={!createName.trim()}>Создать</button>
+                  <button type="submit" className="primary" disabled={!!createHint}>Создать</button>
                 </div>
               </form>
             </CanvasPanel>

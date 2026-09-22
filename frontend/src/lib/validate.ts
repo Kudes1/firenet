@@ -2,9 +2,12 @@
 // Возвращает текст подсказки: "" — валидно, иначе строка показывается
 // рядом с полем и блокирует сохранение.
 
+const NAME_FORBIDDEN = /[|#]/;
+
 export function uniqueNameHint(name: string, taken: string[], selfIndex = -1): string {
   const trimmed = name.trim();
   if (!trimmed) return "Имя обязательно";
+  if (NAME_FORBIDDEN.test(trimmed)) return "Недопустимые символы в имени: | #";
   const clash = taken.findIndex((n) => n === trimmed);
   if (clash !== -1 && clash !== selfIndex) return "Имя уже используется";
   return "";

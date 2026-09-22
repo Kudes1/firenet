@@ -7,6 +7,14 @@ describe("uniqueNameHint", () => {
   it("rejects a duplicate", () => expect(uniqueNameHint("lan", names)).toBe("Имя уже используется"));
   it("allows the object to keep its own name", () => expect(uniqueNameHint("lan", names, 0)).toBe(""));
   it("rejects empty", () => expect(uniqueNameHint("  ", names)).toBe("Имя обязательно"));
+  it("accepts spaces, dots, colons and cyrillic", () => {
+    expect(uniqueNameHint("Офис LAN", names)).toBe("");
+    expect(uniqueNameHint("r.1", names)).toBe("");
+  });
+  it("rejects pipe and hash", () => {
+    expect(uniqueNameHint("sw|core", names)).toBe("Недопустимые символы в имени: | #");
+    expect(uniqueNameHint("sw#2", names)).toBe("Недопустимые символы в имени: | #");
+  });
 });
 
 describe("parseHostAddress", () => {
